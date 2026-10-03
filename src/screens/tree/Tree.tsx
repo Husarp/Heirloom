@@ -8,6 +8,7 @@ import { useDark } from "../../app/useAppearance";
 import { Dropdown, Segmented, Spinner } from "../../components/bits";
 import { people as peopleCount } from "../../lib/format";
 import { FocusCanvas, type FocusCanvasHandle } from "./FocusCanvas";
+import { SIDE, sideColors } from "./colors";
 import { parentsOrdered, type Graph, type GraphPerson } from "./graph";
 import { directLine, layoutAncestors, layoutDescendants, layoutFamily, pathBetween } from "./layout";
 import { OverviewCanvas, type OverviewData, type OverviewHandle } from "./OverviewCanvas";
@@ -22,11 +23,6 @@ const DEPTH: Record<Exclude<View, "overview">, { up: number; down: number }> = {
   ancestors: { up: 3, down: 0 },
   descendants: { up: 0, down: 2 },
 };
-
-function hexOf(name: string): number {
-  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim().replace("#", "");
-  return parseInt(v || "9c9385", 16);
-}
 
 /** Drzewo (spec §3, §4.1–§4.5): loaded only when opened, idle while hidden (PLAN §11.1). */
 export function Tree({ hidden }: { hidden: boolean }) {
@@ -121,24 +117,11 @@ export function Tree({ hidden }: { hidden: boolean }) {
     return layoutFamily(graph, focus, { siblingsOpen, editing: mode === "edit", rounded });
   }, [graph, focus, view, siblingsOpen, mode, rounded]);
 
-  // Colours by the chosen mode (spec §3.2 „Koloruj wg”).
-  const sides = useMemo(() => {
-    const map = new Map<string, number>();
-    if (!graph || !focus) return map;
-    const [father, mother] = parentsOrdered(graph, focus);
-    const mark = (start: string | null, color: number) => {
-      const stack = start ? [start] : [];
-      while (stack.length) {
-        const id = stack.pop()!;
-        if (map.has(id)) continue;
-        map.set(id, color);
-        stack.push(...(graph.people[id]?.parents ?? []));
-      }
-    };
-    mark(father, 2);
-    mark(mother, 9);
-    return map;
-  }, [graph, focus]);
+  // Colours by the chosen mode (spec §3.2 „Koloruj wg”); „strona” is relative to the person in the centre.
+  const sides = useMemo(
+    () => (graph && focus && colorMode === "side" ? sideColors(focus, (id) => parentsOrdered(graph, id), (id) => graph.people[id]?.children ?? []) : null),
+    [graph, focus, colorMode],
+  );
   const colorOf = useCallback(
     (p: GraphPerson): number | null => {
       switch (colorMode) {
@@ -147,17 +130,14 @@ export function Tree({ hidden }: { hidden: boolean }) {
         case "generation":
           return p.generation ? ((p.generation - 1) % 12) + 1 : null;
         case "side":
-          return sides.get(p.id) ?? (p.id === focus ? 12 : null);
-        case "surname": {
-          // The family someone belongs to now: married women take their husband's colour.
-          const partner = p.maiden ? graph?.people[p.partners[0]] : undefined;
-          return partner ? partner.branch : p.branch;
-        }
+          return sides?.get(p.id) ?? null;
+        case "surname":
+          return p.surnameBranch;
         default:
           return p.branch;
       }
     },
-    [colorMode, sides, focus, graph],
+    [colorMode, sides],
   );
 
   const highlighted = useMemo(() => {
@@ -286,15 +266,36 @@ export function Tree({ hidden }: { hidden: boolean }) {
       .catch(() => {});
   };
 
+  // Całe drzewo: „strona” is relative to the clicked person, else to the one the tree was opened at. The canvas
+  // re-tints when this changes, without rebuilding.
+  const sideCentre = view === "overview" && colorMode === "side" ? (selected ?? focus) : null;
+  const overviewSides = useMemo(() => {
+    if (!overviewData || !sideCentre) return null;
+    const people = overviewData.people;
+    const centre = people.findIndex((p) => p[0] === sideCentre);
+    if (centre < 0) return null;
+    const children: number[][] = people.map(() => []);
+    people.forEach((p, i) => p[13].forEach((parent) => parent != null && children[parent].push(i)));
+    return sideColors(centre, (i) => people[i][13], (i) => children[i]);
+  }, [overviewData, sideCentre]);
   const overviewColor = useCallback(
     (index: number) => {
       const p = overviewData?.people[index];
-      if (!p || colorMode === "none") return hexOf("--line");
-      if (colorMode === "generation" && p[11]) return hexOf(`--b${((p[11] - 1) % 12) + 1}`);
-      return hexOf(`--b${p[3]}`);
+      if (!p) return 0;
+      switch (colorMode) {
+        case "none":
+          return 0;
+        case "generation":
+          return p[11] ? ((p[11] - 1) % 12) + 1 : 0;
+        case "side":
+          return overviewSides?.get(index) ?? 0;
+        case "surname":
+          return p[12];
+        default:
+          return p[3];
+      }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [overviewData, colorMode, dark],
+    [overviewData, colorMode, overviewSides],
   );
 
   const showPanel = panelOpen && selected && view !== "overview";
@@ -385,10 +386,11 @@ export function Tree({ hidden }: { hidden: boolean }) {
               setColorMode(v);
               saveDisplay("treeColor", v);
             }}
+            width={360}
             options={[
-              { value: "branch", label: "gałąź" },
-              { value: "surname", label: "nazwisko" },
-              { value: "side", label: "strona ojca–matki" },
+              { value: "branch", label: "gałąź", note: "rodzina, w której ktoś się urodził" },
+              { value: "surname", label: "nazwisko", note: "noszone teraz (żona w kolorze męża)" },
+              { value: "side", label: "strona ojca–matki", note: view === "overview" ? "względem wybranej osoby" : view === "descendants" ? "tu tylko osoba w centrum" : "względem osoby w centrum" },
               { value: "generation", label: "pokolenie" },
               { value: "none", label: "brak" },
             ]}
@@ -441,8 +443,13 @@ export function Tree({ hidden }: { hidden: boolean }) {
                 <LocateFixed size={15} />
               </button>
             </div>
-            <Legend />
+            <Legend side={colorMode === "side" ? (view === "descendants" ? "descendants" : "centre") : null} />
           </>
+        )}
+        {view === "overview" && overviewData && colorMode === "side" && (
+          <div className="tree-legend overview-key">
+            <SideKey centre="wybrana osoba i rodzeństwo" />
+          </div>
         )}
       </div>
       {showPanel && selected && <SidePanel id={selected} onClose={() => setPanelOpen(false)} onFocus={refocus} />}
@@ -515,7 +522,25 @@ function JumpBox({ onPick }: { onPick: (id: string) => void }) {
   );
 }
 
-function Legend() {
+/** The key for „Koloruj wg: strona ojca–matki”. */
+function SideKey({ centre }: { centre: string }) {
+  const swatch = (color: number, label: string) => (
+    <span className="item">
+      <span style={{ width: 10, height: 10, borderRadius: 2, background: `var(--b${color})`, flex: "none" }} />
+      {label}
+    </span>
+  );
+  return (
+    <>
+      <span className="label-caps">Strona</span>
+      {swatch(SIDE.father, "ojca")}
+      {swatch(SIDE.mother, "matki")}
+      {swatch(SIDE.centre, centre)}
+    </>
+  );
+}
+
+function Legend({ side }: { side: "centre" | "descendants" | null }) {
   const sample = (style: React.CSSProperties, dot?: boolean) => (
     <svg width="24" height="10" style={{ flex: "none" }}>
       <line x1="0" y1="5" x2="24" y2="5" style={{ stroke: "var(--line)", strokeWidth: 1.5, ...style }} />
@@ -540,6 +565,15 @@ function Legend() {
       <span className="item">
         {sample({ stroke: "var(--accent)", strokeWidth: 2.5 })}linia wybranej
       </span>
+      {side && <span className="legend-sep" />}
+      {side === "centre" && <SideKey centre="osoba w centrum i rodzeństwo" />}
+      {/* Everyone in Potomkowie descends from the centre person, so only they have a side colour. */}
+      {side === "descendants" && (
+        <>
+          <span className="label-caps">Strona</span>
+          <span className="item" style={{ color: "var(--text3)" }}>w Potomkach kolor ma tylko osoba w centrum</span>
+        </>
+      )}
     </div>
   );
 }

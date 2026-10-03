@@ -417,6 +417,17 @@
   white-space: nowrap;
   overflow: hidden;
 }
+.tree-legend .legend-sep {
+  width: 1px;
+  height: 16px;
+  flex: none;
+  background: var(--border);
+}
+/* Całe drzewo: only the „strona” key, right of the generation column. */
+.tree-legend.overview-key {
+  left: 112px;
+  right: auto;
+}
 .tree-legend .item {
   display: inline-flex;
   align-items: center;

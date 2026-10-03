@@ -8,7 +8,9 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { cardYears, count, roman } from "../../lib/format";
 
 export interface OverviewData {
-  people: [string, number, number, number, string, string, string | null, string | null, boolean, boolean, boolean, number | null][];
+  /** [id, x, y, branch, given, surname, birth year, death year, birth uncertain, death uncertain, living, generation,
+   *  surname branch, [father, mother] as indices] (tree.rs `overview`). */
+  people: [string, number, number, number, string, string, string | null, string | null, boolean, boolean, boolean, number | null, number, [number | null, number | null]][];
   clusters: { label: string; branch: number; count: number; fromGen: number | null; toGen: number | null; x: number; width: number }[];
   bands: number;
   bandHeight: number;
@@ -58,6 +60,11 @@ function cssColor(name: string): number {
   return parseInt(hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex, 16);
 }
 
+/** `--line` (no colour) and `--b1` … `--b12`, read from the theme in use. */
+function palette(): number[] {
+  return [cssColor("--line"), ...Array.from({ length: 12 }, (_, k) => cssColor(`--b${k + 1}`))];
+}
+
 interface Card {
   root: Container;
   bg: Sprite;
@@ -74,18 +81,21 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
   dark: boolean;
   hidden: boolean;
   focus: string | null;
+  /** The colour of a person: 0 none (`--line`), 1–12 `--b1` …; a new function re-tints everyone at once. */
   colorFor: (index: number) => number;
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
   onZoom: (zoom: number) => void;
 }>(function OverviewCanvas({ data, dark, hidden, focus, colorFor, onSelect, onOpen, onZoom }, ref) {
   const host = useRef<HTMLDivElement>(null);
-  const api = useRef<OverviewHandle | null>(null);
+  const api = useRef<(OverviewHandle & { recolor: () => void }) | null>(null);
   const [overlay, setOverlay] = useState<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 0.08 });
   const callbacks = useRef({ onSelect, onOpen, onZoom, colorFor });
   callbacks.current = { onSelect, onOpen, onZoom, colorFor };
   const running = useRef(true);
   running.current = !hidden;
+
+  useEffect(() => api.current?.recolor(), [colorFor]);
 
   useImperativeHandle(ref, () => ({
     fit: () => api.current?.fit(),
@@ -167,11 +177,13 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
         bands.rect(-2000, bandTop(g), data.width + 4000, 1).fill({ color: border, alpha: 0.6 });
       }
 
+      let colors = palette();
+      const colorOf = (i: number) => colors[callbacks.current.colorFor(i)] ?? colors[0];
       const dotSprites: Sprite[] = [];
       const blockSprites: Sprite[] = [];
       for (let i = 0; i < n; i++) {
         const [, x, y, branch] = data.people[i];
-        const color = callbacks.current.colorFor(i);
+        const color = colorOf(i);
         const d = new Sprite(shapeFor(branch));
         d.anchor.set(0.5);
         d.position.set(x + CARD_W / 2, y + CARD_H / 2);
@@ -243,7 +255,18 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
         const zoom = Math.min(0.9, Math.max(0.02, Math.min((view.w - LEFT_COLUMN - 80) / Math.max(c.width, 400), (view.h - 160) / Math.max(height, 200))));
         setCamera(LEFT_COLUMN + (view.w - LEFT_COLUMN) / 2 - (c.x + c.width / 2) * zoom, 110 + (view.h - 130) / 2 - (top + height / 2) * zoom, zoom);
       };
-      api.current = { fit, centerOn, zoomBy: (f) => zoomAt(camera.zoom * f, view.w / 2, view.h / 2), showCluster };
+      // „Koloruj wg” changed: every dot and block and the cards on screen take the new colours (no rebuild).
+      const recolor = () => {
+        colors = palette();
+        for (let i = 0; i < n; i++) {
+          const color = colorOf(i);
+          dotSprites[i].tint = color;
+          blockSprites[i].tint = color;
+        }
+        for (const [i, c] of shown) c.stripe.tint = colorOf(i);
+        dirty = true;
+      };
+      api.current = { fit, centerOn, zoomBy: (f) => zoomAt(camera.zoom * f, view.w / 2, view.h / 2), showCluster, recolor };
 
       const drawLine = () => {
         directLine.clear();
@@ -295,7 +318,7 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
             const c = acquire();
             const p = data.people[i];
             c.root.position.set(p[1], p[2]);
-            c.stripe.tint = callbacks.current.colorFor(i);
+            c.stripe.tint = colorOf(i);
             // „Józef KOWALSKI”, „1878 † 1951” (design v2, A9).
             c.name.text = `${p[4]} ${p[5].toLocaleUpperCase("pl-PL")}`.trim();
             c.years.text = cardYears(p[6], p[7], !!p[10]);
