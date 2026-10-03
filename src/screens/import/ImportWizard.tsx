@@ -124,7 +124,7 @@ function Done({ result }: { result: CommitResult }) {
   const reset = useWizard((w) => w.reset);
   // Undone here, from the import's toast or anywhere else: the history knows (fetched again after every change).
   const { data: past } = useApi<PastImport[]>("import.history");
-  const undone = past?.find((h) => h.name === result.batch)?.active === false;
+  const entry = past?.find((h) => h.name === result.batch);
   const undo = () => askUndoImport(result.batch, () => requireEdit(() => undoImport(result.batch)));
   const parts = [
     result.people > 0 && count(result.people, "nowa osoba", "nowe osoby", "nowych osób"),
@@ -156,9 +156,9 @@ function Done({ result }: { result: CommitResult }) {
             Nowy import
           </button>
         </div>
-        <button className="btn ghost sm" style={{ marginTop: 4 }} disabled={undone} onClick={undo}>
+        <button className="btn ghost sm" style={{ marginTop: 4 }} disabled={entry?.active === false} onClick={undo}>
           <RotateCcw size={14} />
-          {undone ? "Cofnięto — zapisz, aby usunąć z pliku" : "Cofnij import"}
+          {entry?.undone ? "Cofnięto — zapisz, aby usunąć z pliku" : entry?.active === false ? "Nie ma czego cofnąć — wszystko zmieniono później" : "Cofnij import"}
         </button>
       </div>
     </div>

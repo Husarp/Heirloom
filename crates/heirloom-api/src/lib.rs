@@ -668,6 +668,8 @@ mod tests {
         let history = api.call("import.history", Value::Null).unwrap();
         let active: Vec<(&str, bool)> = history.as_array().unwrap().iter().map(|h| (h["name"].as_str().unwrap(), h["active"].as_bool().unwrap())).collect();
         assert_eq!(active, [(second["batch"].as_str().unwrap(), false), (first["batch"].as_str().unwrap(), true)]);
+        let undone: Vec<bool> = history.as_array().unwrap().iter().map(|h| h["undone"].as_bool().unwrap()).collect();
+        assert_eq!(undone, [true, false]);
     }
 
     #[test]

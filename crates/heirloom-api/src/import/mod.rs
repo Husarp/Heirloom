@@ -218,7 +218,17 @@ pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Val
                     let id = req(args, "person")?;
                     let field = req(args, "field")?;
                     let choice = req(args, "choice")?;
-                    d.decisions.get_mut(&id).ok_or_else(|| ApiError::bad_args("person"))?.fields.insert(field, choice);
+                    // A relative set back from „Pomiń” is linked again: refused if that makes two relatives one person.
+                    let clear = first_conflict(d).is_none();
+                    let old = d.decisions.get_mut(&id).ok_or_else(|| ApiError::bad_args("person"))?.fields.insert(field.clone(), choice);
+                    if let Some(why) = clear.then(|| first_conflict(d)).flatten() {
+                        let fields = &mut d.decisions.get_mut(&id).expect("checked").fields;
+                        match old {
+                            Some(old) => fields.insert(field, old),
+                            None => fields.remove(&field),
+                        };
+                        return Err(ApiError::new("same_target", why));
+                    }
                 }
                 "import.include" => {
                     let id = req(args, "person")?;
@@ -230,10 +240,17 @@ pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Val
                             return Err(ApiError::new("same_target", why));
                         }
                     }
+                    let clear = first_conflict(d).is_none();
                     let decision = d.decisions.get_mut(&id).expect("checked");
                     match args.get("field").and_then(Value::as_str) {
                         Some(field) if include => {
-                            decision.excluded_fields.remove(field);
+                            // A relative ticked again is linked again: the same rule.
+                            if decision.excluded_fields.remove(field) {
+                                if let Some(why) = clear.then(|| first_conflict(d)).flatten() {
+                                    d.decisions.get_mut(&id).expect("checked").excluded_fields.insert(field.to_string());
+                                    return Err(ApiError::new("same_target", why));
+                                }
+                            }
                         }
                         Some(field) => {
                             decision.excluded_fields.insert(field.to_string());
@@ -520,7 +537,7 @@ fn input_list(draft: &Draft, files: &[Value]) -> Vec<Value> {
             "size": null,
             "m": null,
             "status": "error",
-            "detail": "Pliku nie ma już w tym miejscu — usuń go z listy albo upuść jeszcze raz.",
+            "detail": "Pliku nie ma już w tym miejscu — usuń go z listy, a jeśli go przeniesiono, upuść go z nowego miejsca.",
             "file": null,
         }));
     }
@@ -592,6 +609,14 @@ pub fn same_target_conflict(draft: &Draft, pid: &str, target: &str) -> Option<St
         }
     }
     None
+}
+
+/// The first pair of relatives joined with one archive person, among the people the import saves.
+pub fn first_conflict(draft: &Draft) -> Option<String> {
+    draft.batch.merged.persons.iter().find_map(|p| {
+        let d = draft.decisions.get(&p.id).filter(|d| !d.excluded && d.kind == Kind::Merge)?;
+        same_target_conflict(draft, &p.id, d.target.as_deref()?)
+    })
 }
 
 /// What `b` is to `a` in the batch („ojciec”, „żona”, „brat”…), counting only the links the commit would write
@@ -975,15 +1000,24 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
 }
 
 /// Previous imports, from the change history (newest first). `active`: something of the import is still as it saved
-/// it, so „Cofnij import” would take it back (false once it was undone, or everything of it was changed since).
+/// it, so „Cofnij import” would take it back. `undone`: everything it changed is back as it was before it (taken back,
+/// not merely changed since — an import whose people were all edited later is neither).
 fn history(s: &Session) -> Value {
     let entries = s.history();
     let mut batches: Vec<(String, String, String, usize, usize, bool)> = Vec::new();
     let mut now: HashMap<&str, Option<String>> = HashMap::new();
+    // Each batch's records as they were before it (the oldest entry of a record in the batch).
+    let mut before: HashMap<&str, Vec<(&str, &Option<String>)>> = HashMap::new();
     for e in &entries {
         let Some(batch) = &e.batch else { continue };
         let current = now.entry(e.record.as_str()).or_insert_with(|| s.archive.doc.record(&e.record).map(heirloom_core::history::record_text));
         let active = e.tag != "HEAD" && e.after.is_some() && *current == e.after;
+        if e.tag != "HEAD" {
+            let records = before.entry(batch.as_str()).or_default();
+            if !records.iter().any(|(r, _)| *r == e.record) {
+                records.push((e.record.as_str(), &e.before));
+            }
+        }
         match batches.iter_mut().find(|b| b.0 == *batch) {
             Some(b) => {
                 if e.tag == "INDI" {
@@ -997,11 +1031,14 @@ fn history(s: &Session) -> Value {
             None => batches.push((batch.clone(), e.ts.clone(), e.author.clone(), usize::from(e.tag == "INDI"), usize::from(e.tag == "OBJE"), active)),
         }
     }
+    let undone = |batch: &str| before.get(batch).is_some_and(|records| records.iter().all(|(r, b)| now.get(r).is_some_and(|n| n == *b)));
     batches.reverse();
     Value::Array(
         batches
             .into_iter()
-            .map(|(name, ts, author, people, files, active)| json!({ "name": name, "ts": ts, "author": author, "people": people, "files": files, "active": active }))
+            .map(|(name, ts, author, people, files, active)| {
+                json!({ "name": name, "ts": ts, "author": author, "people": people, "files": files, "active": active, "undone": !active && undone(&name) })
+            })
             .collect(),
     )
 }

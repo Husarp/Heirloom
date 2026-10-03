@@ -16,9 +16,9 @@ export function ImportSection() {
   const go = useStore((s) => s.go);
   const notify = useStore((s) => s.notify);
   const { data: instructions } = useApi<{ text: string; version: string }>("import.instructions");
-  const { data: history } = useApi<{ active: boolean }[]>("import.history");
+  const { data: history } = useApi<{ active: boolean; undone: boolean }[]>("import.history");
   // Imports already undone can't be undone again: „3 importy, 1 cofnięty”.
-  const undone = history?.filter((h) => !h.active).length ?? 0;
+  const undone = history?.filter((h) => h.undone).length ?? 0;
 
   const copy = async () => {
     if (!instructions) return;
@@ -46,7 +46,9 @@ export function ImportSection() {
               ? "Nie było jeszcze importów"
               : undone
                 ? `${count(history.length, "import", "importy", "importów")}, ${count(undone, "cofnięty", "cofnięte", "cofniętych")}`
-                : `${count(history.length, "import", "importy", "importów")} · każdy można cofnąć`
+                : history.every((h) => h.active)
+                  ? `${count(history.length, "import", "importy", "importów")} · każdy można cofnąć`
+                  : count(history.length, "import", "importy", "importów")
         }
         last
       >
