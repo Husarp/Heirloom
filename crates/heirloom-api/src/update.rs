@@ -1,6 +1,7 @@
 //! Update checks and updates from inside the app (APP-STANDARDS.md §2–3). The only things Heirloom ever sends over
 //! the internet: the question „what is the newest version?” to GitHub (nothing about the family or the archive goes
-//! with it), and, after a click on „Aktualizuj”, the download of the new installer.
+//! with it), and, after a click on „Aktualizuj”, the download of the new installer. Nothing is asked by itself unless
+//! „Sprawdzaj aktualizacje” is on (it is off until switched on); „Sprawdź teraz” always asks.
 //!
 //! Kept apart from `Api`: a request can take up to 10 s, and must not hold the lock every other command waits on.
 //! The window (`src-tauri`) and the bridge send every `update.*` command here.
@@ -267,7 +268,9 @@ impl Updater {
         Ok(self.status())
     }
 
-    /// Starts the downloaded installer. The caller then closes Heirloom, so the installer can replace it.
+    /// Starts the downloaded installer in update mode (`--update`: only its progress page, no questions; it starts
+    /// Heirloom again and closes by itself), on its own, not tied to this process. The caller then closes Heirloom, so
+    /// the installer can replace it. Heirloom installs per user: no administrator rights are asked for.
     fn install(&self) -> Result<Value, ApiError> {
         let mut s = self.lock();
         let Download::Ready { path, .. } = &s.download else {
@@ -277,11 +280,26 @@ impl Updater {
             s.download = Download::None;
             return Err(ApiError::new("not_ready", "Pobrany instalator zniknął z dysku. Pobierz aktualizację jeszcze raz."));
         }
-        std::process::Command::new(path)
+        installer_command(path)
             .spawn()
             .map_err(|e| ApiError::new("install_failed", format!("Nie udało się uruchomić instalatora ({e}).")))?;
         Ok(json!({ "started": true }))
     }
+}
+
+/// `HeirloomSetup-X.Y.Z.exe --update`, detached from Heirloom (no console, its own process group), so it keeps
+/// running after Heirloom exits.
+fn installer_command(path: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new(path);
+    command.arg("--update");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    }
+    command
 }
 
 struct Failure {
@@ -507,6 +525,13 @@ mod tests {
         assert_eq!(status["current"], VERSION);
         assert_eq!(updater.call("update.download", &Value::Null).unwrap_err().code, "updates_off");
         assert_eq!(updater.call("update.install", &Value::Null).unwrap_err().code, "not_ready");
+    }
+
+    #[test]
+    fn the_installer_starts_in_update_mode() {
+        let command = installer_command(Path::new("C:/temp/HeirloomSetup-0.4.1.exe"));
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(args, ["--update"]);
     }
 
     #[test]

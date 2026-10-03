@@ -26,9 +26,17 @@ X = major change, Y = feature / bigger change, Z = small change.
   - fixes: a dropped file that is gone, the paste view hiding an error, file counts, undone imports told apart,
     system files (Thumbs.db, desktop.ini…) skipped, clearer format/version errors, a repeated part reported, one
     warning for all files without a number.
-- **Updates (APP-STANDARDS §2–§3):** Heirloom asks GitHub for the newest version (at start and when the window comes
-  back, at most every 5 minutes; „Sprawdzaj aktualizacje” in Ustawienia › O programie can switch it off), shows a
-  banner, and downloads and runs the new installer itself after asking to save. It sends nothing else.
+- **Updates (APP-STANDARDS §2–§3):** Heirloom stays fully offline unless you ask: „Sprawdź teraz” in Ustawienia ›
+  O programie asks GitHub for the newest version, and „Sprawdzaj aktualizacje” (off by default) does it by itself at
+  start and when the window comes back, at most every 5 minutes, with a banner. The new installer is downloaded and
+  run by the app itself after asking to save (`--update`: progress only, no administrator rights), and it starts
+  Heirloom again. It sends nothing else.
+- **The installer's window (APP-STANDARDS §5)** in Heirloom's look (cream, deep green, its logo, serif headings):
+  „Zainstaluj X” / „Aktualizuj A → X”, „Heirloom jest uruchomiony” (OK closes it the way its own ✕ does, so it asks
+  about unsaved changes), a bar driven by the real steps with „Pokaż szczegóły”, a ticked „Uruchom Heirloom”.
+  `--update` shows only the progress (waiting up to 15 s for Heirloom to close), starts Heirloom again and closes by
+  itself. A failure puts the replaced files back and offers „Spróbuj ponownie” / „Zamknij” (the old version starts
+  again on close); uninstalling uses the same window. The work runs off the window's thread; sharp at 125/150 %.
 - **Backups** are named in local time.
 - **Development:** the repository is public; the design files, the designer's documents and the AI-trial test
   packages stay on the developer's computer (the AI-trial tests skip without them). The Windows installer is built

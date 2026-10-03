@@ -9,5 +9,5 @@ export const WHATS_NEW: string[] = [
   "Import paczki od osoby, która bada rodzinę: upuść naraz odpowiedzi AI, zdjęcia, dokumenty i notatki — Heirloom rozpozna każdy plik i dopasuje osoby do tych już zapisanych. Każdy import można cofnąć.",
   "Bezpieczny zapis: przed każdym zapisem kopia pliku danych, a na żądanie kopia całego archiwum w pliku .zip.",
   "Eksport GEDZIP: dane i zdjęcia w jednym pliku, dla innych programów.",
-  "Działa bez internetu — pyta tylko GitHub o numer najnowszej wersji (można to wyłączyć). Jasny i ciemny motyw oraz większy tekst dla wygodnego czytania.",
+  "Działa bez internetu. Aktualizacje sprawdza tylko na Twoją prośbę: „Sprawdź teraz” albo włączone „Sprawdzaj aktualizacje” w Ustawieniach. Jasny i ciemny motyw oraz większy tekst dla wygodnego czytania.",
 ];

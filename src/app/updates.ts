@@ -1,6 +1,7 @@
 // Update checks and updates from inside the app (APP-STANDARDS.md §2–3); the asking and downloading happen in Rust
-// (crates/heirloom-api/src/update.rs). GitHub is asked at start and whenever the window comes back, only while
-// „Sprawdzaj aktualizacje” is on; Rust keeps automatic checks to one per 5 minutes. An automatic check that fails
+// (crates/heirloom-api/src/update.rs). GitHub is asked at start and whenever the window comes back only while
+// „Sprawdzaj aktualizacje” is on (it is off until switched on); Rust keeps automatic checks to one per 5 minutes.
+// „Sprawdź teraz” and „GitHub” work either way. An automatic check that fails
 // says nothing (it is almost always „no internet”); „Sprawdź teraz” says in words what went wrong.
 
 import { useEffect } from "react";
@@ -72,7 +73,8 @@ export async function checkNow() {
   try {
     const status = await call<UpdateStatus>("update.check", { manual: true });
     const said = status.newer ? `Jest nowa wersja ${status.latest} — masz ${status.current}.` : `Masz najnowszą wersję, ${status.current}.`;
-    // A newer version found by hand shows its banner again.
+    // A newer version found by hand shows its banner again (while „Sprawdzaj aktualizacje” is on; otherwise it is offered
+    // in Ustawienia › O programie).
     useUpdates.setState({ status, said, closedFor: null });
   } catch (e) {
     useUpdates.setState({ said: (e as ApiError).message });
@@ -87,7 +89,8 @@ export async function refreshUpdateStatus() {
 }
 
 /** „Aktualizuj”: downloads the installer with the progress shown, asks about unsaved work, then starts the installer
- *  and Heirloom closes so it can be replaced. A failure stays on screen; nothing opens by itself. */
+ *  in update mode (`--update`: it only shows its progress and starts Heirloom again) and Heirloom closes so it can be
+ *  replaced. A failure stays on screen; nothing opens by itself. */
 let applying = false;
 export async function applyUpdate() {
   const version = useUpdates.getState().status?.latest;

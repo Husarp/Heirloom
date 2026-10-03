@@ -7,9 +7,9 @@ A Windows desktop app for keeping a family's history in one place:
 
 People are added from files that an external AI chat prepares from a researcher's notes and scans. The app's Import
 checks them, matches them with the people already in the archive, and saves only what you approve. The interface is
-in Polish, and the app works without the internet. The only thing it ever asks online is GitHub's number for the
-newest Heirloom version (nothing from the archive goes with it); „Sprawdzaj aktualizacje” in Ustawienia › O programie
-switches that off.
+in Polish, and the app works fully offline. It goes online only when you ask it to: „Sprawdź teraz” in Ustawienia ›
+O programie, or „Sprawdzaj aktualizacje” there switched on (off by default). Even then it asks GitHub only for the
+newest Heirloom version's number (nothing from the archive goes with it).
 
 ## Status
 
@@ -62,13 +62,17 @@ You need Rust (`%USERPROFILE%\.cargo\bin` on the PATH) and Node.js. Run `npm ins
 - `crates/heirloom-gen`: the test-family generator (`--seed N` gives the same family every time).
 - `src-tauri/`: the app window and the `heirloom://` file protocol. `src/`: the screens.
 - `installer/setup.py`: `HeirloomSetup-<version>.exe`, one exe that installs, updates and uninstalls, per user, without
-  administrator rights (APP-STANDARDS.md §1). It never closes a running Heirloom (it asks you to save and close it)
-  and never touches the family archives; on uninstall the program's own
-  settings and thumbnails go to the Recycle Bin only if you tick the box.
-- Updates (APP-STANDARDS.md §2–§3, `crates/heirloom-api/src/update.rs`): at start and on coming back to the window
-  (at most every 5 minutes) the app asks `api.github.com/repos/Husarp/Heirloom/releases/latest`; a newer version shows
-  a banner on Start. „Aktualizuj” downloads that release's `.exe` to `%TEMP%\Heirloom-aktualizacja` with the progress
-  shown, asks about unsaved changes, starts the installer and closes; the installer is deleted at the next start.
+  administrator rights (APP-STANDARDS.md §1), in a window with the standard's steps and Heirloom's look (§5). It never
+  closes a running Heirloom by force (after you say OK it asks it to close the way its ✕ does, so Heirloom asks about
+  unsaved changes), puts the old files back if a step fails, and never touches the family archives; on uninstall the
+  program's own settings and thumbnails go to the Recycle Bin only if you tick the box.
+- Updates (APP-STANDARDS.md §2–§3, `crates/heirloom-api/src/update.rs`): only with „Sprawdzaj aktualizacje” switched
+  on (off by default), at start and on coming back to the window (at most every 5 minutes), the app asks
+  `api.github.com/repos/Husarp/Heirloom/releases/latest`, and a newer version shows a banner on Start; „Sprawdź teraz”
+  and „GitHub” in Ustawienia › O programie always work. „Aktualizuj” downloads that release's `.exe` to
+  `%TEMP%\Heirloom-aktualizacja` with the progress shown, asks about unsaved changes, starts it as
+  `HeirloomSetup-X.Y.Z.exe --update` (progress only, no questions, no administrator rights; it starts Heirloom again)
+  and closes; the installer is deleted at the next start.
 - `.github/workflows/windows-build.yml`: runs `scripts/build.ps1` on a Windows runner and keeps the installer as the
   run's artifact.
 - `test-archives/` (test families) and `test-files/` (the gedcom.io files) are ignored by Git.
