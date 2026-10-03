@@ -172,6 +172,22 @@ pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Val
         _ => {
             let d = draft.as_mut().ok_or_else(no_draft)?;
             match method {
+                "import.fileDetail" => {
+                    // A described file's texts, read on demand: a transcription can be long, and the state is sent
+                    // again after every click.
+                    let label = req(args, "file")?;
+                    let m = d.batch.merged.media.iter().find(|m| m_number(&m.id).map(m_label).as_deref() == Some(label.as_str())).ok_or_else(|| ApiError::bad_args("file"))?;
+                    return Ok(json!({
+                        "file": label,
+                        "caption": m.caption,
+                        "documentType": m.document_type,
+                        "date": date_info(m.date.as_deref()).map(|x| x.text),
+                        "place": m.place,
+                        "transcription": m.transcription,
+                        "translation": m.translation,
+                        "note": m.note,
+                    }));
+                }
                 "import.answer" => {
                     let id = req(args, "question")?;
                     let answer = args.get("answer").and_then(Value::as_str).unwrap_or("").to_string();
@@ -844,6 +860,9 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
     // Files: described ones (M001…) and dropped ones without a description.
     let described: HashSet<String> = batch.media.iter().filter_map(|m| m_number(&m.id).map(m_label)).collect();
     let mut files = Vec::new();
+    // The files the commit will really save or link (not skipped, delivered, described or given a person), and how
+    // many of them are already in the archive.
+    let (mut saving, mut saving_dups) = (0, 0);
     for m in &batch.media {
         let Some(label) = m_number(&m.id).map(m_label) else { continue };
         let input = check::file_by_m(&draft.files, &m.id);
@@ -857,6 +876,10 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
         } else {
             "ok"
         };
+        if matches!(status, "ok" | "dup") {
+            saving += 1;
+            saving_dups += usize::from(status == "dup");
+        }
         let people: Vec<String> = m.depicts.iter().chain(&m.about).chain(&choice.people).cloned().collect::<Vec<_>>().into_iter().fold(Vec::new(), |mut acc, x| {
             if !acc.contains(&x) {
                 acc.push(x);
@@ -885,6 +908,10 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
         }
         let key = label.clone().unwrap_or_else(|| f.name.clone());
         let choice = draft.file_choices.get(&key).cloned().unwrap_or_default();
+        if !choice.skip && !choice.people.is_empty() {
+            saving += 1;
+            saving_dups += usize::from(draft.duplicates.contains_key(&key));
+        }
         files.push(json!({
             "file": key,
             "index": draft.files.iter().position(|x| x.path == f.path),
@@ -919,7 +946,7 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
                 "events": batch.events.len(),
                 "relationships": batch.relationships.len(),
                 "texts": batch.texts.len(),
-                "files": batch.media.len().max(draft.files.len()),
+                "files": files.len(),
                 "sources": batch.sources.len(),
             },
         },
@@ -940,19 +967,23 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
             "events": batch.events.len(),
             "relationships": batch.relationships.len(),
             "texts": batch.texts.len(),
-            "files": batch.media.len(),
-            "duplicates": draft.duplicates.len(),
+            "files": saving,
+            "duplicates": saving_dups,
             "sources": batch.sources.len(),
         },
     }))
 }
 
-/// Previous imports, from the change history (newest first).
+/// Previous imports, from the change history (newest first). `active`: something of the import is still as it saved
+/// it, so „Cofnij import” would take it back (false once it was undone, or everything of it was changed since).
 fn history(s: &Session) -> Value {
     let entries = s.history();
-    let mut batches: Vec<(String, String, String, usize, usize)> = Vec::new();
+    let mut batches: Vec<(String, String, String, usize, usize, bool)> = Vec::new();
+    let mut now: HashMap<&str, Option<String>> = HashMap::new();
     for e in &entries {
         let Some(batch) = &e.batch else { continue };
+        let current = now.entry(e.record.as_str()).or_insert_with(|| s.archive.doc.record(&e.record).map(heirloom_core::history::record_text));
+        let active = e.tag != "HEAD" && e.after.is_some() && *current == e.after;
         match batches.iter_mut().find(|b| b.0 == *batch) {
             Some(b) => {
                 if e.tag == "INDI" {
@@ -961,10 +992,16 @@ fn history(s: &Session) -> Value {
                 if e.tag == "OBJE" {
                     b.4 += 1;
                 }
+                b.5 |= active;
             }
-            None => batches.push((batch.clone(), e.ts.clone(), e.author.clone(), usize::from(e.tag == "INDI"), usize::from(e.tag == "OBJE"))),
+            None => batches.push((batch.clone(), e.ts.clone(), e.author.clone(), usize::from(e.tag == "INDI"), usize::from(e.tag == "OBJE"), active)),
         }
     }
     batches.reverse();
-    Value::Array(batches.into_iter().map(|(name, ts, author, people, files)| json!({ "name": name, "ts": ts, "author": author, "people": people, "files": files })).collect())
+    Value::Array(
+        batches
+            .into_iter()
+            .map(|(name, ts, author, people, files, active)| json!({ "name": name, "ts": ts, "author": author, "people": people, "files": files, "active": active }))
+            .collect(),
+    )
 }

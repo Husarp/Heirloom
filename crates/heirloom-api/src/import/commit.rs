@@ -1049,6 +1049,28 @@ mod tests {
     }
 
     #[test]
+    fn a_files_texts_are_read_on_demand_and_the_counts_are_the_files_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let (answer, photo) = example(dir.path());
+        let loose = dir.path().join("IMG_2034.jpg");
+        std::fs::write(&loose, b"jpg").unwrap();
+        let mut draft = None;
+        let state = call(&mut s, &mut draft, "import.load", json!({ "texts": [answer], "paths": [photo.to_string_lossy(), loose.to_string_lossy()] })).unwrap();
+        // Five described (one delivered) and the loose photo; only M002 will be saved, the loose one once assigned.
+        assert_eq!(state["batch"]["counts"]["files"], 6);
+        assert_eq!(state["summary"]["files"], 1);
+        let state = call(&mut s, &mut draft, "import.file", json!({ "file": "IMG_2034.jpg", "people": ["P1"] })).unwrap();
+        assert_eq!(state["summary"]["files"], 2);
+        let state = call(&mut s, &mut draft, "import.file", json!({ "file": "M002", "skip": true })).unwrap();
+        assert_eq!(state["summary"]["files"], 1);
+        let detail = call(&mut s, &mut draft, "import.fileDetail", json!({ "file": "M001" })).unwrap();
+        assert!(detail["transcription"].as_str().unwrap().starts_with("Состоялось"));
+        assert!(detail["translation"].as_str().unwrap().starts_with("Działo się"));
+        assert_eq!(call(&mut s, &mut draft, "import.fileDetail", json!({ "file": "M099" })).unwrap_err().code, "bad_args");
+    }
+
+    #[test]
     fn a_file_already_in_the_archive_is_found_past_an_object_without_a_file() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("a");
