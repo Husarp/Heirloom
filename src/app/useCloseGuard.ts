@@ -32,7 +32,8 @@ export function useCloseGuard() {
 }
 
 /** Runs `close` at once when closing loses nothing; otherwise asks first. `update`: Heirloom closes to install
- *  version `update`, and only „Zapisz i zamknij” or „Anuluj” are offered — an update never drops work. */
+ *  version `update`, and only „Zapisz i zamknij” or „Anuluj” are offered (with an open section's draft, only „Wróć”)
+ *  — an update never drops work. */
 export function closeWhenSaved(close: () => void, update?: string) {
   const s = useStore.getState();
   const unsaved = s.archive?.unsavedChanges ?? 0;
@@ -43,17 +44,25 @@ export function closeWhenSaved(close: () => void, update?: string) {
     return;
   }
   const closing = update ? `Heirloom zamknie się, żeby zainstalować wersję ${update}.` : "Zamykasz Heirloom.";
+  // An open section's draft can't be saved from here: for an update it is confirmed or cancelled first.
+  if (update && draft) {
+    s.setAsk({
+      title: "Otwarta sekcja ma niezatwierdzone zmiany",
+      text: `${closing} Najpierw zatwierdź otwartą sekcję przyciskiem „Gotowe” albo ją anuluj.`,
+      icon: "warn",
+      buttons: [{ label: "Wróć", kind: "primary" }],
+    });
+    return;
+  }
   s.setAsk({
     title: unsaved > 0 ? `Masz ${count(unsaved, "niezapisaną zmianę", "niezapisane zmiany", "niezapisanych zmian")}` : "Otwarta sekcja ma niezatwierdzone zmiany",
     text:
       unsaved > 0
         ? `${closing} Zapisać zmiany w pliku ${s.archive?.dataFile ?? ""}?${draft ? " To, co wpisano w otwartej sekcji, a nie zatwierdzono przyciskiem „Gotowe”, nie zostanie zapisane." : ""}`
-        : update
-          ? `${closing} Najpierw zatwierdź otwartą sekcję przyciskiem „Gotowe” albo ją anuluj.`
-          : `${closing} To, co wpisano w otwartej sekcji, nie zostanie zapamiętane.`,
+        : `${closing} To, co wpisano w otwartej sekcji, nie zostanie zapamiętane.`,
     icon: "warn",
     buttons: [
-      update && unsaved === 0 ? { label: "Wróć", kind: "primary" as const } : { label: "Anuluj", kind: "ghost" as const },
+      { label: "Anuluj", kind: "ghost" },
       ...(update ? [] : [{ label: "Zamknij bez zapisu", kind: unsaved > 0 ? ("secondary" as const) : ("danger" as const), run: close }]),
       ...(unsaved > 0
         ? [

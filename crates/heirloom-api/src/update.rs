@@ -330,8 +330,11 @@ fn fetch_installer(installer: &Installer, dir: &Path, version: &str, progress: i
         .timeout_recv_body(Some(Duration::from_secs(15 * 60)))
         .build()
         .into();
-    let mut response = agent.get(&installer.url).call().map_err(|e| connection_error(&e).message)?;
+    let mut response = agent.get(&installer.url).call().map_err(|e| download_error(&e))?;
     let status = response.status().as_u16();
+    if status == 404 {
+        return Err("Tego instalatora nie ma już na GitHubie. Zajrzyj na stronę wydań („GitHub”).".into());
+    }
     if status != 200 {
         return Err(status_error(status).message);
     }
@@ -374,8 +377,16 @@ fn mb(bytes: u64) -> String {
 
 fn read_error(e: std::io::Error) -> String {
     match e.into_inner().and_then(|inner| inner.downcast::<ureq::Error>().ok()) {
-        Some(e) => connection_error(&e).message,
+        Some(e) => download_error(&e),
         None => "Połączenie zerwało się w trakcie pobierania. Spróbuj ponownie.".into(),
+    }
+}
+
+/// As `connection_error`, for the download: its time limits are not the check's 10 seconds.
+fn download_error(e: &ureq::Error) -> String {
+    match e {
+        ureq::Error::Timeout(_) => "Pobieranie stanęło: GitHub zbyt długo nie przysyłał danych. Spróbuj ponownie.".into(),
+        _ => connection_error(e).message,
     }
 }
 
