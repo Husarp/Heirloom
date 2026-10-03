@@ -9,6 +9,15 @@ fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ai-trial")
 }
 
+/// The packages are kept out of Git (test data, never published): without them these tests are skipped.
+fn have_fixtures() -> bool {
+    let found = fixtures().join("paczka-1").is_dir();
+    if !found {
+        eprintln!("No tests/fixtures/ai-trial packages here: these tests are skipped.");
+    }
+    found
+}
+
 fn text(file: &str) -> String {
     std::fs::read_to_string(fixtures().join(file)).unwrap()
 }
@@ -62,6 +71,9 @@ fn import_package_1(api: &mut Api) -> Value {
 
 #[test]
 fn the_careful_package_comes_in_whole() {
+    if !have_fixtures() {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let mut api = new_archive(dir.path());
     let state = import_package_1(&mut api);
@@ -111,6 +123,9 @@ fn the_careful_package_comes_in_whole() {
 
 #[test]
 fn everything_dropped_at_once_is_listed_with_what_it_is() {
+    if !have_fixtures() {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let mut api = new_archive(dir.path());
     // The researcher's folder as the family would drop it: the answers, the photos, a second copy of part 1, a note,
@@ -152,6 +167,9 @@ fn everything_dropped_at_once_is_listed_with_what_it_is() {
 
 #[test]
 fn the_list_keeps_order_names_and_choices() {
+    if !have_fixtures() {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let mut api = new_archive(dir.path());
     // Two answers with the same file name, from two folders; a photo dropped twice under two names; many files of
@@ -196,6 +214,9 @@ fn the_list_keeps_order_names_and_choices() {
 
 #[test]
 fn a_sloppy_package_is_repaired_or_explained() {
+    if !have_fixtures() {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let mut api = new_archive(dir.path());
     // Both answers pasted at once, part 2 cut off by the answer length limit.
@@ -226,6 +247,9 @@ fn a_sloppy_package_is_repaired_or_explained() {
 
 #[test]
 fn a_later_package_joins_the_people_already_there() {
+    if !have_fixtures() {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let mut api = new_archive(dir.path());
     import_package_1(&mut api);

@@ -20,3 +20,12 @@ Desktop.ini
 
 # The official GEDCOM 7 test files from gedcom.io (downloaded by scripts/fetch-gedcom-test-files.ps1)
 /test-files/
+
+# Kept on this computer only, never published: the designer's files and the design docs, the AI-trial test
+# packages, and planning notes
+/design/
+/docs/DESIGNER_PROMPT.md
+/docs/DESIGNER_ANSWERS.md
+/crates/heirloom-api/tests/fixtures/
+/docs/.changes-plan-details.json
+/docs/CHANGES_PLAN.md

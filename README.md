@@ -64,7 +64,8 @@ You need Rust (`%USERPROFILE%\.cargo\bin` on the PATH) and Node.js. Run `npm ins
   settings and thumbnails go to the Recycle Bin only if you tick the box.
 - `test-archives/` (test families) and `test-files/` (the gedcom.io files) are ignored by Git.
 - `crates/heirloom-api/tests/fixtures/ai-trial/`: fictional AI answers for the Import tests (a careful package, a
-  sloppy one and a later one; `make-images.ps1` draws their scans).
+  sloppy one and a later one; `make-images.ps1` draws their scans). Kept on the developer's computer only, not in
+  Git; without them `tests/ai_trial.rs` is skipped.
 
 ## Documents
 
@@ -77,13 +78,9 @@ You need Rust (`%USERPROFILE%\.cargo\bin` on the PATH) and Node.js. Run `npm ins
 - [docs/AI_INSTRUCTIONS.md](docs/AI_INSTRUCTIONS.md): instructions for the researcher and their AI chat (in Polish);
   the app copies them with „Kopiuj instrukcję AI”
 - [docs/GEDCOM_EXTENSIONS.md](docs/GEDCOM_EXTENSIONS.md): how the archive is stored in GEDCOM 7, and the `_HLM_…` tags
-- [docs/DESIGNER_PROMPT.md](docs/DESIGNER_PROMPT.md): prompt for Claude Design
-- [docs/DESIGNER_ANSWERS.md](docs/DESIGNER_ANSWERS.md): answers to the designer's questions, with details per tab
-  and v1 priorities (in Polish)
-- [design/IMPLEMENTATION_SPEC.md](design/IMPLEMENTATION_SPEC.md): the design turned into exact values per screen
-- [design/FEEDBACK_DRAFT.md](design/FEEDBACK_DRAFT.md): what to change in the design, including what was found while
-  building
-- [spikes/resize-test](spikes/resize-test/README.md): the Phase 0 resize/pan/zoom test app and its results (throwaway)
+- The design files (`design/`, with `IMPLEMENTATION_SPEC.md` and `FEEDBACK_DRAFT.md`) and the designer's prompt and
+  answers (`docs/DESIGNER_PROMPT.md`, `docs/DESIGNER_ANSWERS.md`) are kept on the developer's computer only, not in
+  Git
 
 ## Licence
 
