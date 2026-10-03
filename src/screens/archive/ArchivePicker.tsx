@@ -7,6 +7,7 @@ import { rowButton } from "../../components/bits";
 import { Dialog } from "../../components/Dialog";
 import { people as peopleCount, shortWhen } from "../../lib/format";
 import { pickFolder, pickGedcom } from "../../lib/native";
+import { UpdateBanner } from "../../shell/UpdateBanner";
 import "./archive.css";
 
 /** Wybór archiwum (spec §4.15, design 17c), with „Utwórz archiwum z plików” as the main first-launch action
@@ -38,6 +39,7 @@ export function ArchivePicker() {
 
   return (
     <div className="fullscreen">
+      <UpdateBanner />
       <div className="picker">
         <div className="col" style={{ gap: 18, minWidth: 0 }}>
           <div className="row" style={{ gap: 12 }}>
@@ -72,8 +74,8 @@ export function ArchivePicker() {
           <ActionCard icon={<FolderOpen size={17} />} title="Otwórz folder…" text="z plikiem .ged i folderem media/" onClick={openFolder} />
           <ActionCard icon={<FileText size={17} />} title="Otwórz plik GEDCOM…" text=".ged · także z innych programów" onClick={openFile} />
           <p style={{ fontSize: 12, lineHeight: 1.55, color: "var(--text3)", marginTop: 6 }}>
-            Twoje dane zostają w wybranym folderze: plik GEDCOM i folder media/. Heirloom działa bez internetu i niczego nie
-            wysyła.
+            Twoje dane zostają w wybranym folderze: plik GEDCOM i folder media/. Heirloom działa bez internetu i nie wysyła
+            niczego z archiwum — pyta tylko GitHub o numer najnowszej wersji (można to wyłączyć w Ustawieniach).
           </p>
         </div>
       </div>

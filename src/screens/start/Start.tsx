@@ -6,6 +6,7 @@ import { useApi } from "../../app/useApi";
 import { Avatar, rowButton } from "../../components/bits";
 import { dayMonth, num, plural, relativeTime, todayLong } from "../../lib/format";
 import { pickFiles } from "../../lib/native";
+import { UpdateBanner } from "../../shell/UpdateBanner";
 import { runEdit } from "../media/shared";
 import { EmptyArchive } from "./EmptyArchive";
 import "./start.css";
@@ -38,6 +39,7 @@ export function Start() {
   return (
     <div className="page">
       <div className="start">
+        <UpdateBanner />
         <div className="col" style={{ gap: 4 }}>
           <span style={{ fontSize: 13, color: "var(--text3)" }}>{todayLong()}</span>
           <h1 className="serif" style={{ fontSize: 38, lineHeight: 1.1, fontWeight: 500 }}>

@@ -1,14 +1,15 @@
-// Ustawienia › Import, Osoby edytujące and O programie (spec §4.34).
+// Ustawienia › Import, Osoby edytujące and O programie (spec §4.34; updates: APP-STANDARDS.md §2–3).
 
 import { Copy, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { call } from "../../api/transport";
-import type { ArchiveStatus } from "../../api/types";
+import type { AppState, ArchiveStatus } from "../../api/types";
 import { useStore } from "../../app/store";
+import { applyUpdate, checkNow, downloadText, refreshUpdateStatus, useUpdates } from "../../app/updates";
 import { useApi } from "../../app/useApi";
-import { SettingRow } from "../../components/bits";
+import { SettingRow, Spinner, Toggle } from "../../components/bits";
 import { count, dayMonth, shortWhen } from "../../lib/format";
-import { copyText } from "../../lib/native";
+import { copyText, openUrl } from "../../lib/native";
 import { ShortcutsDialog, WhatsNewDialog } from "./dialogs";
 import { failed, Keycap, saveSettings, Section } from "./parts";
 
@@ -197,7 +198,11 @@ export function AboutSection() {
           Co nowego
         </button>
       </SettingRow>
-      <SettingRow label="Działa w pełni offline" note="Czcionki Newsreader i IBM Plex Sans (SIL OFL) oraz ikony Lucide są wbudowane" />
+      <UpdateRows version={version} />
+      <SettingRow
+        label="Działa bez internetu"
+        note="Nic z archiwum nie opuszcza komputera; Heirloom pyta tylko GitHub o numer najnowszej wersji (można to wyłączyć wyżej). Czcionki Newsreader i IBM Plex Sans (SIL OFL) oraz ikony Lucide są wbudowane"
+      />
       <SettingRow label="Licencja" note="MIT" />
       <SettingRow label="Skróty klawiszowe" note="Ctrl K szukaj · Ctrl E edycja · Ctrl S zapisz · Ctrl Z cofnij" last>
         <button className="btn secondary set-btn" onClick={() => setOpen("shortcuts")}>
@@ -207,5 +212,54 @@ export function AboutSection() {
       {open === "whatsNew" && <WhatsNewDialog version={version} onClose={() => setOpen(null)} />}
       {open === "shortcuts" && <ShortcutsDialog onClose={() => setOpen(null)} />}
     </Section>
+  );
+}
+
+/** „Sprawdzaj aktualizacje”, and the current version with „GitHub”, „Sprawdź teraz” and „Pobierz aktualizację”. */
+function UpdateRows({ version }: { version: string }) {
+  const on = useStore((s) => s.app?.updates.check ?? true);
+  const { status, checking, said, failed: updateFailed, installing } = useUpdates();
+  useEffect(() => void refreshUpdateStatus(), []);
+
+  const setOn = async (check: boolean) => {
+    try {
+      const app = await call<AppState>("app.setUpdates", { check });
+      useStore.setState({ app });
+    } catch (e) {
+      failed(e);
+    }
+  };
+
+  const running = status?.download.state === "running";
+  const note = updateFailed
+    ? `Nie udało się zaktualizować. ${updateFailed}`
+    : installing
+      ? "Uruchamiam instalator — Heirloom zaraz się zamknie."
+      : (status && downloadText(status)) ??
+        said ??
+        (status?.newer ? `Jest nowa wersja ${status.latest} — masz ${version}.` : status?.checked ? `Masz najnowszą wersję, ${version}.` : `Masz wersję ${version}.`);
+
+  return (
+    <>
+      <SettingRow label="Sprawdzaj aktualizacje" note="Przy starcie i po powrocie do okna, najwyżej co 5 minut. Wysyła tylko pytanie o numer wersji">
+        <Toggle on={on} onChange={setOn} />
+      </SettingRow>
+      <SettingRow label="Aktualizacje" note={note}>
+        <span className="row" style={{ gap: 6 }}>
+          <button className="btn ghost set-btn" onClick={() => void openUrl(status?.page ?? "https://github.com/Husarp/Heirloom/releases")}>
+            GitHub
+          </button>
+          <button className="btn secondary set-btn" disabled={checking} onClick={() => void checkNow()}>
+            {checking && <Spinner size={14} />}
+            Sprawdź teraz
+          </button>
+          {status?.newer && (
+            <button className="btn primary set-btn" disabled={running || installing} onClick={() => void applyUpdate()}>
+              {updateFailed ? "Spróbuj ponownie" : "Pobierz aktualizację"}
+            </button>
+          )}
+        </span>
+      </SettingRow>
+    </>
   );
 }
