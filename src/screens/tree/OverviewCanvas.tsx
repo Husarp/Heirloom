@@ -29,6 +29,9 @@ export interface OverviewHandle {
 
 const CARD_W = 204;
 const CARD_H = 72;
+/** The grid the cards sit on (tree.rs `overview`): a click in the gap still finds the nearest card. */
+const CELL_W = 224;
+const CELL_H = 92;
 const LEFT_COLUMN = 96;
 
 type Cluster = OverviewData["clusters"][number];
@@ -81,21 +84,26 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
   dark: boolean;
   hidden: boolean;
   focus: string | null;
+  /** The person in the side panel, ringed like a selected card in the other views. */
+  selected: string | null;
   /** The colour of a person: 0 none (`--line`), 1–12 `--b1` …; a new function re-tints everyone at once. */
   colorFor: (index: number) => number;
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
   onZoom: (zoom: number) => void;
-}>(function OverviewCanvas({ data, dark, hidden, focus, colorFor, onSelect, onOpen, onZoom }, ref) {
+}>(function OverviewCanvas({ data, dark, hidden, focus, selected, colorFor, onSelect, onOpen, onZoom }, ref) {
   const host = useRef<HTMLDivElement>(null);
-  const api = useRef<(OverviewHandle & { recolor: () => void }) | null>(null);
+  const api = useRef<(OverviewHandle & { recolor: () => void; drawSelection: () => void }) | null>(null);
   const [overlay, setOverlay] = useState<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 0.08 });
   const callbacks = useRef({ onSelect, onOpen, onZoom, colorFor });
   callbacks.current = { onSelect, onOpen, onZoom, colorFor };
   const running = useRef(true);
   running.current = !hidden;
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
 
   useEffect(() => api.current?.recolor(), [colorFor]);
+  useEffect(() => api.current?.drawSelection(), [selected]);
 
   useImperativeHandle(ref, () => ({
     fit: () => api.current?.fit(),
@@ -162,7 +170,8 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
       const dots = new Container();
       const blocks = new Container();
       const cards = new Container();
-      world.addChild(bands, blocks, directLine, dots, cards);
+      const selection = new Graphics();
+      world.addChild(bands, blocks, directLine, dots, cards, selection);
       app.stage.addChild(world);
 
       const n = data.people.length;
@@ -266,7 +275,22 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
         for (const [i, c] of shown) c.stripe.tint = colorOf(i);
         dirty = true;
       };
-      api.current = { fit, centerOn, zoomBy: (f) => zoomAt(camera.zoom * f, view.w / 2, view.h / 2), showCluster, recolor };
+      // The selected person: an accent border with a soft halo around the card or block, a ring around the dot.
+      const drawSelection = () => {
+        selection.clear();
+        const i = selectedRef.current == null ? undefined : index.get(selectedRef.current);
+        if (i == null) return;
+        const [, x, y] = data.people[i];
+        const u = 1 / camera.zoom;
+        if (camera.zoom < 0.15) {
+          selection.circle(x + CARD_W / 2, y + CARD_H / 2, 9 * u).stroke({ width: 4 * u, color: accent, alpha: 0.25 });
+          selection.circle(x + CARD_W / 2, y + CARD_H / 2, 7 * u).stroke({ width: 2 * u, color: accent });
+        } else {
+          selection.roundRect(x - 3 * u, y - 3 * u, CARD_W + 6 * u, CARD_H + 6 * u, 10).stroke({ width: 4 * u, color: accent, alpha: 0.2 });
+          selection.roundRect(x, y, CARD_W, CARD_H, 8).stroke({ width: 2 * u, color: accent });
+        }
+      };
+      api.current = { fit, centerOn, zoomBy: (f) => zoomAt(camera.zoom * f, view.w / 2, view.h / 2), showCluster, recolor, drawSelection };
 
       const drawLine = () => {
         directLine.clear();
@@ -296,7 +320,10 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
           const s = 7 / 16 / z;
           for (const d of dotSprites) d.scale.set(s);
         }
-        if (z !== lastZoom) drawLine();
+        if (z !== lastZoom) {
+          drawLine();
+          drawSelection();
+        }
         lastZoom = z;
         if (lod !== 2) {
           for (const c of shown.values()) release(c);
@@ -343,23 +370,37 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
       // Input: drag to pan, wheel to zoom at the cursor, click to select, double click to open the family view.
       const canvas = app.canvas;
       let drag: { x: number; y: number; moved: boolean } | null = null;
+      // The nearest person: within their grid cell (card and the gaps around it) at the block and card levels,
+      // within 14 px on screen at the dot level.
       const hit = (mx: number, my: number): number | null => {
         const wx = (mx - camera.x) / camera.zoom;
         const wy = (my - camera.y) / camera.zoom;
-        const pad = camera.zoom < 0.15 ? 6 / camera.zoom : 0;
+        const dotLevel = camera.zoom < 0.15;
+        const reach = 14 / camera.zoom;
+        let best: number | null = null;
+        let bestDistance = Infinity;
         for (let i = 0; i < n; i++) {
           const [, x, y] = data.people[i];
-          if (camera.zoom < 0.15) {
-            if (Math.abs(wx - (x + CARD_W / 2)) <= pad && Math.abs(wy - (y + CARD_H / 2)) <= pad) return i;
-          } else if (wx >= x && wx <= x + CARD_W && wy >= y && wy <= y + CARD_H) return i;
+          const dx = wx - (x + CARD_W / 2);
+          const dy = wy - (y + CARD_H / 2);
+          const distance = dx * dx + dy * dy;
+          if (dotLevel ? distance > reach * reach : Math.abs(dx) > CELL_W / 2 || Math.abs(dy) > CELL_H / 2) continue;
+          if (distance < bestDistance) {
+            best = i;
+            bestDistance = distance;
+          }
         }
-        return null;
+        return best;
       };
       const pos = (e: PointerEvent | WheelEvent | MouseEvent) => {
         const r = canvas.getBoundingClientRect();
         return [e.clientX - r.left, e.clientY - r.top] as const;
       };
+      // Only the left button pans and selects: the mouse's back button must not pick the person under it.
       const onDown = (e: PointerEvent) => {
+        // Esc (close the panel) belongs to the tree after a click in it.
+        el.focus({ preventScroll: true });
+        if (e.button !== 0) return;
         drag = { x: e.clientX, y: e.clientY, moved: false };
         canvas.setPointerCapture(e.pointerId);
       };
@@ -373,6 +414,7 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
         setCamera(camera.x + dx, camera.y + dy, camera.zoom);
       };
       const onUp = (e: PointerEvent) => {
+        if (e.button !== 0) return;
         if (drag && !drag.moved) {
           const [mx, my] = pos(e);
           const i = hit(mx, my);
@@ -430,7 +472,7 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
   const z = overlay.zoom;
   const bandTopScreen = (g: number) => overlay.y + (g - 1) * data.bandHeight * z;
   return (
-    <div className="overview-host" ref={host} style={{ display: hidden ? "none" : undefined }}>
+    <div className="overview-host" ref={host} tabIndex={-1} style={{ display: hidden ? "none" : undefined }}>
       <div className="band-labels">
         {Array.from({ length: data.bands }, (_, k) => k + 1).map((g) => {
           const top = bandTopScreen(g);
@@ -472,7 +514,7 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
         <span className="chip-info">
           <span>{count(data.people.length, "osoba", "osoby", "osób")}</span>
           <span>{count(data.bands, "pokolenie", "pokolenia", "pokoleń")}</span>
-          <span style={{ color: "var(--text3)" }}>Podwójne kliknięcie: rodzina tej osoby</span>
+          <span style={{ color: "var(--text3)" }}>Kliknij osobę: szczegóły · podwójnie: jej rodzina</span>
         </span>
         <span className="zoom-h">
           <button onClick={() => api.current?.zoomBy(1 / 1.3)} title="Oddal">

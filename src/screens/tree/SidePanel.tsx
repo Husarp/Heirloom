@@ -18,7 +18,7 @@ interface PanelData {
 
 /** „Wybrana osoba” (spec §4.1, design 17h): a mini profile with relatives. Browsing shows no edit actions; in edit mode
  *  „Edytuj” opens the profile's personal data and „Dodaj krewnego” adds a relative. */
-export function SidePanel({ id, onClose, onFocus }: { id: string; onClose: () => void; onFocus: (id: string) => void }) {
+export function SidePanel({ id, onClose, onFocus, relativeTitle = "Pokaż w centrum drzewa" }: { id: string; onClose: () => void; onFocus: (id: string) => void; relativeTitle?: string }) {
   const { data } = useApi<PanelData>("person.panel", { id });
   const go = useStore((s) => s.go);
   const mode = useStore((s) => s.mode);
@@ -99,7 +99,7 @@ export function SidePanel({ id, onClose, onFocus }: { id: string; onClose: () =>
           {data.relatives.length > 0 && (
             <div className="col" style={{ gap: 2, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
               {data.relatives.map((r) => (
-                <button key={`${r.id}-${r.label}`} className="panel-relative" onClick={() => onFocus(r.id)} title="Pokaż w centrum drzewa">
+                <button key={`${r.id}-${r.label}`} className="panel-relative" onClick={() => onFocus(r.id)} title={relativeTitle}>
                   <Avatar initials={r.initials} branch={r.branch} photo={r.photo} size={26} />
                   <span className="ellipsis grow" style={{ fontSize: 13, fontWeight: 500 }}>
                     {/* „z d.” only for the mother and the wife (spec §4.1); a married daughter keeps her married surname. */}
