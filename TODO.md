@@ -186,7 +186,8 @@ This is the roadmap, with a checkbox per task.
 - [ ] **Historie:** the story's exact branch (not only its colour), the story's own photos, an „uncertain” flag on
       story dates, the rich editor in the story panel
 - [ ] **Historia zmian:** `current` for import rows; links for text, source and media rows
-- [ ] **Backups:** file names in local time (they use UTC now)
+- [x] **Backups:** file names in local time, same format (2026-10-03); old copies are pruned by their file time, and
+      „Ostatnia kopia” counts only the data file's own copies
 - [ ] **Tree:** manual sibling order (drag), minimap, ↻ duplicates, photos in „Całe drzewo”
 - [ ] **Settings:** moving the settings files („Obok danych / W programie”), accent colours, „Zmniejsz zdjęcia”,
       restoring a backup („Przywróć”), keeping an editor's change count when they are renamed
