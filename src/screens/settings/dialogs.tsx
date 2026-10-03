@@ -147,6 +147,7 @@ const SHORTCUTS: { title: string; keys: [string[][], string][] }[] = [
       [[["↓"]], "Do dziecka"],
       [[["←"], ["→"]], "Wybierz osobę obok: rodzeństwo, partnera"],
       [[["Enter"]], "Wybraną osobę na środek"],
+      [[["Home"]], "Do osoby z największą liczbą powiązań"],
     ],
   },
   {

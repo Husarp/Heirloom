@@ -5,7 +5,9 @@
 import { Application, BitmapFont, BitmapText, Container, Graphics, Sprite, type Renderer } from "pixi.js";
 import { Minus, Plus, LocateFixed } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import type { TreeCamera } from "../../app/store";
 import { cardYears, count, roman } from "../../lib/format";
+import { cameraOf, viewOf } from "./camera";
 import { placeLabels } from "./labels";
 
 export interface OverviewData {
@@ -17,7 +19,6 @@ export interface OverviewData {
   bandHeight: number;
   bandYears: (number | null)[];
   width: number;
-  line: string[];
 }
 
 export interface OverviewHandle {
@@ -26,7 +27,13 @@ export interface OverviewHandle {
   zoomBy: (f: number) => void;
   /** Fits one surname cluster on screen (its columns across its generation bands). */
   showCluster: (c: { x: number; width: number; fromGen: number | null; toGen: number | null }) => void;
+  /** Where the camera is, in world coordinates (for Back and „Ostatnie miejsce”). */
+  getView: () => TreeCamera | null;
 }
+
+const MIN_ZOOM = 0.005;
+const MAX_ZOOM = 1.6;
+const ORIGIN = { x: 0, y: 0 };
 
 const CARD_W = 204;
 const CARD_H = 72;
@@ -93,26 +100,47 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
   onZoom: (zoom: number) => void;
-}>(function OverviewCanvas({ data, dark, hidden, focus, selected, colorFor, onSelect, onOpen, onZoom }, ref) {
+  /** A camera to come back to (Back, „Ostatnie miejsce”); `onRestored` says it was used. */
+  restore?: TreeCamera | null;
+  onRestored?: () => void;
+  /** The camera moved (to remember the place). */
+  onCamera?: () => void;
+}>(function OverviewCanvas({ data, dark, hidden, focus, selected, colorFor, onSelect, onOpen, onZoom, restore, onRestored, onCamera }, ref) {
   const host = useRef<HTMLDivElement>(null);
-  const api = useRef<(OverviewHandle & { recolor: () => void; drawSelection: () => void }) | null>(null);
+  const api = useRef<(Omit<OverviewHandle, "getView"> & { recolor: () => void; drawSelection: () => void; drawLine: () => void; setView: (v: TreeCamera) => void }) | null>(null);
   const [overlay, setOverlay] = useState<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 0.08 });
-  const callbacks = useRef({ onSelect, onOpen, onZoom, colorFor });
-  callbacks.current = { onSelect, onOpen, onZoom, colorFor };
+  const callbacks = useRef({ onSelect, onOpen, onZoom, onCamera, colorFor });
+  callbacks.current = { onSelect, onOpen, onZoom, onCamera, colorFor };
   const running = useRef(true);
   running.current = !hidden;
   const labelSpots = useRef(new Map<string, number>());
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  const focusRef = useRef(focus);
+  focusRef.current = focus;
+  // The camera outside the Pixi app, so a rebuild (the data edited, the theme changed) keeps the place.
+  const kept = useRef<TreeCamera | null>(null);
+  const restoreRef = useRef(restore);
+  restoreRef.current = restore;
+  const restored = useRef(onRestored);
+  restored.current = onRestored;
 
   useEffect(() => api.current?.recolor(), [colorFor]);
   useEffect(() => api.current?.drawSelection(), [selected]);
+  useEffect(() => api.current?.drawLine(), [focus]);
+  // While the app is starting, it picks up `restore` itself.
+  useEffect(() => {
+    if (!restore || !api.current) return;
+    api.current.setView(restore);
+    restored.current?.();
+  }, [restore]);
 
   useImperativeHandle(ref, () => ({
     fit: () => api.current?.fit(),
     centerOn: (id) => api.current?.centerOn(id),
     zoomBy: (f) => api.current?.zoomBy(f),
     showCluster: (c) => api.current?.showCluster(c),
+    getView: () => kept.current,
   }));
 
   useEffect(() => {
@@ -251,7 +279,7 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
         setCamera(LEFT_COLUMN + 20 + (view.w - LEFT_COLUMN - 40 - data.width * z) / 2, 90 + (view.h - 120 - worldH * z) / 2, z);
       };
       const zoomAt = (z: number, mx: number, my: number) => {
-        const zoom = Math.min(1.6, Math.max(0.005, z));
+        const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
         setCamera(mx - ((mx - camera.x) / camera.zoom) * zoom, my - ((my - camera.y) / camera.zoom) * zoom, zoom);
       };
       const centerOn = (id: string) => {
@@ -293,20 +321,38 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
           selection.roundRect(x, y, CARD_W, CARD_H, 8).stroke({ width: 2 * u, color: accent });
         }
       };
-      api.current = { fit, centerOn, zoomBy: (f) => zoomAt(camera.zoom * f, view.w / 2, view.h / 2), showCluster, recolor, drawSelection };
+      const setView = (v: TreeCamera) => {
+        // Right after the tree is shown again, before the resize observer has told the size.
+        if (el.clientWidth > 0 && el.clientHeight > 0) {
+          view.w = el.clientWidth;
+          view.h = el.clientHeight;
+        }
+        const c = cameraOf(v, view, ORIGIN, MIN_ZOOM, MAX_ZOOM);
+        setCamera(c.x, c.y, c.zoom);
+      };
 
+      // The direct line of the person the tree was opened at: father, else mother, each generation up.
       const drawLine = () => {
         directLine.clear();
-        const pts = data.line.map((id) => index.get(id)).filter((i): i is number => i != null).map((i) => [data.people[i][1] + CARD_W / 2, data.people[i][2] + CARD_H / 2]);
-        if (pts.length < 2) return;
-        directLine.moveTo(pts[0][0], pts[0][1]);
-        for (const [x, y] of pts.slice(1)) directLine.lineTo(x, y);
-        directLine.stroke({ width: 2 / camera.zoom, color: accent, alpha: 0.85, join: "round" });
-        if (focus && index.has(focus)) {
-          const [, x, y] = data.people[index.get(focus)!];
-          directLine.roundRect(x - 6 / camera.zoom, y - 6 / camera.zoom, CARD_W + 12 / camera.zoom, CARD_H + 12 / camera.zoom, 10 / camera.zoom).stroke({ width: 2.5 / camera.zoom, color: accent });
+        const focus = focusRef.current;
+        const start = focus == null ? undefined : index.get(focus);
+        if (start == null) return;
+        const line: number[] = [];
+        for (let i: number | null = start; i != null && !line.includes(i) && line.length <= 200; ) {
+          line.push(i);
+          const [father, mother]: [number | null, number | null] = data.people[i][13];
+          i = father ?? mother;
         }
+        const pts = line.map((i) => [data.people[i][1] + CARD_W / 2, data.people[i][2] + CARD_H / 2]);
+        if (pts.length >= 2) {
+          directLine.moveTo(pts[0][0], pts[0][1]);
+          for (const [x, y] of pts.slice(1)) directLine.lineTo(x, y);
+          directLine.stroke({ width: 2 / camera.zoom, color: accent, alpha: 0.85, join: "round" });
+        }
+        const [, x, y] = data.people[start];
+        directLine.roundRect(x - 6 / camera.zoom, y - 6 / camera.zoom, CARD_W + 12 / camera.zoom, CARD_H + 12 / camera.zoom, 10 / camera.zoom).stroke({ width: 2.5 / camera.zoom, color: accent });
       };
+      api.current = { fit, centerOn, zoomBy: (f) => zoomAt(camera.zoom * f, view.w / 2, view.h / 2), showCluster, recolor, drawSelection, drawLine, setView };
 
       let lastZoom = -1;
       const update = () => {
@@ -358,7 +404,9 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
             shown.set(i, c);
           }
         }
+        kept.current = viewOf(camera, view, ORIGIN);
         callbacks.current.onZoom(z);
+        callbacks.current.onCamera?.();
         setOverlay({ x: camera.x, y: camera.y, zoom: z });
       };
 
@@ -442,13 +490,21 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
       canvas.addEventListener("dblclick", onDouble);
       canvas.addEventListener("wheel", onWheel, { passive: false });
       const observer = new ResizeObserver(() => {
+        // Hidden (another screen in front): the size to come back to stays.
+        if (el.clientWidth === 0 || el.clientHeight === 0) return;
         view.w = el.clientWidth;
         view.h = el.clientHeight;
         if (view.w > app.screen.width || view.h > app.screen.height) app.renderer.resize(Math.max(view.w, app.screen.width), Math.max(view.h, app.screen.height));
         dirty = true;
       });
       observer.observe(el);
-      if (focus && index.has(focus)) {
+      // A camera to come back to, else the one before a rebuild, else the person the tree was opened at.
+      const focus = focusRef.current;
+      const back = restoreRef.current ?? kept.current;
+      if (back) {
+        setView(back);
+        if (restoreRef.current) restored.current?.();
+      } else if (focus && index.has(focus)) {
         fit();
         const i = index.get(focus)!;
         const [, x, y] = data.people[i];
@@ -468,9 +524,9 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
       destroyed = true;
       cleanup();
     };
-    // Rebuilt when the data or the theme changes.
+    // Rebuilt when the data or the theme changes (a new centre person only redraws the line, above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, dark, focus]);
+  }, [data, dark]);
 
   const z = overlay.zoom;
   const bandTopScreen = (g: number) => overlay.y + (g - 1) * data.bandHeight * z;

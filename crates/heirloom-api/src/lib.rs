@@ -167,6 +167,15 @@ impl Api {
         match method {
             "app.state" => Ok(self.app_state()),
             "app.setAppearance" => self.set_appearance(&args),
+            "app.setPlace" => {
+                // The archive is named by the UI: a place sent late must not land in an archive opened since.
+                let archive_id = str_arg(&args, "archiveId")?;
+                let part = |key: &str| args.get(key).filter(|v| !v.is_null()).cloned();
+                let viewed = args.get("viewed").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect());
+                self.config.set_place(&archive_id, part("route"), part("tree"), viewed, heirloom_core::history::now());
+                self.save_config();
+                Ok(Value::Null)
+            }
             "recent.forget" => {
                 self.config.forget(&str_arg(&args, "path")?);
                 self.save_config();
@@ -385,6 +394,8 @@ impl Api {
             "appearance": self.config.appearance,
             "lastEditor": self.config.last_editor,
             "archive": self.session.as_ref().map(|s| status_of(s)),
+            // Where the open archive was left on this computer.
+            "place": self.session.as_ref().and_then(|s| self.config.places.get(&s.archive.settings().archive_id)),
         })
     }
 
@@ -407,6 +418,12 @@ impl Api {
         }
         if let Some(animations) = args.get("animations").and_then(Value::as_bool) {
             appearance.animations = animations;
+        }
+        if let Some(start_in) = args.get("startIn").and_then(Value::as_str) {
+            if !["start", "last"].contains(&start_in) {
+                return Err(ApiError::bad_args("startIn"));
+            }
+            appearance.start_in = start_in.into();
         }
         self.config.appearance = appearance;
         self.save_config();
@@ -486,9 +503,6 @@ impl Api {
         if let Some(read_only) = args.get("readOnly").and_then(Value::as_bool) {
             settings.read_only = read_only;
         }
-        if let Some(start) = args.get("startPerson") {
-            settings.start_person = start.as_str().map(str::to_string);
-        }
         if let Some(keep) = args.get("backupsToKeep").and_then(Value::as_u64) {
             settings.backups_to_keep = (keep as usize).clamp(1, 1000);
         }
@@ -514,7 +528,7 @@ impl Api {
 
     fn save_config(&self) {
         if let Some(dir) = &self.config_dir {
-            // Only conveniences (recent list, appearance) live here; failing to write them must not break the app.
+            // Only conveniences (recent list, appearance, last places) live here; failing to write them must not break the app.
             let _ = self.config.save(dir);
         }
     }
@@ -538,7 +552,6 @@ fn status_of(s: &Session) -> Value {
         "undoDepth": archive.undo_depth(),
         "canRedo": archive.can_redo(),
         "changedOnDisk": archive.changed_on_disk().unwrap_or(false),
-        "startPerson": settings.start_person,
         "warnings": archive.warnings.iter().map(|w| json!({ "line": w.line, "message": w.message })).collect::<Vec<_>>(),
         "encoding": archive.doc.source_encoding.label(),
         "people": archive.doc.records.iter().filter(|r| r.tag == "INDI").count(),
@@ -607,6 +620,30 @@ mod tests {
         assert_eq!(date_feedback("ok. 14.03.1878")["qualifier"], "about");
         assert_eq!(date_feedback("między 1850 a 1855")["text"], "między 1850 a 1855");
         assert_eq!(date_feedback("zimą 1915")["qualifier"], "text");
+    }
+
+    #[test]
+    fn the_last_place_is_remembered_per_archive_on_this_computer() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config");
+        let mut api = Api::new(Some(config.clone()), None);
+        let a = dir.path().join("a");
+        let id = api.call("archive.create", json!({ "folder": a.to_str().unwrap(), "name": "A" })).unwrap()["archiveId"].as_str().unwrap().to_string();
+        assert!(api.call("app.state", Value::Null).unwrap()["place"].is_null());
+        assert_eq!(api.call("app.setAppearance", json!({ "startIn": "elsewhere" })).unwrap_err().code, "bad_args");
+        api.call("app.setAppearance", json!({ "startIn": "last" })).unwrap();
+        let route = json!({ "name": "tree", "view": "family", "person": "@I1@", "cam": { "zoom": 0.5, "x": 10.0, "y": -20.0 } });
+        api.call("app.setPlace", json!({ "archiveId": id, "route": route, "tree": route, "viewed": ["@I1@"] })).unwrap();
+        api.call("app.setPlace", json!({ "archiveId": id, "route": { "name": "people" } })).unwrap();
+
+        // After a restart: the choice and the place are back, and nothing was written into the archive folder.
+        let mut api = Api::new(Some(config), None);
+        api.call("archive.open", json!({ "path": a.to_str().unwrap() })).unwrap();
+        let state = api.call("app.state", Value::Null).unwrap();
+        assert_eq!(state["appearance"]["startIn"], "last");
+        assert_eq!((&state["place"]["route"], &state["place"]["tree"], &state["place"]["viewed"]), (&json!({ "name": "people" }), &route, &json!(["@I1@"])));
+        let settings = std::fs::read_to_string(a.join(".heirloom").join("ustawienia.json")).unwrap();
+        assert!(!settings.contains("people") && !settings.contains("startPerson"));
     }
 
     #[test]

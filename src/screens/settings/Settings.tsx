@@ -1,15 +1,13 @@
-import { Archive, Calendar, Import, Info, Network, Palette, Search, Users } from "lucide-react";
+import { Archive, Calendar, Import, Info, Network, Palette, Users } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { call } from "../../api/transport";
-import type { AppState, Appearance, ArchiveStatus, PersonSummary } from "../../api/types";
+import type { AppState, Appearance, ArchiveStatus } from "../../api/types";
 import { useStore } from "../../app/store";
-import { useApi } from "../../app/useApi";
-import { Avatar, Segmented, SettingRow, Toggle, useDismiss } from "../../components/bits";
+import { Segmented, SettingRow, Toggle } from "../../components/bits";
 import { ArchiveSections } from "./archive";
 import { AboutSection, EditorsSection, ImportSection } from "./more";
-import { failed, saveSettings, Section, Select, setDisplay } from "./parts";
+import { failed, Section, Select, setDisplay } from "./parts";
 import "./settings.css";
-import { cardYears } from "../../lib/format";
 
 const NAV = [
   { id: "appearance", label: "Wygląd", icon: Palette },
@@ -183,9 +181,6 @@ function TextSize({ value, onChange }: { value: number; onChange: (value: number
 
 function TreeSection({ archive }: { archive: ArchiveStatus }) {
   const display = archive.display;
-  const [picking, setPicking] = useState(false);
-  const { data: start, error: startError } = useApi<PersonSummary>(archive.startPerson ? "person.hover" : null, { id: archive.startPerson });
-  const startName = start?.id === archive.startPerson ? start.name : startError ? "nie ma tej osoby" : "…";
   return (
     <Section id="tree" title="Drzewo">
       <SettingRow label="Widok domyślny">
@@ -200,32 +195,6 @@ function TreeSection({ archive }: { archive: ArchiveStatus }) {
             { value: "overview", label: "Całe drzewo" },
           ]}
         />
-      </SettingRow>
-      <SettingRow label="Osoba startowa" note="Od niej otwiera się drzewo">
-        <div style={{ position: "relative" }}>
-          <Segmented
-            size={28}
-            value={archive.startPerson ? "chosen" : "recent"}
-            onChange={(v) => (v === "recent" ? saveSettings({ startPerson: null }) : setPicking(true))}
-            options={[
-              {
-                value: "chosen",
-                label: archive.startPerson ? <span className="ellipsis" style={{ maxWidth: 220 }}>Wybrana: {startName}</span> : "Wybrana…",
-                title: "Wybierz osobę",
-              },
-              { value: "recent", label: "Ostatnio oglądana" },
-            ]}
-          />
-          {picking && (
-            <PersonPicker
-              onClose={() => setPicking(false)}
-              onPick={(id) => {
-                setPicking(false);
-                saveSettings({ startPerson: id });
-              }}
-            />
-          )}
-        </div>
       </SettingRow>
       <SettingRow label="Styl karty">
         <Segmented
@@ -283,65 +252,6 @@ function TreeSection({ archive }: { archive: ArchiveStatus }) {
         </span>
       </SettingRow>
     </Section>
-  );
-}
-
-type Hit = PersonSummary & { context: string };
-
-/** Choosing the start person: a search over everyone in the archive. */
-function PersonPicker({ onPick, onClose }: { onPick: (id: string) => void; onClose: () => void }) {
-  const [query, setQuery] = useState("");
-  const [hits, setHits] = useState<Hit[]>([]);
-  const ref = useDismiss<HTMLDivElement>(true, onClose);
-  useEffect(() => {
-    if (!query.trim()) {
-      setHits([]);
-      return;
-    }
-    let cancelled = false;
-    call<Hit[]>("people.search", { q: query, limit: 8 })
-      .then((list) => !cancelled && setHits(list))
-      .catch(failed);
-    return () => {
-      cancelled = true;
-    };
-  }, [query]);
-  return (
-    <div ref={ref} className="popover" style={{ top: 40, right: 0, width: 320 }}>
-      <div style={{ padding: 8 }}>
-        <div className="search-box">
-          <Search size={14} />
-          <input
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && hits[0] && onPick(hits[0].id)}
-            placeholder="Szukaj osoby…"
-          />
-        </div>
-      </div>
-      {hits.length > 0 && (
-        <div style={{ paddingBottom: 4 }}>
-          {hits.map((h) => (
-            <button key={h.id} className="menu-item" style={{ minHeight: 46 }} onClick={() => onPick(h.id)}>
-              <Avatar initials={h.initials} branch={h.branch} photo={h.photo} size={28} />
-              <span className="col grow" style={{ minWidth: 0 }}>
-                <span className="ellipsis" style={{ fontWeight: 500 }}>
-                  {h.name}
-                </span>
-                <span className="ellipsis" style={{ fontSize: 12, color: "var(--text3)" }}>
-                  {h.context}
-                </span>
-              </span>
-              <span className="num" style={{ fontSize: 12, color: "var(--text2)" }}>
-                {cardYears(h.birth?.year, h.death?.year, h.living)}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-      {query.trim() && hits.length === 0 && <div style={{ padding: "4px 12px 12px", fontSize: 13, color: "var(--text3)" }}>Nikogo nie znaleziono.</div>}
-    </div>
   );
 }
 

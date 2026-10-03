@@ -3,14 +3,26 @@
 
 import { create } from "zustand";
 import { call, ApiError } from "../api/transport";
-import type { AppState, ArchiveStatus, SaveResult } from "../api/types";
+import type { AppState, ArchiveStatus, PersonSummary, SaveResult } from "../api/types";
 import { count } from "../lib/format";
 
 export type TreeView = "family" | "ancestors" | "descendants" | "overview";
 
+/** Where a tree view was looking: the zoom and the world point in the middle of the screen — relative to the centre
+ *  person's card in the focus views (so a new layout after an edit doesn't throw it off), absolute in Całe drzewo. */
+export interface TreeCamera {
+  zoom: number;
+  x: number;
+  y: number;
+}
+
+/** The tree as it was left: `cam` and `sel` (the selected person) are added when the tree is left, so Back and
+ *  „Ostatnie miejsce” come back to the same view, zoom and place. */
+export type TreeRoute = { name: "tree"; view: TreeView; person?: string; cam?: TreeCamera; sel?: string };
+
 export type Route =
   | { name: "start" }
-  | { name: "tree"; view: TreeView; person?: string }
+  | TreeRoute
   | { name: "people" }
   /** `open`: the section to open for editing (design 17a), e.g. "personal" from the tree's „Edytuj”. */
   | { name: "person"; id: string; section?: string; open?: string }
@@ -101,6 +113,12 @@ interface Store {
   /** The last part of the breadcrumb, set by the screen (e.g. the person's name). */
   crumb: string | null;
   ask: Ask | null;
+  /** Set by the tree: its camera and selection, added to its route when the tree is left. */
+  treeSnapshot: (() => Pick<TreeRoute, "person" | "cam" | "sel">) | null;
+  setTreeSnapshot: (take: (() => Pick<TreeRoute, "person" | "cam" | "sel">) | null) => void;
+  /** The tree as it was last seen in this archive (from the last place), where the tree starts when it's opened
+   *  without a person. */
+  treePlace: TreeRoute | null;
 
   boot: () => Promise<void>;
   refreshApp: () => Promise<void>;
@@ -153,8 +171,44 @@ interface Store {
 
 let toastId = 0;
 
+/** The same screen; the tree's camera and selection don't make it another one. */
 function sameRoute(a: Route, b: Route): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  const bare = (r: Route) => (r.name === "tree" ? { name: r.name, view: r.view, person: r.person } : r);
+  return JSON.stringify(bare(a)) === JSON.stringify(bare(b));
+}
+
+/** The route as it is being left: the tree's adds its camera and selection. */
+function withSnapshot(route: Route): Route {
+  if (route.name !== "tree") return route;
+  const take = useStore.getState().treeSnapshot;
+  return take ? { ...route, ...take() } : route;
+}
+
+/** Where opening an archive goes: Start, or with „Ostatnie miejsce” the place where it was left. Screens that make
+ *  no sense to come back to (the Import, a new person, Ustawienia) and a profile of someone gone give Start. */
+async function firstRoute(app: AppState): Promise<Route> {
+  const route = (app.appearance.startIn === "last" ? app.place?.route : null) as Route | null;
+  if (!route || typeof route !== "object" || typeof route.name !== "string") return { name: "start" };
+  if (route.name === "import" || route.name === "edit" || route.name === "settings") return { name: "start" };
+  if (route.name === "person") {
+    try {
+      await call("person.hover", { id: route.id });
+    } catch {
+      return { name: "start" };
+    }
+  }
+  return route;
+}
+
+/** „Ostatnio oglądane” as it was left (people gone since are skipped). */
+async function viewedBefore(app: AppState): Promise<ViewedPerson[]> {
+  const people = await Promise.all((app.place?.viewed ?? []).map((id) => call<PersonSummary>("person.hover", { id }).catch(() => null)));
+  return people.filter((p): p is PersonSummary => p != null).map((p) => ({ id: p.id, name: p.name, initials: p.initials, branch: p.branch, photo: p.photo }));
+}
+
+function treePlaceOf(app: AppState): TreeRoute | null {
+  const tree = app.place?.tree as TreeRoute | null | undefined;
+  return tree && typeof tree === "object" && tree.name === "tree" ? tree : null;
 }
 
 export const useStore = create<Store>((set, get) => ({
@@ -182,6 +236,9 @@ export const useStore = create<Store>((set, get) => ({
   palette: null,
   crumb: null,
   ask: null,
+  treeSnapshot: null,
+  setTreeSnapshot: (take) => set({ treeSnapshot: take }),
+  treePlace: null,
 
   boot: async () => {
     const app = await call<AppState>("app.state");
@@ -198,19 +255,21 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   openArchive: async (path) => {
+    flushPlace();
     set({ opening: path, openError: null, phase: get().phase === "boot" ? "boot" : "loading" });
     // Known from before opening: opening puts the archive at the top of the recent list.
     const seenBefore = get().app?.recent.some((r) => r.path === path) ?? false;
     try {
       const status = await call<ArchiveStatus>("archive.open", { path });
       const app = await call<AppState>("app.state");
-      const firstTime = status.startPerson == null && status.people > 0 && !seenBefore;
+      const firstTime = status.people > 0 && !seenBefore;
+      const [route, recentlyViewed] = await Promise.all([firstTime ? ({ name: "start" } as Route) : firstRoute(app), viewedBefore(app)]);
       set({
         app,
         archive: status,
         opening: null,
         phase: firstTime ? "firstOpen" : "ready",
-        route: { name: "start" },
+        route,
         back: [],
         forward: [],
         mode: "browse",
@@ -219,7 +278,8 @@ export const useStore = create<Store>((set, get) => ({
         lastSaved: status.lastSaved,
         lastSave: null,
         section: null,
-        recentlyViewed: [],
+        recentlyViewed,
+        treePlace: treePlaceOf(app),
       });
       return true;
     } catch (e) {
@@ -229,6 +289,7 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   createArchive: async (folder, name) => {
+    flushPlace();
     set({ openError: null });
     try {
       const status = await call<ArchiveStatus>("archive.create", { folder, name });
@@ -247,6 +308,7 @@ export const useStore = create<Store>((set, get) => ({
         lastSave: null,
         section: null,
         recentlyViewed: [],
+        treePlace: null,
       });
       return true;
     } catch (e) {
@@ -256,6 +318,7 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   closeArchive: async () => {
+    flushPlace();
     await call("archive.close");
     const app = await call<AppState>("app.state");
     set({ app, archive: null, phase: "picker", mode: "browse", editor: null, lastSave: null, section: null });
@@ -269,7 +332,7 @@ export const useStore = create<Store>((set, get) => ({
     const { route: current, back } = get();
     if (sameRoute(current, route)) return;
     // An edit that waited for „Kto edytuje?” belongs to the screen being left.
-    leaving(() => set({ route, back: [...back, current].slice(-100), forward: [], pendingEdit: null }));
+    leaving(() => set({ route, back: [...back, withSnapshot(current)].slice(-100), forward: [], pendingEdit: null }));
   },
 
   replaceRoute: (route) => set({ route }),
@@ -278,14 +341,14 @@ export const useStore = create<Store>((set, get) => ({
     const { back, route, forward } = get();
     const previous = back[back.length - 1];
     if (!previous) return;
-    leaving(() => set({ route: previous, back: back.slice(0, -1), forward: [route, ...forward], pendingEdit: null }));
+    leaving(() => set({ route: previous, back: back.slice(0, -1), forward: [withSnapshot(route), ...forward], pendingEdit: null }));
   },
 
   goForward: () => {
     const { back, route, forward } = get();
     const next = forward[0];
     if (!next) return;
-    leaving(() => set({ route: next, back: [...back, route], forward: forward.slice(1), pendingEdit: null }));
+    leaving(() => set({ route: next, back: [...back, withSnapshot(route)], forward: forward.slice(1), pendingEdit: null }));
   },
 
   leaveGuard: null,
@@ -538,6 +601,41 @@ function leaving(move: () => void) {
     },
   });
 }
+
+// The last place (screen, tree view and camera, „Ostatnio oglądane”) is remembered on this computer for each
+// archive, a second after it last changed, whichever start the user chose: switching to „Ostatnie miejsce” later
+// works at once.
+let placeTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Called on changes the store doesn't see (the tree's camera moving). */
+export function rememberPlace() {
+  if (placeTimer) clearTimeout(placeTimer);
+  placeTimer = setTimeout(savePlace, 1000);
+}
+
+function savePlace() {
+  placeTimer = null;
+  const s = useStore.getState();
+  if (s.phase !== "ready" || !s.archive) return;
+  const route = withSnapshot(s.route);
+  call("app.setPlace", {
+    archiveId: s.archive.archiveId,
+    route,
+    tree: route.name === "tree" ? route : undefined,
+    viewed: s.recentlyViewed.map((p) => p.id),
+  }).catch(() => {});
+}
+
+/** Writes a waiting place now (before another archive is opened or this one closed). */
+function flushPlace() {
+  if (!placeTimer) return;
+  clearTimeout(placeTimer);
+  savePlace();
+}
+
+useStore.subscribe((s, before) => {
+  if (s.route !== before.route || s.recentlyViewed !== before.recentlyViewed) rememberPlace();
+});
 
 /** Screens call this after a change that the API has already applied. */
 export function afterChange(status?: ArchiveStatus) {

@@ -43,7 +43,17 @@ export function ArchiveSections({ archive }: { archive: ArchiveStatus }) {
 function ArchiveSection({ archive, measured }: { archive: ArchiveStatus; measured: number }) {
   const whenSaved = useStore((s) => s.whenSaved);
   const stopEditing = useStore((s) => s.stopEditing);
+  const startIn = useStore((s) => s.app?.appearance.startIn ?? "start");
   const version = archive.gedcomVersion;
+
+  // A choice of this computer (aplikacja.json), like the appearance: on a shared archive everyone keeps their own.
+  const setStartIn = async (value: "start" | "last") => {
+    try {
+      useStore.setState({ app: await call<AppState>("app.setAppearance", { startIn: value }) });
+    } catch (e) {
+      failed(e);
+    }
+  };
 
   const setMode = (mode: "edit" | "readOnly") => {
     if (mode === "edit") {
@@ -58,6 +68,17 @@ function ArchiveSection({ archive, measured }: { archive: ArchiveStatus; measure
 
   return (
     <Section id="archive" title="Archiwum">
+      <SettingRow label="Po otwarciu archiwum" note="Ekran, widok drzewa i powiększenie zapamiętane osobno dla każdego archiwum, na tym komputerze">
+        <Segmented
+          size={28}
+          value={startIn}
+          onChange={setStartIn}
+          options={[
+            { value: "start", label: "Start" },
+            { value: "last", label: "Ostatnie miejsce" },
+          ]}
+        />
+      </SettingRow>
       <SettingRow label="Folder archiwum" note={<span className="selectable">{displayPath(archive.root)}</span>}>
         <button className="btn secondary set-btn" onClick={() => openPath(archive.root).catch(failed)}>
           <FolderOpen size={15} />

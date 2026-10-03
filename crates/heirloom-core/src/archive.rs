@@ -34,8 +34,6 @@ pub struct Settings {
     pub read_only: bool,
     /// The first save into another program's file was confirmed.
     pub foreign_save_confirmed: bool,
-    /// Where the tree opens (xref); none = the most recently viewed person.
-    pub start_person: Option<String>,
     pub backups_to_keep: usize,
     /// Copy the data file into `.heirloom/kopie/` before each save (Ustawienia › Kopie zapasowe).
     pub backup_before_save: bool,
@@ -64,7 +62,6 @@ impl Default for Settings {
             data_file: DEFAULT_DATA_FILE.into(),
             read_only: false,
             foreign_save_confirmed: false,
-            start_person: None,
             backups_to_keep: 20,
             backup_before_save: true,
             editors: Vec::new(),

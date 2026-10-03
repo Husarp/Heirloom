@@ -27,7 +27,7 @@
   | **Platform** | PC (Windows) only | A phone version isn't planned |
   | **UI language** | Polish | Built with translations in mind, so English can be added later |
   | **Users** | The whole family, on one computer, with no login | From the designer brief (2026-09-28) |
-  | **No "Ty" (no home person)** | Relationships are always shown relative to the person being viewed. The tree opens on a start person chosen in Settings, or on the last person viewed | From the designer brief (2026-09-28) |
+  | **No "Ty" (no home person)** | Relationships are always shown relative to the person being viewed. The tree opens on the last person viewed, else on a suggested one (the start person setting was removed 2026-10-03) | From the designer brief (2026-09-28) |
   | **Modes** | Browsing by default. Editing is switched on separately and asks "Kto edytuje?" (who is editing); that name goes into the change history | From the designer brief (2026-09-28) |
   | **The researcher's AI** | Free ChatGPT, maybe free Gemini | Small batches, parts of at most 10 persons, results copied from the chat (no downloads) |
   | **Fully offline** | Nothing is downloaded while the app runs: fonts, icons and every other asset ship with the app | Web links (e.g. Wikipedia) open in the browser only when clicked |

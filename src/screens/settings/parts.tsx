@@ -58,7 +58,7 @@ export function failed(e: unknown) {
   useStore.getState().notify((e as ApiError).message, { kind: "err" });
 }
 
-/** Changes the open archive's settings (display choices, start person, editors…). They are not family data, so this
+/** Changes the open archive's settings (display choices, editors…). They are not family data, so this
  *  works in browse mode too. */
 export async function saveSettings(patch: object): Promise<boolean> {
   try {

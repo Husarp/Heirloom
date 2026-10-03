@@ -4,8 +4,10 @@
 
 import { Camera, ChevronsDown, ChevronsUp, ChevronRight, Plus } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import type { TreeCamera } from "../../app/store";
 import { Avatar, CardYears } from "../../components/bits";
 import { cardName, cardYears } from "../../lib/format";
+import { cameraOf, viewOf, type Camera2D } from "./camera";
 import type { Graph, GraphPerson } from "./graph";
 import { CARD_H, CARD_W, type Scene, type SceneCard } from "./layout";
 
@@ -21,19 +23,18 @@ export function nextLod(current: Lod, zoom: number): Lod {
   return lod;
 }
 
-export interface Camera2D {
-  x: number;
-  y: number;
-  zoom: number;
-}
-
 export interface FocusCanvasHandle {
   fit: () => void;
   centerOn: (id: string, animate?: boolean) => void;
   zoomBy: (factor: number) => void;
   /** Moves the camera only when the card is (partly) off screen: keyboard steps keep the chosen card in view. */
   reveal: (id: string) => void;
+  /** Where the camera is, relative to the centre person's card (for Back and „Ostatnie miejsce”). */
+  getView: () => TreeCamera | null;
 }
+
+const MIN_ZOOM = 0.06;
+const MAX_ZOOM = 2;
 
 export interface CardStyle {
   color: (p: GraphPerson) => number | null;
@@ -63,8 +64,14 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
   photos: boolean;
   /** Where the person starts on screen: the middle (Rodzina), the left (Przodkowie) or the top (Potomkowie). */
   anchor: "center" | "left" | "top";
+  /** A camera to come back to (Back, „Ostatnie miejsce”), used instead of the usual placement once the centre
+   *  person's card is laid out; `onRestored` then says it was used. */
+  restore?: TreeCamera | null;
+  onRestored?: () => void;
+  /** The camera moved (to remember the place). */
+  onCamera?: () => void;
 }>(function FocusCanvas(props, ref) {
-  const { scene, graph, selected, style, hidden, animate, onSelect, onOpen, onHover, onPill, onBox, onZoom, focusId, photos, anchor } = props;
+  const { scene, graph, selected, style, hidden, animate, onSelect, onOpen, onHover, onPill, onBox, onZoom, focusId, photos, anchor, restore, onRestored, onCamera } = props;
   const host = useRef<HTMLDivElement>(null);
   const [camera, setCamera] = useState<Camera2D>({ x: 0, y: 0, zoom: 1 });
   const [lod, setLod] = useState<Lod>(1);
@@ -111,7 +118,7 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
       const { w, h } = size();
       const px = mx ?? w / 2;
       const py = my ?? h / 2;
-      const zoom = Math.min(2, Math.max(0.06, c.zoom * factor));
+      const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, c.zoom * factor));
       apply({ zoom, x: px - ((px - c.x) / c.zoom) * zoom, y: py - ((py - c.y) / c.zoom) * zoom }, mx == null);
     },
     [apply],
@@ -132,7 +139,21 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
     [scene, centerOn],
   );
 
-  useImperativeHandle(ref, () => ({ fit, centerOn, zoomBy: (f) => zoomAt(f), reveal }), [fit, centerOn, zoomAt, reveal]);
+  const focusCentre = useCallback(() => {
+    const card = scene.cards.find((c) => c.id === focusId);
+    return card ? { x: card.x + CARD_W / 2, y: card.y + CARD_H / 2 } : null;
+  }, [scene, focusId]);
+
+  const getView = useCallback(() => {
+    const centre = focusCentre();
+    return centre ? viewOf(cameraRef.current, size(), centre) : null;
+  }, [focusCentre]);
+
+  useImperativeHandle(ref, () => ({ fit, centerOn, zoomBy: (f) => zoomAt(f), reveal, getView }), [fit, centerOn, zoomAt, reveal, getView]);
+
+  const cameraMoved = useRef(onCamera);
+  cameraMoved.current = onCamera;
+  useEffect(() => cameraMoved.current?.(), [camera]);
 
   // A new scene: another person in the middle moves the camera to them with animation; the same person in a new
   // layout (fresh data, siblings unfolded) moves the camera with their card, so they stay put on screen.
@@ -155,7 +176,10 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
     const spot = lastSpot.current;
     // Przodkowie: the generation labels above the tree stay below the two toolbar rows (spec §3.10: y 100).
     const belowToolbars = (y: number, zoom: number) => (anchor === "left" ? Math.max(y, 118 - scene.bounds.minY * zoom) : y);
-    if (lastFocus.current === null) {
+    if (restore && w > 0 && h > 0) {
+      apply(cameraOf(restore, { w, h }, { x: card.x + CARD_W / 2, y: card.y + CARD_H / 2 }, MIN_ZOOM, MAX_ZOOM));
+      onRestored?.();
+    } else if (lastFocus.current === null) {
       const x = anchor === "left" ? 80 - card.x : w / 2 - (card.x + CARD_W / 2);
       const y = anchor === "top" ? 150 - card.y : h / 2 - (card.y + CARD_H / 2) + (anchor === "center" && scene.bounds.minY < -100 ? 40 : 0);
       apply({ zoom: 1, x, y: belowToolbars(y, 1) });
@@ -171,7 +195,7 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
     lastFocus.current = focusId;
     lastSpot.current = { x: card.x, y: card.y };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusId, scene, hasSize]);
+  }, [focusId, scene, hasSize, restore]);
 
   useEffect(() => {
     const el = host.current;
