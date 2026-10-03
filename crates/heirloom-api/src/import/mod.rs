@@ -72,6 +72,8 @@ pub struct Draft {
     pub pasted: Vec<String>,
     pub answer_paths: Vec<PathBuf>,
     pub skipped: Vec<check::SkippedInput>,
+    /// Dropped paths that are gone: shown in step 1 so they can be taken off the list.
+    pub missing: Vec<PathBuf>,
     pub exclude: Vec<PathBuf>,
 }
 
@@ -275,15 +277,13 @@ fn load(s: &mut Session, texts: &[String], paths: &[PathBuf], exclude: &[PathBuf
     let answer_paths: Vec<PathBuf> = inputs.answers.iter().filter_map(|a| a.path.clone()).collect();
     let (blocks, files, raw) = (inputs.blocks, inputs.files, inputs.raw);
     let parsed = check::parse_blocks(&blocks);
-    // What each answer held: its part and counts, or why it can't be read (the issue naming it).
-    let answer_inputs: Vec<Value> = inputs
+    // What each answer held: its part and counts (why it can't be read is added after the check below).
+    let mut answer_inputs: Vec<Value> = inputs
         .answers
         .iter()
         .map(|a| {
             let mine: Vec<&check::Block> = blocks.iter().filter(|b| b.origin == a.origin).collect();
-            let parts: Vec<&format::Part> = parsed.parts.iter().filter(|(_, text)| mine.iter().any(|b| b.text == *text)).map(|(p, _)| p).collect();
-            // An issue names its part and origin: „Część 2 · odpowiedz.txt”.
-            let problem = parsed.issues.iter().find(|i| i.level == "error" && i.reference.ends_with(&format!(" · {}", a.origin))).map(|i| i.message.clone());
+            let parts: Vec<&format::Part> = parsed.parts.iter().filter(|(_, text, _)| mine.iter().any(|b| b.text == *text)).map(|(p, _, _)| p).collect();
             let name = match a.origin.strip_prefix("wklejony tekst") {
                 Some(rest) if a.path.is_none() => format!("Wklejony tekst{rest}"),
                 _ => a.origin.clone(),
@@ -298,12 +298,19 @@ fn load(s: &mut Session, texts: &[String], paths: &[PathBuf], exclude: &[PathBuf
                 "events": parts.iter().map(|p| p.events.len()).sum::<usize>(),
                 "questions": parts.iter().map(|p| p.questions.len()).sum::<usize>(),
                 "found": !mine.is_empty(),
-                "problem": problem,
+                "problem": null,
             })
         })
         .collect();
     let skipped = inputs.skipped;
     let (batch, mut issues) = check::check(parsed, &files);
+    // An issue names its part and origin („Część 2 · odpowiedz.txt”): the first error is shown at its answer, whether
+    // the part can't be read or isn't an answer for Heirloom at all.
+    for (a, row) in inputs.answers.iter().zip(answer_inputs.iter_mut()) {
+        if let Some(i) = issues.iter().find(|i| i.level == "error" && i.reference.ends_with(&format!(" · {}", a.origin))) {
+            row["problem"] = json!(i.message);
+        }
+    }
     if blocks.is_empty() && texts.iter().any(|t| !t.trim().is_empty()) {
         issues.insert(0, Issue {
             level: "error",
@@ -388,6 +395,7 @@ fn load(s: &mut Session, texts: &[String], paths: &[PathBuf], exclude: &[PathBuf
         pasted,
         answer_paths,
         skipped,
+        missing: inputs.missing,
         exclude: exclude.to_vec(),
     }
 }
@@ -478,6 +486,18 @@ fn input_list(draft: &Draft, files: &[Value]) -> Vec<Value> {
             "status": status,
             "detail": detail,
             "file": key,
+        }));
+    }
+    for path in &draft.missing {
+        out.push(json!({
+            "name": path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string()),
+            "kind": check::file_kind(path),
+            "path": path.display().to_string(),
+            "size": null,
+            "m": null,
+            "status": "error",
+            "detail": "Pliku nie ma już w tym miejscu — usuń go z listy albo upuść jeszcze raz.",
+            "file": null,
         }));
     }
     for s in &draft.skipped {

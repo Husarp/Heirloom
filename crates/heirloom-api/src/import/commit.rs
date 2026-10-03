@@ -1008,6 +1008,21 @@ mod tests {
     }
 
     #[test]
+    fn step_one_shows_a_foreign_answer_and_a_file_that_is_gone_at_their_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let (answer, photo) = example(dir.path());
+        let gone = dir.path().join("M003 zniknal.jpg");
+        let mut draft = None;
+        let state = call(&mut s, &mut draft, "import.load", json!({ "texts": [answer.replace("heirloom-import", "inny-format")], "paths": [photo.to_string_lossy(), gone.to_string_lossy()] })).unwrap();
+        let row = |name: &str| state["inputs"].as_array().unwrap().iter().find(|i| i["name"] == name).cloned().unwrap();
+        assert_eq!(row("Wklejony tekst")["status"], "error");
+        assert!(row("Wklejony tekst")["detail"].as_str().unwrap().starts_with("To nie jest odpowiedź w formacie Heirloom"));
+        assert_eq!(row("M003 zniknal.jpg")["status"], "error");
+        assert!(!state["files"].to_string().contains("zniknal"), "never a file of 0 bytes to copy");
+    }
+
+    #[test]
     fn candidates_still_point_at_the_right_people_after_the_archive_changes() {
         let dir = tempfile::tempdir().unwrap();
         let mut s = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());

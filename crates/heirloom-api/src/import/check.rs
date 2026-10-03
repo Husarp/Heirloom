@@ -167,13 +167,14 @@ fn part_number_hint(text: &str) -> Option<u32> {
 }
 
 pub struct Parsed {
-    pub parts: Vec<(Part, String)>,
+    /// Each part with its text and the origin of its block.
+    pub parts: Vec<(Part, String, String)>,
     pub issues: Vec<Issue>,
 }
 
 /// Reads every block: checks the marker, repairs cosmetic slips, parses.
 pub fn parse_blocks(blocks: &[Block]) -> Parsed {
-    let mut parts: Vec<(Part, String)> = Vec::new();
+    let mut parts: Vec<(Part, String, String)> = Vec::new();
     let mut issues = Vec::new();
     // Parts that came cut off: the error goes once the whole part is pasted too.
     let mut cut: Vec<(usize, u32)> = Vec::new();
@@ -207,15 +208,15 @@ pub fn parse_blocks(blocks: &[Block]) -> Parsed {
             serde_json::from_value::<Part>(v).map_err(|_| "jedna z wartości ma niewłaściwą postać".to_string())
         });
         match parsed {
-            Ok(part) => parts.push((part, block.text.clone())),
+            Ok(part) => parts.push((part, block.text.clone(), block.origin.clone())),
             Err(why) => issues.push(Issue::new("error", format!("Nie mogę odczytać: {} {why}.", label.to_lowercase()), format!("{label} · {}", block.origin))),
         }
     }
-    let complete: HashSet<u32> = parts.iter().filter_map(|(p, _)| p.part).collect();
+    let complete: HashSet<u32> = parts.iter().filter_map(|(p, _, _)| p.part).collect();
     for (at, _) in cut.iter().rev().filter(|(_, n)| complete.contains(n)) {
         issues.remove(*at);
     }
-    parts.sort_by_key(|(p, _)| p.part.unwrap_or(u32::MAX));
+    parts.sort_by_key(|(p, _, _)| p.part.unwrap_or(u32::MAX));
     Parsed { parts, issues }
 }
 
@@ -245,17 +246,29 @@ pub fn check(parsed: Parsed, files: &[InputFile]) -> (Batch, Vec<Issue>) {
     let mut issues = parsed.issues;
     let mut batch = Batch::default();
     let mut names: Vec<String> = Vec::new();
-    for (part, _) in &parsed.parts {
+    // Where each part number came from, for a second part with the same number.
+    let mut origin_of: HashMap<u32, &str> = HashMap::new();
+    for (part, _, origin) in &parsed.parts {
+        // „Część 2 · odpowiedz.txt”, as the parse-level issues name their part.
+        let label = part.part.map_or_else(|| "Część bez numeru".to_string(), |n| format!("Część {n}"));
+        let reference = format!("{label} · {origin}");
         if part.format.as_deref() != Some("heirloom-import") {
-            issues.push(Issue::new("error", "To nie jest plik importu Heirloom.", format!("Część {}", part.part.unwrap_or(0))));
+            issues.push(Issue::new(
+                "error",
+                "To nie jest odpowiedź w formacie Heirloom. Usuń ten plik z listy albo poproś AI o odpowiedź według instrukcji („Kopiuj instrukcję dla AI”).",
+                reference,
+            ));
             continue;
         }
         let major = part.version.as_deref().and_then(|v| v.split('.').next()).unwrap_or("");
         if major != "1" {
             issues.push(Issue::new(
                 "error",
-                format!("Ta wersja formatu ({}) nie jest obsługiwana.", part.version.clone().unwrap_or_else(|| "?".into())),
-                format!("Część {}", part.part.unwrap_or(0)),
+                format!(
+                    "Ta odpowiedź jest w wersji formatu {}, a Heirloom zna wersję 1.x. Skopiuj instrukcję dla AI jeszcze raz i poproś o odpowiedź według niej.",
+                    part.version.clone().unwrap_or_else(|| "?".into())
+                ),
+                reference,
             ));
             continue;
         }
@@ -265,9 +278,16 @@ pub fn check(parsed: Parsed, files: &[InputFile]) -> (Batch, Vec<Issue>) {
             }
         }
         let number = part.part.unwrap_or(0);
-        if batch.parts_seen.contains(&number) {
+        if let Some(first) = origin_of.get(&number) {
+            // The same text came once already (parse_blocks keeps one); this one differs, so the user picks.
+            issues.push(Issue::new(
+                "warning",
+                format!("{label} jest dwa razy, w różnych wersjach — użyto tej z „{first}”, a tę pominięto. Jeśli to poprawiona wersja, usuń z listy tamtą."),
+                reference,
+            ));
             continue;
         }
+        origin_of.insert(number, origin);
         batch.parts_seen.push(number);
         if part.end.as_ref().and_then(|e| e.is_final) == Some(true) {
             batch.total_parts = Some(number);
@@ -415,9 +435,24 @@ pub fn check(parsed: Parsed, files: &[InputFile]) -> (Batch, Vec<Issue>) {
             issues.push(Issue::new("warning", format!("Plik {} jest opisany w paczce, ale nie został dołączony.", m_label(n)), format!("Plik {}{who}", m_label(n))).act("show", Some(m_label(n))));
         }
     }
+    // Files without an M-number: one warning for all of them (200 photos are not 200 warnings).
+    let unnumbered: Vec<&str> = files.iter().filter(|f| f.m.is_none()).map(|f| f.name.as_str()).collect();
+    match unnumbered.as_slice() {
+        [] => {}
+        [one] => issues.push(Issue::new("warning", format!("Plik „{one}” nie ma numeru M — pominąć czy przypisać ręcznie?"), format!("Plik {one}"))),
+        many => {
+            let shown = many.iter().take(3).copied().collect::<Vec<_>>().join(", ");
+            let more = if many.len() > 3 { format!(" i {}", crate::count_pl(many.len() - 3, "inny", "inne", "innych")) } else { String::new() };
+            issues.push(Issue::new(
+                "warning",
+                format!("{} numeru M — pominąć czy przypisać ręcznie?", crate::count_pl(many.len(), "plik nie ma", "pliki nie mają", "plików nie ma")),
+                format!("Pliki {shown}{more}"),
+            ));
+        }
+    }
     for f in files {
         match f.m {
-            None => issues.push(Issue::new("warning", format!("Plik „{}” nie ma numeru M — pominąć czy przypisać ręcznie?", f.name), format!("Plik {}", f.name))),
+            None => {}
             Some(n) if !described.contains(&n) && !m.media.is_empty() => {
                 issues.push(Issue::new("info", format!("Plik {} nie jest opisany w paczce — przypiszesz go w kroku „Zdjęcia i pliki”.", m_label(n)), format!("Plik {}", f.name)))
             }
@@ -504,6 +539,15 @@ pub struct Inputs {
     pub raw: Vec<String>,
     pub answers: Vec<AnswerInput>,
     pub skipped: Vec<SkippedInput>,
+    /// Dropped paths that are gone (moved or deleted since): listed, never read as an empty file.
+    pub missing: Vec<PathBuf>,
+}
+
+/// Files the system leaves in folders (thumbnail caches, folder settings, macOS extras, Office lock files): never part
+/// of a package.
+fn is_system_file(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    matches!(lower.as_str(), "thumbs.db" | "ehthumbs.db" | "desktop.ini" | ".ds_store" | "__macosx") || lower.starts_with("._") || lower.starts_with("~$")
 }
 
 /// Everything dropped at once (design 17d): AI answers (as .json, or text with the marker), photos, PDFs and notes.
@@ -533,6 +577,9 @@ pub fn read_inputs_with(texts: &[String], paths: &[PathBuf], exclude: &[PathBuf]
         if exclude.contains(&path) || !read.insert(path.clone()) {
             continue;
         }
+        if path.file_name().is_some_and(|n| is_system_file(&n.to_string_lossy())) {
+            continue;
+        }
         if path.is_dir() {
             if let Ok(entries) = std::fs::read_dir(&path) {
                 let mut list: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
@@ -544,7 +591,10 @@ pub fn read_inputs_with(texts: &[String], paths: &[PathBuf], exclude: &[PathBuf]
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let lower = name.to_lowercase();
         let m = m_number(&name);
-        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        let Ok(size) = std::fs::metadata(&path).map(|m| m.len()) else {
+            out.missing.push(path);
+            continue;
+        };
         let is_answer_text = |content: &str| content.contains(MARKER) || content.to_lowercase().contains("```json") || content.contains("\"heirloom-import\"");
         if m.is_none() && (lower.ends_with(".json") || lower.ends_with(".txt") || lower.ends_with(".md")) {
             if let Ok(content) = std::fs::read_to_string(&path) {
@@ -696,6 +746,55 @@ mod tests {
         assert!(messages.contains(&"Identyfikator P2 występuje dwa razy."));
         assert!(messages.iter().any(|m| m.starts_with("Brakuje części: osoby P4")));
         assert_eq!(batch.merged.persons.len(), 4);
+    }
+
+    #[test]
+    fn a_wrong_format_or_version_names_its_part_and_file() {
+        let not_ours = example_json().replace("\"heirloom-import\"", "\"cos-innego\"");
+        let newer = example_json().replace("\"version\": \"1.0\"", "\"version\": \"2.0\"");
+        let blocks = [extract_blocks(&not_ours, "inne.json"), extract_blocks(&newer, "nowa.json")].concat();
+        let (_, issues) = check(parse_blocks(&blocks), &[]);
+        let errors: Vec<(&str, &str)> = issues.iter().filter(|i| i.level == "error").map(|i| (i.reference.as_str(), i.message.as_str())).collect();
+        assert!(errors.iter().any(|(r, m)| *r == "Część 1 · inne.json" && m.starts_with("To nie jest odpowiedź w formacie Heirloom.")), "{errors:?}");
+        assert!(errors.iter().any(|(r, m)| *r == "Część 1 · nowa.json" && m.starts_with("Ta odpowiedź jest w wersji formatu 2.0")), "{errors:?}");
+        assert!(!issues.iter().any(|i| i.reference.contains("Część 0")));
+    }
+
+    #[test]
+    fn a_second_part_with_the_same_number_is_reported_not_dropped_silently() {
+        let corrected = example_json().replace("Kowalski", "Kowalsky");
+        let blocks = [extract_blocks(&example_json(), "czesc-1.json"), extract_blocks(&corrected, "czesc-1 poprawiona.json")].concat();
+        let (batch, issues) = check(parse_blocks(&blocks), &[]);
+        assert_eq!(batch.merged.persons.len(), 4, "the first one is used");
+        let warning = issues.iter().find(|i| i.reference == "Część 1 · czesc-1 poprawiona.json").expect("reported");
+        assert_eq!(warning.level, "warning");
+        assert!(warning.message.contains("użyto tej z „czesc-1.json”"), "{}", warning.message);
+    }
+
+    #[test]
+    fn files_without_an_m_number_give_one_warning() {
+        let file = |name: &str| InputFile { path: PathBuf::from(name), name: name.into(), m: None, size: 10 };
+        let files: Vec<InputFile> = (1..=5).map(|n| file(&format!("IMG_{n}.jpg"))).collect();
+        let (_, issues) = check(parse_blocks(&extract_blocks(&example_json(), "x")), &files);
+        let warnings: Vec<&Issue> = issues.iter().filter(|i| i.message.contains("numeru M")).collect();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].message, "5 plików nie ma numeru M — pominąć czy przypisać ręcznie?");
+        assert_eq!(warnings[0].reference, "Pliki IMG_1.jpg, IMG_2.jpg, IMG_3.jpg i 2 inne");
+        let (_, issues) = check(parse_blocks(&extract_blocks(&example_json(), "x")), &files[..1]);
+        assert!(issues.iter().any(|i| i.message == "Plik „IMG_1.jpg” nie ma numeru M — pominąć czy przypisać ręcznie?"));
+    }
+
+    #[test]
+    fn system_files_are_skipped_and_a_path_that_is_gone_is_not_an_empty_file() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["M001 akt.jpg", "Thumbs.db", "desktop.ini", ".DS_Store", "._M001 akt.jpg"] {
+            std::fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        let gone = dir.path().join("M002 slub.jpg");
+        let inputs = read_inputs_with(&[], &[dir.path().to_path_buf(), gone.clone()], &[]);
+        let names: Vec<&str> = inputs.files.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["M001 akt.jpg"]);
+        assert_eq!(inputs.missing, [gone]);
     }
 
     #[test]
