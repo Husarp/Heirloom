@@ -552,6 +552,10 @@
   overflow: hidden;
   background: var(--canvas);
 }
+/* Focused by a click so Esc closes the side panel; the ring is on the selected person, not on the canvas. */
+.overview-host:focus {
+  outline: none;
+}
 .overview-host canvas {
   position: absolute;
   left: 0;

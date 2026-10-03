@@ -270,7 +270,10 @@ This is the roadmap, with a checkbox per task.
       but the side panel is switched off for that view (`Tree.tsx:304`, `view !== "overview"`), so nothing seems to
       happen — and the click only counts when it lands on the small card or dot. Back from the profile — the
       mouse's back button, Alt ←, or the ← button in the top bar — returns to the same view at the same zoom and
-      place (the tree doesn't remember its zoom and position yet)
+      place (the tree doesn't remember its zoom and position yet). The click part done 2026-10-03: Całe drzewo opens the side
+      panel (its relatives move the camera there), rings the selected person (also after „Skocz do osoby…”), finds
+      the nearest person in the grid cell, Esc closes the panel, and only the left button selects in every view;
+      Back to the same place is still open
 - [ ] **Settings: no row that only looks like a setting** (checked 2026-09-29; every other row does change the app).
       Rows you can see but not change now:
   - Drzewo › „Kolejność rodzeństwa”: only the text „Według daty” (manual order needs dragging siblings in the tree,

@@ -258,6 +258,18 @@ export function Tree({ hidden }: { hidden: boolean }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [hidden, view, graph, focus, selected, scene, refocus, go, archive?.startPerson]);
 
+  // Całe drzewo has no keyboard walk; Esc still closes the panel there.
+  useEffect(() => {
+    if (hidden || view !== "overview") return;
+    const onKey = (e: KeyboardEvent) => {
+      const active = document.activeElement as HTMLElement | null;
+      if (e.key !== "Escape" || (active && active !== document.body && !active.classList.contains("overview-host"))) return;
+      setPanelOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hidden, view]);
+
   const setView = (v: View) => go({ name: "tree", view: v, person: focus ?? undefined });
 
   const saveDisplay = (key: string, value: string) => {
@@ -298,7 +310,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
     [overviewData, colorMode, overviewSides],
   );
 
-  const showPanel = panelOpen && selected && view !== "overview";
+  const showPanel = panelOpen && selected;
   const firstLoad = !scene && (loading || !focus) && view !== "overview";
 
   return (
@@ -312,6 +324,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
               dark={dark}
               hidden={hidden}
               focus={focus}
+              selected={selected}
               colorFor={overviewColor}
               onSelect={(id) => {
                 setSelected(id);
@@ -452,7 +465,22 @@ export function Tree({ hidden }: { hidden: boolean }) {
           </div>
         )}
       </div>
-      {showPanel && selected && <SidePanel id={selected} onClose={() => setPanelOpen(false)} onFocus={refocus} />}
+      {showPanel && selected && (
+        <SidePanel
+          id={selected}
+          onClose={() => setPanelOpen(false)}
+          // Całe drzewo: a relative is found on the map (no new centre, which would lay out everyone again).
+          onFocus={
+            view === "overview"
+              ? (id) => {
+                  setSelected(id);
+                  overview.current?.centerOn(id);
+                }
+              : refocus
+          }
+          relativeTitle={view === "overview" ? "Pokaż w drzewie" : undefined}
+        />
+      )}
       <div className="sr-only" aria-live="polite">
         {announce}
       </div>

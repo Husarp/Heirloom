@@ -188,7 +188,8 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
   const onPointerDown = (e: React.PointerEvent) => {
     // The keys (arrows, Enter…) go to the tree after a click in it.
     host.current?.focus({ preventScroll: true });
-    if ((e.target as HTMLElement).closest("button, .tree-card")) return;
+    // Only the left button pans and deselects (the mouse's back button goes back, nothing more).
+    if (e.button !== 0 || (e.target as HTMLElement).closest("button, .tree-card")) return;
     drag.current = { x: e.clientX, y: e.clientY, moved: false };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
