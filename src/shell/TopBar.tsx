@@ -1,5 +1,5 @@
 import { ALargeSmall, ArrowLeft, ArrowRight, BookOpen, ChevronRight, Lock, Pencil, Search, SunMoon } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { call } from "../api/transport";
 import type { AppState } from "../api/types";
 import { useStore, type Route } from "../app/store";
@@ -58,6 +58,7 @@ export function TopBar() {
   const setPalette = useStore((s) => s.setPalette);
   const refreshApp = useStore((s) => s.refreshApp);
   const [sizeOpen, setSizeOpen] = useState(false);
+  const sizeButton = useRef<HTMLButtonElement>(null);
   const [lockHint, setLockHint] = useState(false);
 
   const c = crumbsFor(route, crumb, (archive?.people ?? 0) === 0);
@@ -102,10 +103,10 @@ export function TopBar() {
       </div>
       <div className="topbar-right">
         <div style={{ position: "relative" }}>
-          <button className="icon-btn" title="Rozmiar tekstu" aria-label="Rozmiar tekstu" onClick={() => setSizeOpen((o) => !o)}>
+          <button ref={sizeButton} className="icon-btn" title="Rozmiar tekstu" aria-label="Rozmiar tekstu" aria-expanded={sizeOpen} onClick={() => setSizeOpen((o) => !o)}>
             <ALargeSmall size={17} />
           </button>
-          {sizeOpen && <TextSizePopover onClose={() => setSizeOpen(false)} />}
+          {sizeOpen && <TextSizePopover toggle={sizeButton} onClose={() => setSizeOpen(false)} />}
         </div>
         <button className="icon-btn" title="Motyw: jasny / ciemny / systemowy" aria-label="Motyw" onClick={cycleTheme}>
           <SunMoon size={17} />

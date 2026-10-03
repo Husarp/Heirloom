@@ -121,15 +121,8 @@ function AppearanceSection() {
           ]}
         />
       </SettingRow>
-      <SettingRow label="Kolor akcentu">
-        <Select
-          label="Kolor akcentu"
-          title="Inne kolory będą w kolejnej wersji"
-          value="green"
-          options={[{ value: "green", label: "Zieleń (domyślny)" }]}
-          onChange={() => {}}
-          disabled
-        />
+      <SettingRow label="Kolor akcentu" soon>
+        <Select label="Kolor akcentu" value="green" options={[{ value: "green", label: "Zieleń (domyślny)" }]} onChange={() => {}} />
       </SettingRow>
       <SettingRow label="Wielkość tekstu" note="100–150%, powiększa cały program">
         <TextSize value={appearance.textSize} onChange={(textSize) => set({ textSize })} />
@@ -270,11 +263,19 @@ function TreeSection({ archive }: { archive: ArchiveStatus }) {
           ]}
         />
       </SettingRow>
-      {/* Manual order (dragging siblings in the tree) isn't built yet, so there is nothing to choose. */}
-      <SettingRow label="Kolejność rodzeństwa" note="Ręczne układanie w drzewie — w przygotowaniu">
-        <span style={{ fontSize: 13, color: "var(--text2)" }}>Według daty</span>
+      {/* Manual order (dragging siblings in the tree) isn't built yet: siblings follow their birth dates. */}
+      <SettingRow label="Kolejność rodzeństwa" soon>
+        <Segmented
+          size={28}
+          value="date"
+          onChange={() => {}}
+          options={[
+            { value: "date", label: "Według daty" },
+            { value: "manual", label: "Ręczna" },
+          ]}
+        />
       </SettingRow>
-      <SettingRow label="Kolory gałęzi" note="Każda gałąź ma swój kolor i kształt" last>
+      <SettingRow label="Kolory gałęzi" note="Każda gałąź ma swój kolor i kształt" soon last>
         <span className="swatches">
           {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
             <span key={n} style={{ background: `var(--b${n})`, borderRadius: n % 3 === 0 ? "50%" : 3 }} />

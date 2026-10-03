@@ -276,7 +276,8 @@ This is the roadmap, with a checkbox per task.
       panel (its relatives move the camera there), rings the selected person (also after „Skocz do osoby…”), finds
       the nearest person in the grid cell, Esc closes the panel, and only the left button selects in every view;
       Back to the same place is still open
-- [ ] **Settings: no row that only looks like a setting** (checked 2026-09-29; every other row does change the app).
+- [x] **Settings: no row that only looks like a setting** (checked 2026-09-29; every other row does change the app;
+      the shared „wkrótce” look done 2026-10-03: greyed row, a „wkrótce” badge, the control visible but inert).
       Rows you can see but not change now:
   - Drzewo › „Kolejność rodzeństwa”: only the text „Według daty” (manual order needs dragging siblings in the tree,
     see „Tree” under „Found while building”);
@@ -292,8 +293,10 @@ This is the roadmap, with a checkbox per task.
       list…), remembered per archive, also after closing the program. No chosen start person: „Osoba startowa”
       (Ustawienia › Drzewo) goes, and so does the first-open question „Od kogo zacząć drzewo?” that sets it; the
       tree centres on the last viewed person, or on a suggested one when nobody was viewed yet
-- [ ] **Top bar › „Rozmiar tekstu”: „150%” sticks out of the box** (your screenshot, 2026-09-29): the popover is a
-      fixed 230 px wide (`TextSizePopover.tsx:28`) and the four buttons need more; let it grow to fit them
+- [x] **Top bar › „Rozmiar tekstu”: „150%” sticks out of the box** (your screenshot, 2026-09-29; done 2026-10-03): the popover is a
+      fixed 230 px wide (`TextSizePopover.tsx:28`) and the four buttons need more; let it grow to fit them. Done: it
+      grows to fit, a second click on the icon closes it, a failure shows a toast, and a size the buttons don't
+      offer (105, 115…) shows as „Teraz: 115%”
 - [ ] **Import › „Upuść wszystko naraz”: a click anywhere on the box opens the file picker** (now only the small
       „albo wybierz pliki” / „lub folder…” links do). One Windows dialog can't pick files and folders at once, so:
       the box opens the file picker (several files at once), and the „lub folder…” link stays for a whole folder
