@@ -129,12 +129,11 @@ fn disk_name(root: &Path) -> Option<String> {
     }
 }
 
-/// When the newest copy in `.heirloom/kopie` was made (RFC 3339), for "Ostatnia: dziś 11:04".
-pub(crate) fn last_backup(dir: &Path) -> Option<String> {
-    let newest = fs::read_dir(dir)
-        .ok()?
-        .flatten()
-        .filter_map(|e| e.metadata().ok())
+/// When the newest copy of the data file in `.heirloom/kopie` was made (RFC 3339), for "Ostatnia: dziś 11:04".
+pub(crate) fn last_backup(copies: &[PathBuf]) -> Option<String> {
+    let newest = copies
+        .iter()
+        .filter_map(|p| fs::metadata(p).ok())
         .filter(|m| m.is_file())
         // A copy keeps the data file's modification time; its creation time is when the copy was made.
         .filter_map(|m| m.created().ok().max(m.modified().ok()))
@@ -1021,6 +1020,10 @@ mod tests {
         assert_eq!((status["backupBeforeSave"].as_bool(), status["gedcomVersion"].as_str()), (Some(true), Some("7.0")));
         assert!(status["lastBackup"].is_null());
         assert_eq!(status["dataBytes"], fs::metadata(root.join("rodzina.ged")).unwrap().len());
+        // A file put into kopie/ by hand is not a copy of the data file.
+        fs::create_dir_all(root.join(".heirloom").join("kopie")).unwrap();
+        fs::write(root.join(".heirloom").join("kopie").join("notatka.txt"), "x").unwrap();
+        assert!(api.call("archive.status", Value::Null).unwrap()["lastBackup"].is_null());
         add_and_save(&mut api, "@I9001@", "Ewa");
         let status = api.call("archive.status", Value::Null).unwrap();
         assert!(status["lastBackup"].as_str().is_some_and(|t| t.starts_with("20")), "{}", status["lastBackup"]);

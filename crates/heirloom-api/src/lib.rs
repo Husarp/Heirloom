@@ -561,7 +561,7 @@ fn status_of(s: &Session) -> Value {
         "lastSaved": s.last_saved,
         "backupsToKeep": settings.backups_to_keep,
         "backupBeforeSave": settings.backup_before_save,
-        "lastBackup": tools::last_backup(&archive.backup_dir()),
+        "lastBackup": tools::last_backup(&archive.backups()),
         "dataBytes": std::fs::metadata(archive.data_path()).ok().map(|m| m.len()),
         "gedcomVersion": archive.doc.head().and_then(|h| h.child("GEDC")).and_then(|g| g.child_value("VERS")).map(str::trim),
         "sidecar": archive.sidecar_path().display().to_string(),

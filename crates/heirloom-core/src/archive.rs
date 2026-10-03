@@ -263,6 +263,13 @@ impl Archive {
         self.sidecar.join(BACKUP_DIR)
     }
 
+    /// This data file's own copies in `.heirloom/kopie` (not copies of another data file, nor files put there by hand).
+    pub fn backups(&self) -> Vec<PathBuf> {
+        let stem = self.data_stem();
+        let Ok(list) = fs::read_dir(self.backup_dir()) else { return Vec::new() };
+        list.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| is_backup_of(n, &stem))).collect()
+    }
+
     pub fn settings(&self) -> &Settings {
         &self.settings
     }
@@ -595,11 +602,10 @@ impl Archive {
         fs::copy(&data, &target)?;
         // Only this data file's own copies, never the one just made: copies of another data file
         // ("rodzina-stara-…" also starts with "rodzina-") and files put here by hand are not ours to delete.
-        let mut copies: Vec<PathBuf> = fs::read_dir(&dir)?
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| *p != target && p.file_name().and_then(|n| n.to_str()).is_some_and(|n| is_backup_of(n, &stem)))
-            .collect();
-        copies.sort();
+        let mut copies: Vec<PathBuf> = self.backups().into_iter().filter(|p| *p != target).collect();
+        // Oldest first by the file's time, not its name: names in local time repeat an hour when the clocks go back,
+        // and older copies were named in UTC.
+        copies.sort_by_cached_key(|p| (fs::metadata(p).and_then(|m| m.modified()).ok(), p.clone()));
         let keep = self.settings.backups_to_keep.max(1) - 1;
         if copies.len() > keep {
             for old in &copies[..copies.len() - keep] {
@@ -680,10 +686,12 @@ fn folder_name(root: &Path) -> String {
     root.file_name().map_or_else(|| "Archiwum".into(), |n| n.to_string_lossy().into_owned())
 }
 
-/// "20260928-164005-123" (UTC): sorts in time order, safe in file names.
+/// "20260928-164005-123" in local time (UTC when the offset can't be read), safe in file names.
 fn compact_timestamp() -> String {
     let format = time::macros::format_description!("[year][month][day]-[hour][minute][second]-[subsecond digits:3]");
-    time::OffsetDateTime::now_utc().format(&format).unwrap_or_default()
+    let now = time::OffsetDateTime::now_utc();
+    let local = time::UtcOffset::local_offset_at(now).map_or(now, |offset| now.to_offset(offset));
+    local.format(&format).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -926,6 +934,27 @@ mod tests {
             .filter(|n| is_backup_of(n, "rodzina"))
             .collect();
         assert_eq!(own.len(), 2, "{own:?}");
+    }
+
+    #[test]
+    fn the_oldest_copies_go_first_by_their_time_not_their_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut archive = Archive::create(dir.path(), "Test").unwrap();
+        archive.settings_mut().backups_to_keep = 2;
+        let kopie = archive.backup_dir();
+        fs::create_dir_all(&kopie).unwrap();
+        // Named in UTC once, or in the repeated hour when the clocks went back: the names don't sort by time.
+        let day = std::time::Duration::from_secs(86_400);
+        let now = std::time::SystemTime::now();
+        for (name, age) in [("rodzina-20261025-023000-000.ged", 3), ("rodzina-20261025-021500-000.ged", 2)] {
+            let file = fs::File::create(kopie.join(name)).unwrap();
+            file.set_modified(now - day * age).unwrap();
+        }
+        archive.apply(Edit::Add(person("@I1@", "Jan /Nowak/"))).unwrap();
+        archive.save(&options()).unwrap();
+        assert!(!kopie.join("rodzina-20261025-023000-000.ged").exists(), "the older copy goes");
+        assert!(kopie.join("rodzina-20261025-021500-000.ged").exists(), "the newer copy stays");
+        assert_eq!(archive.backups().len(), 2);
     }
 
     #[cfg(windows)]
