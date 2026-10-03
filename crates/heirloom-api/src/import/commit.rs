@@ -6,12 +6,14 @@ use super::format;
 use super::{Decision, Draft, Kind};
 use crate::edit::{Changes, add_child_to_family, link};
 use crate::gedwrite::{file_uri, has_pointer, media_type, name_value, new_uid, stamp, text_node};
-use crate::media_edit::copy_into_archive;
+use crate::media_edit::copy_new_into_archive;
 use crate::{ApiError, Session};
+use heirloom_core::archive::MEDIA_DIR;
 use heirloom_core::gedcom::Node;
 use heirloom_core::SaveOptions;
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 fn batch_mark(node: &mut Node, batch: &str) {
     node.children.push(Node::with_value("_HLM_BATCH", batch));
@@ -111,6 +113,14 @@ pub fn commit(s: &mut Session, draft: &mut Draft, author: &str, note: Option<&st
     if draft.decisions.values().any(|d| d.kind == Kind::Undecided && !d.excluded) {
         return Err(ApiError::new("import_undecided", "Niektóre osoby czekają na decyzję w kroku „Dopasuj osoby”."));
     }
+    // Step 3 refuses joining two relatives with one archive person; a choice changed later (a relative ticked again)
+    // is caught here, before anything is copied.
+    for p in &draft.batch.merged.persons {
+        let Some(decision) = draft.decisions.get(&p.id).filter(|d| is_included(Some(d)) && d.kind == Kind::Merge) else { continue };
+        if let Some(why) = decision.target.as_deref().and_then(|t| super::same_target_conflict(draft, &p.id, t)) {
+            return Err(ApiError::new("same_target", why));
+        }
+    }
     if s.archive.settings().read_only {
         return Err(ApiError::new("read_only", "To archiwum jest tylko do odczytu (Ustawienia › Archiwum)."));
     }
@@ -129,7 +139,33 @@ pub fn commit(s: &mut Session, draft: &mut Draft, author: &str, note: Option<&st
     let history = s.history();
     let taken = |name: &str| history.iter().any(|e| e.batch.as_deref() == Some(name));
     let name = (1..).map(|k| if k == 1 { draft.batch.name.clone() } else { format!("{} ({k})", draft.batch.name) }).find(|n| !taken(n)).unwrap_or_default();
-    // Copy the files first (outside the data file); a failure here changes nothing in the data.
+    // The files are copied first, so the saved data points at their final places. If anything fails after that, the
+    // copies this import made are removed again: a failed import leaves nothing behind in media/.
+    let media_existed = root.join(MEDIA_DIR).is_dir();
+    let mut created: Vec<PathBuf> = Vec::new();
+    let result = copy_files(&root, draft, &mut created).and_then(|copied| write(s, draft, &name, &copied, author, note, allow_foreign));
+    if result.is_err() {
+        // A file that can't be removed now (held by an antivirus) stays; the import already failed with its own message.
+        for path in &created {
+            let _ = std::fs::remove_file(path);
+        }
+        if !media_existed {
+            let _ = std::fs::remove_dir(root.join(MEDIA_DIR));
+        }
+        return result;
+    }
+    // The researcher's AI answers, kept as delivered (PLAN §11.2: zrodla-ai/), once the import is saved.
+    let folder = root.join("zrodla-ai").join(sanitize(&name));
+    if std::fs::create_dir_all(&folder).is_ok() {
+        for (n, text) in draft.raw.iter().enumerate() {
+            keep_answer(&folder, n + 1, text);
+        }
+    }
+    result
+}
+
+/// Copies the files the import saves into `media/` (M-label or name → path in the archive), noting each file created.
+fn copy_files(root: &Path, draft: &Draft, created: &mut Vec<PathBuf>) -> Result<HashMap<String, String>, ApiError> {
     let batch = &draft.batch.merged;
     let mut copied: HashMap<String, String> = HashMap::new();
     for f in &draft.files {
@@ -140,21 +176,21 @@ pub fn commit(s: &mut Session, draft: &mut Draft, author: &str, note: Option<&st
         if choice.is_some_and(|c| c.skip) || draft.duplicates.contains_key(&key) || (!described && !assigned) {
             continue;
         }
-        copied.insert(key, copy_into_archive(&root, &f.path)?);
+        let (relative, new) = copy_new_into_archive(root, &f.path)?;
+        created.extend(new);
+        copied.insert(key, relative);
     }
-    // The researcher's AI answers, kept as delivered (PLAN §11.2: zrodla-ai/).
-    let folder = root.join("zrodla-ai").join(sanitize(&name));
-    if std::fs::create_dir_all(&folder).is_ok() {
-        for (n, text) in draft.raw.iter().enumerate() {
-            keep_answer(&folder, n + 1, text);
-        }
-    }
+    Ok(copied)
+}
 
+/// Builds every change of the import and saves it as one batch named `name`.
+fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, String>, author: &str, note: Option<&str>, allow_foreign: bool) -> Result<Value, ApiError> {
+    let batch = &draft.batch.merged;
     s.ensure();
     let derived = s.derived.as_ref().expect("ensured");
     let doc = &s.archive.doc;
     let mut changes = Changes::new(doc);
-    let mut ctx = Context { draft, name: name.clone(), people: HashMap::new(), uids: HashMap::new(), sources: HashMap::new(), media: HashMap::new() };
+    let mut ctx = Context { draft, name: name.to_string(), people: HashMap::new(), uids: HashMap::new(), sources: HashMap::new(), media: HashMap::new() };
     let mut new_people = 0;
     let mut merged_people = 0;
 
@@ -243,7 +279,7 @@ pub fn commit(s: &mut Session, draft: &mut Draft, author: &str, note: Option<&st
 
     // 2. Media records for the files (or the records already in the archive).
     let mut profile_links: Vec<(String, String)> = Vec::new();
-    for (key, relative) in &copied {
+    for (key, relative) in copied {
         let described = batch.media.iter().find(|m| m_number(&m.id).map(m_label).as_deref() == Some(key.as_str()));
         let choice = ctx.draft.file_choices.get(key).cloned().unwrap_or_default();
         let kind = choice.kind.clone().or_else(|| described.and_then(|m| m.kind.clone()));
@@ -744,7 +780,7 @@ pub fn commit(s: &mut Session, draft: &mut Draft, author: &str, note: Option<&st
     let applied = !edits.is_empty();
     s.archive.apply_all(edits)?;
     s.changed();
-    let report = match s.archive.save(&SaveOptions { author, batch: Some(&name), note, allow_foreign }) {
+    let report = match s.archive.save(&SaveOptions { author, batch: Some(name), note, allow_foreign }) {
         Ok(report) => report,
         Err(e) => {
             // Not written: the import must not stay in memory, or committing again would add it a second time.
@@ -921,6 +957,27 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_import_removes_the_files_it_copied_and_keeps_no_answers() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("a");
+        let mut s = Session::new(Archive::create(&root, "A").unwrap());
+        // A file of the same name already in media/ (not in the data): the import's copy gets „ (2)”.
+        std::fs::create_dir_all(root.join("media")).unwrap();
+        std::fs::write(root.join("media").join("M002 slub.jpg"), b"inne zdjecie").unwrap();
+        let (answer, photo) = example(dir.path());
+        // A partner of herself can't be written, so the import fails after the photo was copied.
+        let answer = answer.replace("\"a\": \"P1\", \"b\": \"P4\"", "\"a\": \"P4\", \"b\": \"P4\"");
+        let mut draft = None;
+        load(&mut s, &mut draft, &answer, &photo);
+        let error = call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap_err();
+        assert_eq!(error.message, "Osoba nie może być swoim własnym krewnym.");
+        let left: Vec<String> = std::fs::read_dir(root.join("media")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(left, ["M002 slub.jpg"], "only the file that was there before");
+        assert!(!root.join("zrodla-ai").exists(), "answers are kept only for a saved import");
+        assert!(draft.is_some() && s.archive.history_path().metadata().is_err());
+    }
+
+    #[test]
     fn the_answers_of_an_earlier_import_with_the_same_name_are_kept() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("a");
@@ -1020,6 +1077,47 @@ mod tests {
         assert!(row("Wklejony tekst")["detail"].as_str().unwrap().starts_with("To nie jest odpowiedź w formacie Heirloom"));
         assert_eq!(row("M003 zniknal.jpg")["status"], "error");
         assert!(!state["files"].to_string().contains("zniknal"), "never a file of 0 bytes to copy");
+    }
+
+    #[test]
+    fn two_relatives_joined_with_one_archive_person_are_refused_in_step_three() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("a");
+        let mut s = Session::new(Archive::create(&root, "A").unwrap());
+        let mut person = |given: &str| crate::edit::call(&mut s, "person.create", &json!({ "given": given, "surname": "Kowalski" })).unwrap()["id"].as_str().unwrap().to_string();
+        let (x, y) = (person("Józef"), person("Jan"));
+        let (answer, photo) = example(dir.path());
+        let mut draft = None;
+        load(&mut s, &mut draft, &answer, &photo);
+        let decide = |s: &mut Session, draft: &mut Option<Draft>, pid: &str, target: &str| call(s, draft, "import.decide", json!({ "person": pid, "kind": "merge", "target": target }));
+        decide(&mut s, &mut draft, "P1", &x).unwrap();
+        // Antoni (P2) is Józef's father in the batch.
+        let error = decide(&mut s, &mut draft, "P2", &x).unwrap_err();
+        assert_eq!(error.code, "same_target");
+        assert_eq!(
+            error.message,
+            "Ta osoba z archiwum jest już połączona z: Józef Kowalski (P1), a w paczce to syn osoby Antoni Kowalski. Jedna osoba nie może być swoim własnym krewnym — wybierz kogoś innego albo „Nowa”."
+        );
+        assert_ne!(draft.as_ref().unwrap().decisions["P2"].kind, Kind::Merge, "the choice is not taken");
+        // Left out in the summary it can be chosen, but ticking it again is refused.
+        call(&mut s, &mut draft, "import.include", json!({ "person": "P2", "include": false })).unwrap();
+        decide(&mut s, &mut draft, "P2", &x).unwrap();
+        assert_eq!(call(&mut s, &mut draft, "import.include", json!({ "person": "P2", "include": true })).unwrap_err().code, "same_target");
+        // Unrelated in the batch (Józef's wife and his father): allowed, and both are marked.
+        decide(&mut s, &mut draft, "P2", &y).unwrap();
+        call(&mut s, &mut draft, "import.include", json!({ "person": "P2", "include": true })).unwrap();
+        let state = decide(&mut s, &mut draft, "P4", &y).unwrap();
+        let marked = |id: &str| state["persons"].as_array().unwrap().iter().find(|p| p["id"] == id).unwrap()["sameTarget"].clone();
+        assert_eq!(marked("P2"), json!([{ "id": "P4", "name": "Marianna Kowalska" }]));
+        assert_eq!(marked("P1"), json!([]));
+        // A father set to „Pomiń” is not linked, so he may be the same person; set back, the commit refuses before
+        // anything is copied.
+        call(&mut s, &mut draft, "import.decide", json!({ "person": "P4", "kind": "new" })).unwrap();
+        call(&mut s, &mut draft, "import.field", json!({ "person": "P1", "field": "father", "choice": "skip" })).unwrap();
+        decide(&mut s, &mut draft, "P2", &x).unwrap();
+        call(&mut s, &mut draft, "import.field", json!({ "person": "P1", "field": "father", "choice": "add" })).unwrap();
+        assert_eq!(call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap_err().code, "same_target");
+        assert!(std::fs::read_dir(root.join("media")).map_or(true, |mut d| d.next().is_none()), "nothing copied");
     }
 
     #[test]

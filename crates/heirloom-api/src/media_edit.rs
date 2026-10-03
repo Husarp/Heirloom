@@ -69,9 +69,15 @@ pub fn object_node(xref: &str, relative: &str, kind: Option<&str>, title: Option
 /// Copies a file into `media/`, keeping its name ("Józef 1904.jpg", or "Józef 1904 (2).jpg" when taken). Returns
 /// the path relative to the archive folder. A file already inside the archive folder is not copied.
 pub fn copy_into_archive(root: &Path, source: &Path) -> Result<String, ApiError> {
+    copy_new_into_archive(root, source).map(|(relative, _)| relative)
+}
+
+/// [`copy_into_archive`], also giving the file it created (None when the file was already inside the archive folder),
+/// so a failed import can remove exactly what it added.
+pub fn copy_new_into_archive(root: &Path, source: &Path) -> Result<(String, Option<PathBuf>), ApiError> {
     if let (Ok(source_abs), Ok(root_abs)) = (source.canonicalize(), root.canonicalize()) {
         if let Ok(relative) = source_abs.strip_prefix(&root_abs) {
-            return Ok(relative.to_string_lossy().replace('\\', "/"));
+            return Ok((relative.to_string_lossy().replace('\\', "/"), None));
         }
     }
     let name = source.file_name().map(|n| n.to_string_lossy().into_owned()).ok_or_else(|| ApiError::bad_args("path"))?;
@@ -87,8 +93,12 @@ pub fn copy_into_archive(root: &Path, source: &Path) -> Result<String, ApiError>
         target = dir.join(format!("{stem} ({n}){ext}"));
         n += 1;
     }
-    std::fs::copy(source, &target).map_err(|e| ApiError::new("io", format!("Nie można skopiować pliku {name}: {e}")))?;
-    Ok(format!("{MEDIA_DIR}/{}", target.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or(name)))
+    std::fs::copy(source, &target).map_err(|e| {
+        // A half-written copy is ours (the name was free): it goes.
+        let _ = std::fs::remove_file(&target);
+        ApiError::new("io", format!("Nie można skopiować pliku {name}: {e}"))
+    })?;
+    Ok((format!("{MEDIA_DIR}/{}", target.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or(name)), Some(target)))
 }
 
 /// A media object already in the archive with exactly this file's contents.
