@@ -6,6 +6,7 @@ import { Application, BitmapFont, BitmapText, Container, Graphics, Sprite, type 
 import { Minus, Plus, LocateFixed } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { cardYears, count, roman } from "../../lib/format";
+import { placeLabels } from "./labels";
 
 export interface OverviewData {
   /** [id, x, y, branch, given, surname, birth year, death year, birth uncertain, death uncertain, living, generation,
@@ -36,25 +37,26 @@ const LEFT_COLUMN = 96;
 
 type Cluster = OverviewData["clusters"][number];
 
-/** The surname labels that fit on screen without covering each other, bigger families first. Widths are estimated
- *  from the text (serif 14 px name, 12 px count, dot, padding); a label sits above its cluster, centred on the part
- *  of the cluster that is on screen. */
-function labelsThatFit(clusters: Cluster[], at: (c: Cluster) => { left: number; right: number; y: number }, screenWidth: number) {
-  const placed: { left: number; right: number; top: number; bottom: number }[] = [];
-  const shown: { c: Cluster; x: number; y: number }[] = [];
-  for (const c of [...clusters].filter((c) => c.fromGen).sort((a, b) => b.count - a.count)) {
-    const { left, right, y } = at(c);
-    const half = (c.label.length * 8 + `${c.count} os.`.length * 6.6 + 40) / 2;
-    const from = Math.max(left, LEFT_COLUMN);
-    const to = Math.min(right, screenWidth);
-    if (to - from < 24) continue;
-    const x = Math.min(Math.max((from + to) / 2, LEFT_COLUMN + half + 4), screenWidth - half - 4);
-    const box = { left: x - half - 4, right: x + half + 4, top: y - 30, bottom: y };
-    if (placed.some((p) => box.left < p.right && box.right > p.left && box.top < p.bottom && box.bottom > p.top)) continue;
-    placed.push(box);
-    shown.push({ c, x, y });
+/** A surname label's width on screen: the dot, the name (serif 14 px), the count (12 px), gaps, padding and border
+ *  of `.cluster-label`. Measured once the fonts are in. */
+const labelWidths = new Map<string, number>();
+let measureContext: CanvasRenderingContext2D | null = null;
+function labelWidth(c: Cluster): number {
+  const key = `${c.label}|${c.count}`;
+  const known = labelWidths.get(key);
+  if (known != null) return known;
+  measureContext ??= document.createElement("canvas").getContext("2d");
+  const css = getComputedStyle(document.documentElement);
+  let width = c.label.length * 8 + `${c.count} os.`.length * 6.6;
+  if (measureContext) {
+    measureContext.font = `600 14px ${css.getPropertyValue("--f-serif")}`;
+    width = measureContext.measureText(c.label).width;
+    measureContext.font = `12px ${css.getPropertyValue("--f-sans")}`;
+    width += measureContext.measureText(`${c.count} os.`).width;
   }
-  return shown;
+  width += 8 + 6 + 6 + 18 + 2;
+  if (document.fonts.status === "loaded") labelWidths.set(key, width);
+  return width;
 }
 
 function cssColor(name: string): number {
@@ -99,6 +101,7 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
   callbacks.current = { onSelect, onOpen, onZoom, colorFor };
   const running = useRef(true);
   running.current = !hidden;
+  const labelSpots = useRef(new Map<string, number>());
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
 
@@ -471,6 +474,27 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
 
   const z = overlay.zoom;
   const bandTopScreen = (g: number) => overlay.y + (g - 1) * data.bandHeight * z;
+  // Surname labels over the families on screen; the spots of the last frame keep shown labels in place.
+  const clusterKey = (c: Cluster) => `${c.label}-${c.x}`;
+  const { placed, spots } = placeLabels(
+    data.clusters
+      .filter((c) => c.fromGen)
+      .map((c) => ({
+        key: clusterKey(c),
+        count: c.count,
+        width: labelWidth(c),
+        left: overlay.x + c.x * z,
+        right: overlay.x + (c.x + c.width) * z,
+        top: bandTopScreen(c.fromGen!),
+        bottom: bandTopScreen(c.toGen ?? c.fromGen!) + data.bandHeight * z,
+      })),
+    // Under both toolbar rows.
+    { left: LEFT_COLUMN, top: 92, right: host.current?.clientWidth ?? 2000, bottom: host.current?.clientHeight ?? 1200 },
+    labelSpots.current,
+    z >= 0.4,
+  );
+  labelSpots.current = spots;
+  const byKey = new Map(data.clusters.map((c) => [clusterKey(c), c]));
   return (
     <div className="overview-host" ref={host} tabIndex={-1} style={{ display: hidden ? "none" : undefined }}>
       <div className="band-labels">
@@ -492,24 +516,24 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
           );
         })}
       </div>
-      {labelsThatFit(data.clusters, (c) => ({ left: overlay.x + c.x * z, right: overlay.x + (c.x + c.width) * z, y: Math.max(108, bandTopScreen(c.fromGen!)) }), host.current?.clientWidth ?? 2000)
-        .map(({ c, x, y }) => {
-          return (
-            <button
-              key={`${c.label}-${c.x}`}
-              className="cluster-label"
-              style={{ left: x, top: y }}
-              onClick={() => api.current?.showCluster(c)}
-              title="Przybliż grupę"
-            >
-              <span style={{ width: 8, height: 8, background: `var(--b${c.branch})`, borderRadius: c.branch % 3 === 0 ? "50%" : 2, transform: c.branch % 3 === 2 ? "rotate(45deg) scale(.85)" : undefined }} />
-              <span className="serif" style={{ fontSize: 14, fontWeight: 600 }}>
-                {c.label}
-              </span>
-              <span style={{ fontSize: 12, color: "var(--text3)" }}>{c.count} os.</span>
-            </button>
-          );
-        })}
+      {placed.map(({ key, x, y }) => {
+        const c = byKey.get(key)!;
+        return (
+          <button
+            key={key}
+            className="cluster-label"
+            style={{ left: x, top: y }}
+            onClick={() => api.current?.showCluster(c)}
+            title="Przybliż grupę"
+          >
+            <span style={{ width: 8, height: 8, background: `var(--b${c.branch})`, borderRadius: c.branch % 3 === 0 ? "50%" : 2, transform: c.branch % 3 === 2 ? "rotate(45deg) scale(.85)" : undefined }} />
+            <span className="serif" style={{ fontSize: 14, fontWeight: 600 }}>
+              {c.label}
+            </span>
+            <span style={{ fontSize: 12, color: "var(--text3)" }}>{c.count} os.</span>
+          </button>
+        );
+      })}
       <div className="overview-info">
         <span className="chip-info">
           <span>{count(data.people.length, "osoba", "osoby", "osób")}</span>
