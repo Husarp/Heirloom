@@ -196,7 +196,8 @@ fn export_gedzip(s: &Session, target: &Path) -> ApiResult {
         if path.is_empty() || is_url(&path) {
             return;
         }
-        let source = resolve(root, &path);
+        // A 5.5.1 file may write `zdjecia\Jan.jpg`: the same file on every system.
+        let source = resolve(root, &path.replace('\\', "/"));
         if !source.is_file() {
             if !missing.contains(&path) {
                 missing.push(path);
