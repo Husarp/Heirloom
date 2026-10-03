@@ -210,7 +210,8 @@ export function Tree({ hidden }: { hidden: boolean }) {
   snapshot.current = () => ({
     person: focus ?? undefined,
     sel: selected ?? undefined,
-    cam: (view === "overview" ? overview.current?.getView() : canvas.current?.getView()) ?? restore?.cam,
+    // A camera still waiting to be used counts only for this view and this person.
+    cam: (view === "overview" ? overview.current?.getView() : canvas.current?.getView()) ?? (restore?.view === view && restore.person === focus ? restore.cam : undefined),
   });
   useEffect(() => {
     const take = () => snapshot.current();
@@ -221,7 +222,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
   }, []);
 
   // Keyboard (design 17g, PLAN §4.2): ↑ a parent (↑ again: the other parent), ↓ the first child, ← → siblings and
-  // partners in the row, Enter shows the panel, Shift Enter opens the profile, Home goes to the start person, Esc
+  // partners in the row, Enter shows the panel, Shift Enter opens the profile, Home goes to the suggested person, Esc
   // closes the panel. A person outside the part of the tree on screen becomes its centre.
   const upFrom = useRef<{ child: string; parent: string } | null>(null);
   const [announce, setAnnounce] = useState("");
