@@ -319,10 +319,11 @@ This is the roadmap, with a checkbox per task.
       „Pokaż w drzewie”) take the width; lay it out so the text fits (e.g. the buttons under the text)
 - [ ] **Całe drzewo: lines between parents and children** (2026-09-29), as in Rodzina, Przodkowie and Potomkowie;
       now it shows only the cards in generation bands, plus one line for the selected person's direct line
-- [ ] **Tree toolbar: remove „Żyjący / Zmarli / Wszyscy”** (agreed 2026-09-29): most people in an archive of
+- [x] **Tree toolbar: remove „Żyjący / Zmarli / Wszyscy”** (agreed 2026-09-29; done 2026-10-03): most people in an archive of
       ancestors are dead, so the filter isn't needed; it also never worked in Całe drzewo (it only dims people in the
       three family views). The Osoby list keeps its own filter
-- [ ] **Tree toolbar: the card style out of „Filtry”** (agreed 2026-09-29): „Ze zdjęciem / Bez zdjęcia
+- [x] **Tree toolbar: the card style out of „Filtry”** (agreed 2026-09-29; done 2026-10-03 as the dropdown „Karty: ze
+      zdjęciem / inicjały”, hidden in Całe drzewo; Ustawienia says „Ze zdjęciem / Inicjały”): „Ze zdjęciem / Bez zdjęcia
       (inicjały)” isn't a filter (it looked like „show people with / without a photo”) but how the cards look, so it
       stays, under its own name (e.g. „Karty: ze zdjęciem / inicjały”), and the „Filtry” button, then empty, goes.
       It also stays in Ustawienia › Drzewo › „Styl karty”. (It does nothing in Całe drzewo, whose cards have no

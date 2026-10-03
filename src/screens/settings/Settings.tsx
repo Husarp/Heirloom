@@ -241,7 +241,7 @@ function TreeSection({ archive }: { archive: ArchiveStatus }) {
           onChange={(v) => setDisplay("cardStyle", v)}
           options={[
             { value: "photo", label: "Ze zdjęciem" },
-            { value: "plain", label: "Bez zdjęcia" },
+            { value: "plain", label: "Inicjały" },
           ]}
         />
       </SettingRow>

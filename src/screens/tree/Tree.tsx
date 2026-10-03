@@ -1,11 +1,11 @@
-import { Crosshair, Filter, GitCommitVertical, HeartPulse, LocateFixed, Maximize, Minus, Palette, Plus, RotateCcw } from "lucide-react";
+import { Crosshair, GitCommitVertical, IdCard, LocateFixed, Maximize, Minus, Palette, Plus, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { call } from "../../api/transport";
 import type { ArchiveStatus } from "../../api/types";
 import { useStore } from "../../app/store";
 import { useApi } from "../../app/useApi";
 import { useDark } from "../../app/useAppearance";
-import { Dropdown, Segmented, Spinner, useDismiss } from "../../components/bits";
+import { Dropdown, Segmented, Spinner } from "../../components/bits";
 import { people as peopleCount } from "../../lib/format";
 import { FocusCanvas, type FocusCanvasHandle } from "./FocusCanvas";
 import { parentsOrdered, type Graph, type GraphPerson } from "./graph";
@@ -16,7 +16,6 @@ import "./tree.css";
 
 type View = "family" | "ancestors" | "descendants" | "overview";
 type ColorMode = "branch" | "surname" | "side" | "generation" | "none";
-type Living = "living" | "dead" | "all";
 
 const DEPTH: Record<Exclude<View, "overview">, { up: number; down: number }> = {
   family: { up: 1, down: 1 },
@@ -48,7 +47,6 @@ export function Tree({ hidden }: { hidden: boolean }) {
   const [siblingsOpen, setSiblingsOpen] = useState(false);
   const display = (archive?.display ?? {}) as Record<string, unknown>;
   const [colorMode, setColorMode] = useState<ColorMode>(((display.treeColor as ColorMode) ?? "branch"));
-  const [living, setLiving] = useState<Living>("all");
   const [lineOn, setLineOn] = useState(true);
   const [photos, setPhotos] = useState((display.cardStyle as string) !== "plain");
   // Changed in Ustawienia while the tree stays mounted in the background.
@@ -185,12 +183,10 @@ export function Tree({ hidden }: { hidden: boolean }) {
     (id: string) => {
       const p = graph?.people[id];
       if (!p) return false;
-      if (living === "living" && !p.living) return true;
-      if (living === "dead" && p.living) return true;
       if (lineSet && view === "family" && lineOn && selected !== focus && !lineSet.has(id)) return true;
       return false;
     },
-    [graph, living, lineSet, view, lineOn, selected, focus],
+    [graph, lineSet, view, lineOn, selected, focus],
   );
 
   const refocus = useCallback((id: string) => {
@@ -403,20 +399,23 @@ export function Tree({ hidden }: { hidden: boolean }) {
               Linia bezpośrednia
             </button>
           )}
-          <Segmented
-            variant="neutral"
-            value={living}
-            onChange={setLiving}
-            options={[
-              { value: "living", label: "Żyjący", icon: <HeartPulse size={13} /> },
-              { value: "dead", label: "Zmarli" },
-              { value: "all", label: "Wszyscy" },
-            ]}
-          />
-          <FiltersButton photos={photos} setPhotos={(v) => {
-            setPhotos(v);
-            saveDisplay("cardStyle", v ? "photo" : "plain");
-          }} />
+          {/* Całe drzewo has no photos on its cards yet, so there is nothing to switch there. */}
+          {view !== "overview" && (
+            <Dropdown
+              label="Karty:"
+              icon={<IdCard size={14} color="var(--text2)" />}
+              value={photos ? "photo" : "plain"}
+              onChange={(v) => {
+                setPhotos(v === "photo");
+                saveDisplay("cardStyle", v);
+              }}
+              width={180}
+              options={[
+                { value: "photo", label: "ze zdjęciem" },
+                { value: "plain", label: "inicjały" },
+              ]}
+            />
+          )}
           <span className="grow" />
           {view === "family" && siblingsOpen && (
             <button className="btn ghost sm" onClick={() => setSiblingsOpen(false)}>
@@ -513,30 +512,6 @@ function JumpBox({ onPick }: { onPick: (id: string) => void }) {
         Skocz do osoby…
       </span>
     </button>
-  );
-}
-
-function FiltersButton({ photos, setPhotos }: { photos: boolean; setPhotos: (v: boolean) => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
-  return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <button className="chip" onClick={() => setOpen((o) => !o)}>
-        <Filter size={14} />
-        Filtry
-      </button>
-      {open && (
-        <div className="popover" style={{ top: 36, left: 0, width: 240, padding: "4px 0" }}>
-          <div className="menu-label">Styl karty</div>
-          <button className={`menu-item${photos ? " on" : ""}`} onClick={() => setPhotos(true)}>
-            Ze zdjęciem
-          </button>
-          <button className={`menu-item${!photos ? " on" : ""}`} onClick={() => setPhotos(false)}>
-            Bez zdjęcia (inicjały)
-          </button>
-        </div>
-      )}
-    </div>
   );
 }
 
