@@ -1,15 +1,18 @@
 import { Download, X } from "lucide-react";
+import { useStore } from "../app/store";
 import { applyUpdate, downloadText, useUpdates } from "../app/updates";
 import { openUrl } from "../lib/native";
 
 /** A newer Heirloom on GitHub (APP-STANDARDS.md §2): the version, „Aktualizuj”, and ✕, which hides it until Heirloom
- *  next starts. Shown on Start and on the archive picker. */
+ *  next starts. Shown on Start and on the archive picker, only while „Sprawdzaj aktualizacje” is on (otherwise an
+ *  update found by „Sprawdź teraz” is offered in Ustawienia › O programie). */
 export function UpdateBanner() {
+  const on = useStore((s) => s.app?.updates.check ?? false);
   const status = useUpdates((s) => s.status);
   const closedFor = useUpdates((s) => s.closedFor);
   const failed = useUpdates((s) => s.failed);
   const installing = useUpdates((s) => s.installing);
-  if (!status?.newer || !status.latest || closedFor === status.latest) return null;
+  if (!on || !status?.newer || !status.latest || closedFor === status.latest) return null;
   const progress = downloadText(status);
   const d = status.download;
   return (

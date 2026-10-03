@@ -71,17 +71,12 @@ impl Default for Appearance {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Updates {
-    /// „Sprawdzaj aktualizacje”: ask GitHub for the newest version at start and on coming back to the window.
+    /// „Sprawdzaj aktualizacje”: ask GitHub for the newest version at start and on coming back to the window. Off
+    /// until switched on (the owner's decision): Heirloom stays fully offline unless asked.
     pub check: bool,
-}
-
-impl Default for Updates {
-    fn default() -> Self {
-        Updates { check: true }
-    }
 }
 
 impl AppConfig {
@@ -190,14 +185,16 @@ mod tests {
     }
 
     #[test]
-    fn update_checks_are_on_unless_switched_off() {
+    fn update_checks_are_off_unless_switched_on() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(AppConfig::load(dir.path()).updates.check, "a new computer");
+        assert!(!AppConfig::load(dir.path()).updates.check, "a new computer");
         std::fs::write(dir.path().join(FILE), br#"{"recent": []}"#).unwrap();
-        assert!(AppConfig::load(dir.path()).updates.check, "a file from before 0.4.0");
+        assert!(!AppConfig::load(dir.path()).updates.check, "a file from before 0.4.0");
+        std::fs::write(dir.path().join(FILE), br#"{"updates": {}}"#).unwrap();
+        assert!(!AppConfig::load(dir.path()).updates.check, "a file without the key");
         let mut config = AppConfig::default();
-        config.updates.check = false;
+        config.updates.check = true;
         config.save(dir.path()).unwrap();
-        assert!(!AppConfig::load(dir.path()).updates.check);
+        assert!(AppConfig::load(dir.path()).updates.check);
     }
 }

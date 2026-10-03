@@ -30,7 +30,7 @@
   | **No "Ty" (no home person)** | Relationships are always shown relative to the person being viewed. The tree opens on the last person viewed, else on a suggested one (the start person setting was removed 2026-10-03) | From the designer brief (2026-09-28) |
   | **Modes** | Browsing by default. Editing is switched on separately and asks "Kto edytuje?" (who is editing); that name goes into the change history | From the designer brief (2026-09-28) |
   | **The researcher's AI** | Free ChatGPT, maybe free Gemini | Small batches, parts of at most 10 persons, results copied from the chat (no downloads) |
-  | **Fully offline** | Nothing is downloaded while the app runs: fonts, icons and every other asset ship with the app. The one exception (2026-10-03): it asks GitHub for the newest version's number, which „Sprawdzaj aktualizacje” switches off | Web links (e.g. Wikipedia) open in the browser only when clicked |
+  | **Fully offline** | Nothing is downloaded while the app runs: fonts, icons and every other asset ship with the app. The one exception (2026-10-03): asking GitHub for the newest version's number, only on „Sprawdź teraz” or with „Sprawdzaj aktualizacje” switched on (off by default) | Web links (e.g. Wikipedia) open in the browser only when clicked |
   | **Approved 2026-09-28** | Open on Start and load the tree on demand (§11.1). The family archive is an open folder with GEDCOM, editable with a clear indication, and the Import is the built-in converter (§11.2) | The sections below are updated to match |
   | **Resize** | Staying with Tauri; no Electron comparison | Your decision, 2026-09-28 |
 
@@ -130,7 +130,8 @@
 6. **Edit where you read.** Editing happens in place on the profile, and everything can be done from the keyboard.
 7. **Offline and private.** No account, no cloud, no internet needed: fonts and icons ship with the app. The family
    data lives outside the code repository. The only request the app makes online asks GitHub for the newest version
-   number (nothing from the archive goes with it), and it can be switched off.
+   number (nothing from the archive goes with it), and only when asked: „Sprawdź teraz”, or „Sprawdzaj
+   aktualizacje” switched on (off by default).
 
 ## 4. What the app does
 
@@ -457,10 +458,12 @@ This is the model the app works with, in memory and in the SQLite cache. Where e
   `scripts/build.ps1` after a self-test of the packaged app.
 - **Updates (2026-10-03, owner's decision: the full standard, and the repo Husarp/Heirloom is public):**
   `../APP-STANDARDS.md` §2–§3. Rust (`heirloom-api/src/update.rs`, ureq over rustls with Windows' certificate store)
-  asks `/releases/latest` at start and when the window comes back, at most every 5 minutes, and compares versions as
-  numbers; a banner on Start (✕ hides it until the next start) and Ustawienia › O programie („Sprawdzaj
-  aktualizacje”, „Sprawdź teraz”, „GitHub”, „Pobierz aktualizację”). The update downloads the release's `.exe` with
-  the progress shown, asks about unsaved changes, runs the installer and closes. The installer comes from
+  asks `/releases/latest` at start and when the window comes back, at most every 5 minutes, only while „Sprawdzaj
+  aktualizacje” is on (off by default, owner's decision), and compares versions as numbers; a banner on Start (✕
+  hides it until the next start) and Ustawienia › O programie („Sprawdzaj aktualizacje”, „Sprawdź teraz”, „GitHub”,
+  „Pobierz aktualizację”; the buttons work with checks off). The update downloads the release's `.exe` with the
+  progress shown, asks about unsaved changes, runs it as `HeirloomSetup-X.Y.Z.exe --update` (progress only, per user,
+  no administrator rights; it starts Heirloom again) and closes. The installer comes from
   `.github/workflows/windows-build.yml`.
 
 ## 6. Performance targets (acceptance criteria)

@@ -3,7 +3,8 @@
 #   2. heirloom.exe: npx tauri build --no-bundle (the interface is built into the exe)
 #   3. self-test: heirloom.exe --selftest starts hidden and checks the interface, the bundled fonts and an archive
 #      round trip in a throwaway folder (skip with -NoSelfTest)
-#   4. HeirloomSetup-<version>.exe: installer\setup.py with the program folder zipped inside it (PyInstaller)
+#   4. HeirloomSetup-<version>.exe: installer\setup.py with the program folder zipped inside it and the logo for its
+#      window (PyInstaller)
 #   5. build\BUILT.json: which version this run built
 # No admin needed, at build time or install time. Run from any folder:
 #   & "<project folder>\scripts\build.ps1" [-Python <python.exe with PyInstaller>] [-NoSelfTest]
@@ -75,10 +76,16 @@ $gen = "$Build\installer"
 New-Item -ItemType Directory -Force $gen -ErrorAction Stop | Out-Null
 try { [System.IO.File]::WriteAllText("$gen\version.py", "VERSION = `"$version`"`n") } catch { throw "Could not write $gen\version.py: $_" }
 Copy-Item "$Root\src-tauri\icons\icon.ico" "$gen\heirloom.ico" -Force -ErrorAction Stop
+# The window's logo at 100-200 % display scaling (LOGOS in installer\setup.py), under setup\ inside the exe.
+$logos = "Square44x44Logo.png", "64x64.png", "Square71x71Logo.png", "Square89x89Logo.png"
+$logoData = foreach ($logo in $logos) {
+    if (-not (Test-Path "$Root\src-tauri\icons\$logo")) { throw "No src-tauri\icons\$logo for the installer's window" }
+    "--add-data"; "$Root\src-tauri\icons\$logo;setup"
+}
 $name = "HeirloomSetup-$version"
 & $Python -m PyInstaller --noconfirm --log-level WARN --onefile --noconsole --name $name `
     --icon "$gen\heirloom.ico" --paths $gen `
-    --add-data "$zip;." --add-data "$gen\heirloom.ico;." `
+    --add-data "$zip;." --add-data "$gen\heirloom.ico;." @logoData `
     --distpath $Build --workpath "$Build\work-setup" --specpath "$Build\work-setup" installer\setup.py
 if ($LASTEXITCODE) { throw "Building the installer failed" }
 $setup = "$Build\$name.exe"

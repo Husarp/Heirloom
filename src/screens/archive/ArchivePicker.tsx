@@ -75,7 +75,7 @@ export function ArchivePicker() {
           <ActionCard icon={<FileText size={17} />} title="Otwórz plik GEDCOM…" text=".ged · także z innych programów" onClick={openFile} />
           <p style={{ fontSize: 12, lineHeight: 1.55, color: "var(--text3)", marginTop: 6 }}>
             Twoje dane zostają w wybranym folderze: plik GEDCOM i folder media/. Heirloom działa bez internetu i nie wysyła
-            niczego z archiwum — pyta tylko GitHub o numer najnowszej wersji (można to wyłączyć w Ustawieniach).
+            niczego z archiwum. Z GitHubem łączy się tylko, gdy w Ustawieniach poprosisz o sprawdzenie aktualizacji.
           </p>
         </div>
       </div>

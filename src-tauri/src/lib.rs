@@ -41,7 +41,8 @@ async fn call(
     if method.starts_with("update.") {
         let result = updater.call(&method, &args)?;
         if method == "update.install" {
-            // The installer replaces the program folder, and Windows won't overwrite a running exe: Heirloom goes.
+            // The installer (started with --update) replaces the program folder, and Windows won't overwrite a running
+            // exe: Heirloom goes; the installer starts it again.
             // The window has already asked about unsaved changes. A moment later, so this answer reaches it first.
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(500));

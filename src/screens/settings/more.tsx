@@ -201,7 +201,7 @@ export function AboutSection() {
       <UpdateRows version={version} />
       <SettingRow
         label="Działa bez internetu"
-        note="Nic z archiwum nie opuszcza komputera; Heirloom pyta tylko GitHub o numer najnowszej wersji (można to wyłączyć wyżej). Czcionki Newsreader i IBM Plex Sans (SIL OFL) oraz ikony Lucide są wbudowane"
+        note="Nic z archiwum nie opuszcza komputera. Heirloom łączy się z GitHubem tylko wtedy, gdy włączysz sprawdzanie aktualizacji albo klikniesz „Sprawdź teraz”. Czcionki Newsreader i IBM Plex Sans (SIL OFL) oraz ikony Lucide są wbudowane"
       />
       <SettingRow label="Licencja" note="MIT" />
       <SettingRow label="Skróty klawiszowe" note="Ctrl K szukaj · Ctrl E edycja · Ctrl S zapisz · Ctrl Z cofnij" last>
@@ -217,7 +217,7 @@ export function AboutSection() {
 
 /** „Sprawdzaj aktualizacje”, and the current version with „GitHub”, „Sprawdź teraz” and „Pobierz aktualizację”. */
 function UpdateRows({ version }: { version: string }) {
-  const on = useStore((s) => s.app?.updates.check ?? true);
+  const on = useStore((s) => s.app?.updates.check ?? false);
   const { status, checking, said, failed: updateFailed, installing } = useUpdates();
   useEffect(() => void refreshUpdateStatus(), []);
 
@@ -241,7 +241,7 @@ function UpdateRows({ version }: { version: string }) {
 
   return (
     <>
-      <SettingRow label="Sprawdzaj aktualizacje" note="Przy starcie i po powrocie do okna, najwyżej co 5 minut. Wysyła tylko pytanie o numer wersji">
+      <SettingRow label="Sprawdzaj aktualizacje" note="Domyślnie wyłączone. Gdy jest włączone, Heirloom pyta GitHuba przy starcie i po powrocie do okna, najwyżej co 5 minut — wysyła tylko pytanie o numer wersji">
         <Toggle on={on} onChange={setOn} />
       </SettingRow>
       <SettingRow label="Aktualizacje" note={note}>
