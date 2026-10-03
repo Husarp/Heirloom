@@ -167,8 +167,18 @@ This is the roadmap, with a checkbox per task.
 - [x] Windows installer (2026-09-29): `HeirloomSetup-<version>.exe` from `scripts/build.ps1` + `installer/setup.py`,
       the APP-STANDARDS §1 pattern (install/update/uninstall in one exe, per user, version check, self-test of the
       packaged app); "what's new" (short Polish notes in Ustawienia › O programie, 2026-09-28)
-- [ ] **Update checks and in-app updates** (APP-STANDARDS §2–§3): waiting for your decision — they contact GitHub,
-      and Heirloom promises to work offline and send nothing
+- [x] **Update checks and in-app updates** (APP-STANDARDS §2–§3) (2026-10-03, your decision: the full standard, the
+      repo is public): GitHub `/releases/latest` at start and on coming back to the window, at most every 5 minutes,
+      versions compared as numbers (Rust, `update.rs`); a banner on Start and on the archive picker (✕ until the next
+      start); Ustawienia › O programie: „Sprawdzaj aktualizacje” (on by default, `aplikacja.json`), „Sprawdź teraz”,
+      „GitHub”, „Pobierz aktualizację”; the installer downloaded with the progress shown, unsaved changes asked about,
+      then the installer starts and Heirloom closes; „Spróbuj ponownie” + „GitHub” on failure; the old installer goes
+      at the next start. The „offline” texts now say it asks GitHub for the version number only. Not yet tried on
+      Windows
+- [x] **Windows build on GitHub** (2026-10-03): `.github/workflows/windows-build.yml` runs `scripts/build.ps1` on
+      `windows-latest` (by hand or on a `v*` tag), keeps the installer and `BUILT.json` as the run's artifact, and on a
+      tag attaches the installer to that tag's release. The self-test now gives up after 2 minutes instead of waiting
+      for ever. Not run yet
 - [ ] Final performance run on the 5k and 10k test archives → first run 2026-09-28 (10,000 people, release build):
       profile 15 ms, search 15 ms, whole-family layout 74 ms; cold start 2.2–2.7 s to the first screen (target 2 s,
       much of it the WebView starting); frame rates not measured yet
