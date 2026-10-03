@@ -1,5 +1,5 @@
-//! Settings that belong to this computer, not to an archive: the recent archives, the appearance and the last
-//! place in each archive. Stored in `%APPDATA%\Heirloom\aplikacja.json`.
+//! Settings that belong to this computer, not to an archive: the recent archives, the appearance, update checks
+//! and the last place in each archive. Stored in `%APPDATA%\Heirloom\aplikacja.json`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -23,6 +23,7 @@ pub struct AppConfig {
     /// Where each archive was left, by archive id. Kept on this computer, never in the archive folder: on a shared
     /// server, one person's last screen must not move another's.
     pub places: BTreeMap<String, Place>,
+    pub updates: Updates,
 }
 
 /// Where an archive was left, for „Po otwarciu archiwum: Ostatnie miejsce”.
@@ -67,6 +68,19 @@ pub struct Appearance {
 impl Default for Appearance {
     fn default() -> Self {
         Appearance { theme: "system".into(), text_size: 100, density: "comfortable".into(), animations: true, start_in: "start".into() }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Updates {
+    /// „Sprawdzaj aktualizacje”: ask GitHub for the newest version at start and on coming back to the window.
+    pub check: bool,
+}
+
+impl Default for Updates {
+    fn default() -> Self {
+        Updates { check: true }
     }
 }
 
@@ -173,5 +187,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(FILE), b"{not json").unwrap();
         assert_eq!(AppConfig::load(dir.path()).appearance, Appearance::default());
+    }
+
+    #[test]
+    fn update_checks_are_on_unless_switched_off() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(AppConfig::load(dir.path()).updates.check, "a new computer");
+        std::fs::write(dir.path().join(FILE), br#"{"recent": []}"#).unwrap();
+        assert!(AppConfig::load(dir.path()).updates.check, "a file from before 0.4.0");
+        let mut config = AppConfig::default();
+        config.updates.check = false;
+        config.save(dir.path()).unwrap();
+        assert!(!AppConfig::load(dir.path()).updates.check);
     }
 }

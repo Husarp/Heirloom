@@ -15,6 +15,7 @@ pub mod media;
 pub mod people;
 pub mod text;
 mod tools;
+pub mod update;
 
 use config::{AppConfig, RecentArchive};
 use derive::Derived;
@@ -175,6 +176,11 @@ impl Api {
                 self.config.set_place(&archive_id, part("route"), part("tree"), viewed, heirloom_core::history::now());
                 self.save_config();
                 Ok(Value::Null)
+            }
+            "app.setUpdates" => {
+                self.config.updates.check = args.get("check").and_then(Value::as_bool).ok_or_else(|| ApiError::bad_args("check"))?;
+                self.save_config();
+                Ok(self.app_state())
             }
             "recent.forget" => {
                 self.config.forget(&str_arg(&args, "path")?);
@@ -393,6 +399,7 @@ impl Api {
             "recent": self.config.recent,
             "appearance": self.config.appearance,
             "lastEditor": self.config.last_editor,
+            "updates": self.config.updates,
             "archive": self.session.as_ref().map(|s| status_of(s)),
             // Where the open archive was left on this computer.
             "place": self.session.as_ref().and_then(|s| self.config.places.get(&s.archive.settings().archive_id)),
@@ -528,7 +535,7 @@ impl Api {
 
     fn save_config(&self) {
         if let Some(dir) = &self.config_dir {
-            // Only conveniences (recent list, appearance, last places) live here; failing to write them must not break the app.
+            // Only conveniences (recent list, appearance, update checks, last places) live here; failing to write them must not break the app.
             let _ = self.config.save(dir);
         }
     }

@@ -1,8 +1,8 @@
-//! The app window: one command (`api`) that forwards to `heirloom-api`, and the `heirloom://` protocol that
-//! serves the archive's photos and documents (PLAN.md §5.3). With `--selftest <report>` the window is hidden, the
-//! interface checks itself (scripts/build.ps1 runs it before packaging) and the app quits.
+//! The app window: one command (`api`) that forwards to `heirloom-api` (`update.*` to its updater), and the
+//! `heirloom://` protocol that serves the archive's photos and documents (PLAN.md §5.3). With `--selftest <report>`
+//! the window is hidden, the interface checks itself (scripts/build.ps1 runs it before packaging) and the app quits.
 
-use heirloom_api::{Api, ApiError, media};
+use heirloom_api::{Api, ApiError, media, update::Updater};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -30,7 +30,26 @@ fn finish_selftest(report: &Path, dir: &Path, text: &str, code: i32) {
 
 /// Every UI command goes through here. `async` so it runs off the window's thread and never freezes it.
 #[tauri::command]
-async fn call(state: tauri::State<'_, AppState>, method: String, args: Value) -> Result<Value, ApiError> {
+async fn call(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    updater: tauri::State<'_, Updater>,
+    method: String,
+    args: Value,
+) -> Result<Value, ApiError> {
+    // Update checks wait on the internet, so they never take the archive's lock.
+    if method.starts_with("update.") {
+        let result = updater.call(&method, &args)?;
+        if method == "update.install" {
+            // The installer replaces the program folder, and Windows won't overwrite a running exe: Heirloom goes.
+            // The window has already asked about unsaved changes. A moment later, so this answer reaches it first.
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(500));
+                app.exit(0);
+            });
+        }
+        return Ok(result);
+    }
     let mut api = state.0.lock().unwrap_or_else(|e| e.into_inner());
     api.call(&method, args)
 }
@@ -70,11 +89,15 @@ pub fn run() {
         None => Api::with_default_dirs(),
     };
     let roots = api.media_roots();
+    // The self-test never goes online either.
+    let updater = Updater::new(if selftest.is_some() { None } else { Some(Updater::default_dir()) });
+    updater.remove_old_downloads();
     let watchdog = selftest.clone();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState(Mutex::new(api)))
+        .manage(updater)
         .manage(SelfTest(selftest))
         .register_asynchronous_uri_scheme_protocol("heirloom", move |_ctx, request, responder| {
             let roots = roots.clone();

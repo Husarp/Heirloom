@@ -4,7 +4,7 @@
 //! normal browser (`npm run dev`, then http://localhost:1420). Vite forwards `/api` and `/media` here.
 //! It uses its own settings folder (`%TEMP%\heirloom-bridge`), so it never touches the app's recent list.
 
-use heirloom_api::{Api, media};
+use heirloom_api::{Api, ApiError, media, update::Updater};
 use serde_json::{Value, json};
 use tiny_http::{Header, Method, Response, Server};
 
@@ -27,6 +27,7 @@ fn main() {
         }
     }
     let media_roots = api.media_roots();
+    let updater = Updater::new(Some(dir.join("aktualizacja")));
     let server = Server::http(("127.0.0.1", port)).expect("could not listen");
     println!("heirloom-bridge on http://127.0.0.1:{port}");
 
@@ -39,7 +40,14 @@ fn main() {
             let mut body = String::new();
             let _ = request.as_reader().read_to_string(&mut body);
             let args: Value = if body.trim().is_empty() { Value::Null } else { serde_json::from_str(&body).unwrap_or(Value::Null) };
-            let result = match api.call(method, args) {
+            let result = if method == "update.install" {
+                Err(ApiError::new("install_failed", "Aktualizację instaluje tylko okno programu."))
+            } else if method.starts_with("update.") {
+                updater.call(method, &args)
+            } else {
+                api.call(method, args)
+            };
+            let result = match result {
                 Ok(value) => json!({ "ok": value }),
                 Err(error) => json!({ "error": error }),
             };
