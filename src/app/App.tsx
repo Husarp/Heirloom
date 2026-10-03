@@ -9,6 +9,7 @@ import { CommandPalette } from "../shell/CommandPalette";
 import { useAppearance } from "./useAppearance";
 import { useShortcuts } from "./useShortcuts";
 import { useCloseGuard } from "./useCloseGuard";
+import { useUpdateChecks } from "./updates";
 import { Screen } from "./Screen";
 import { ArchivePicker } from "../screens/archive/ArchivePicker";
 import { LoadingArchive } from "../screens/archive/LoadingArchive";
@@ -26,6 +27,7 @@ export function App() {
   useAppearance();
   useShortcuts();
   useCloseGuard();
+  useUpdateChecks();
 
   useEffect(() => {
     boot().catch(() => useStore.setState({ phase: "picker" }));

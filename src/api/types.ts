@@ -68,6 +68,8 @@ export interface AppState {
   recent: RecentArchive[];
   appearance: Appearance;
   lastEditor: string | null;
+  /** „Sprawdzaj aktualizacje” (this computer's setting). */
+  updates: { check: boolean };
   archive: ArchiveStatus | null;
   /** Where the open archive was left on this computer (aplikacja.json); null before anything was remembered. */
   place: Place | null;
@@ -80,6 +82,26 @@ export interface Place {
   /** „Ostatnio oglądane”, newest first. */
   viewed: string[];
   at: string;
+}
+
+/** What the update checks know (crates/heirloom-api/src/update.rs). */
+export interface UpdateStatus {
+  /** False in the self-test, which never goes online. */
+  enabled: boolean;
+  current: string;
+  /** GitHub has answered since the start. */
+  checked: boolean;
+  latest: string | null;
+  newer: boolean;
+  /** The newest release has a Windows installer. */
+  installer: boolean;
+  /** The newest release's page, or the list of releases. */
+  page: string;
+  download:
+    | { state: "none" }
+    | { state: "running"; version: string; done: number; total: number }
+    | { state: "ready"; version: string }
+    | { state: "failed"; version: string; message: string };
 }
 
 export interface SaveResult {
