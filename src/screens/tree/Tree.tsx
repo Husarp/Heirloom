@@ -456,14 +456,10 @@ export function Tree({ hidden }: { hidden: boolean }) {
                 <LocateFixed size={15} />
               </button>
             </div>
-            <Legend side={colorMode === "side" ? (view === "descendants" ? "descendants" : "centre") : null} />
+            <Legend />
           </>
         )}
-        {view === "overview" && overviewData && colorMode === "side" && (
-          <div className="tree-legend overview-key">
-            <SideKey centre="wybrana osoba i rodzeństwo" />
-          </div>
-        )}
+        {colorMode === "side" && (view === "overview" ? overviewData : scene) && <SideKey view={view} />}
       </div>
       {showPanel && selected && (
         <SidePanel
@@ -550,8 +546,8 @@ function JumpBox({ onPick }: { onPick: (id: string) => void }) {
   );
 }
 
-/** The key for „Koloruj wg: strona ojca–matki”. */
-function SideKey({ centre }: { centre: string }) {
+/** The key for „Koloruj wg: strona ojca–matki”, above the line legend. */
+function SideKey({ view }: { view: View }) {
   const swatch = (color: number, label: string) => (
     <span className="item">
       <span style={{ width: 10, height: 10, borderRadius: 2, background: `var(--b${color})`, flex: "none" }} />
@@ -559,16 +555,23 @@ function SideKey({ centre }: { centre: string }) {
     </span>
   );
   return (
-    <>
+    <div className={`tree-legend side-key${view === "overview" ? " overview" : ""}`}>
       <span className="label-caps">Strona</span>
-      {swatch(SIDE.father, "ojca")}
-      {swatch(SIDE.mother, "matki")}
-      {swatch(SIDE.centre, centre)}
-    </>
+      {view === "descendants" ? (
+        // Everyone in Potomkowie descends from the centre person, so only they have a side colour.
+        <span className="item" style={{ color: "var(--text3)" }}>w Potomkach kolor ma tylko osoba w centrum</span>
+      ) : (
+        <>
+          {swatch(SIDE.father, "ojca")}
+          {swatch(SIDE.mother, "matki")}
+          {swatch(SIDE.centre, view === "overview" ? "wybrana osoba i rodzeństwo" : "osoba w centrum i rodzeństwo")}
+        </>
+      )}
+    </div>
   );
 }
 
-function Legend({ side }: { side: "centre" | "descendants" | null }) {
+function Legend() {
   const sample = (style: React.CSSProperties, dot?: boolean) => (
     <svg width="24" height="10" style={{ flex: "none" }}>
       <line x1="0" y1="5" x2="24" y2="5" style={{ stroke: "var(--line)", strokeWidth: 1.5, ...style }} />
@@ -593,15 +596,6 @@ function Legend({ side }: { side: "centre" | "descendants" | null }) {
       <span className="item">
         {sample({ stroke: "var(--accent)", strokeWidth: 2.5 })}linia wybranej
       </span>
-      {side && <span className="legend-sep" />}
-      {side === "centre" && <SideKey centre="osoba w centrum i rodzeństwo" />}
-      {/* Everyone in Potomkowie descends from the centre person, so only they have a side colour. */}
-      {side === "descendants" && (
-        <>
-          <span className="label-caps">Strona</span>
-          <span className="item" style={{ color: "var(--text3)" }}>w Potomkach kolor ma tylko osoba w centrum</span>
-        </>
-      )}
     </div>
   );
 }
