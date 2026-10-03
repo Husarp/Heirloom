@@ -175,7 +175,8 @@ This is the roadmap, with a checkbox per task.
 
 ## Found while building (2026-09-28)
 - [ ] **Import:** link an unrecognised mention to a person or create them (the „Nierozpoznana wzmianka” card), crop the
-      profile photo during the import („Kadruj”), show a file's transcription in step 4
+      profile photo during the import („Kadruj”); ~~show a file's transcription in step 4~~ done 2026-10-03 (the
+      „transkrypcja” chip opens the file with its transcription, translation and note, read-only)
 - [x] **Import:** after a person is joined with someone in the archive, suggest their relatives from the batch for
       that person's relatives (matching by family, not only by name) (2026-09-29: +3 points per relative of a clear
       match)
@@ -218,8 +219,11 @@ This is the roadmap, with a checkbox per task.
   - re-importing into joined people adds their texts again, and every batch adds new source records even for
     sources already in the archive;
   - ~~lenient reading of a few slips (`"events": null`, `"id": 5`, `"part": "1"`)~~ done 2026-09-29;
-  - joining two people of one batch with the same archive person should be refused in step 3, not at the end;
-  - files copied into `media/` before a failed import stay there (nothing is lost, it's clutter);
+  - ~~joining two people of one batch with the same archive person should be refused in step 3, not at the end~~
+    done 2026-10-03: refused in step 3 when the two are relatives in the batch (what the save can't write), with a
+    message saying who; unrelated people may still be one archive person and are marked so;
+  - ~~files copied into `media/` before a failed import stay there (nothing is lost, it's clutter)~~ done 2026-10-03:
+    a failed import removes its copies, and `zrodla-ai/` is written only after the save;
   - the GEDZIP export packs any local file a FILE line points to (absolute paths, `../`): a GEDCOM from someone
     else could pull private files into an export;
   - the `heirloom://` handler decodes whole originals for thumbnails, one thread per request: a screen of big scans
@@ -244,6 +248,21 @@ This is the roadmap, with a checkbox per task.
       confirmed finding fixed — „Cofnij zapis” by time and author, no undo over later changes, the close question,
       drafts kept in sections, the uninstaller removing its folder (details in CHANGELOG 0.3.1); the last open one,
       an import kept across „Zapisz jako nowe archiwum”, in 0.3.3
+
+## Done on 2026-10-03 (small fixes found while planning 0.4.0, docs/CHANGES_PLAN.md §6)
+- [x] **Import step 1:** a dropped file that is gone since is listed as gone („Pliku nie ma już w tym miejscu”), never
+      read as an empty file that then fails the import; Thumbs.db, desktop.ini, .DS_Store and similar files are skipped
+- [x] **Import step 1:** the paste view shows the first error even when something was recognised; „To nie jest
+      odpowiedź w formacie Heirloom” and the unsupported version name their part and file (no more „Część 0”) and
+      show at their row; a second, different part with a number already seen is a warning, not dropped silently; one
+      warning for all files without an M-number; the „Kopiuj instrukcję dla AI” toast says to pass it to the person
+      who searches the records (it holds Part A for them and Part B for the chat)
+- [x] **Import counts:** each file counted once in step 1; the summary counts only the files that will be saved;
+      „Zatwierdź” no longer counts files by a status they never have
+- [x] **Undone imports:** the Done screen's „Cofnij import” turns off after an undo from the toast too (and after
+      coming back); undoing an import already undone says so; Ustawienia › Import counts them („3 importy, 1
+      cofnięty”) and step 1's „Poprzednie importy” marks them
+- [x] **GEDZIP export:** a FILE path written with `\` (GEDCOM 5.5.1 from Windows programs) is found on every system
 
 ## From building design v2 (2026-09-29; questions for the designer are in FEEDBACK_DRAFT.md §L)
 - [ ] **Opening a .gdz file** („Otwórz plik GEDCOM… .ged, .gdz” in the design): only the export exists now
@@ -305,10 +324,10 @@ This is the roadmap, with a checkbox per task.
       fixed 230 px wide (`TextSizePopover.tsx:28`) and the four buttons need more; let it grow to fit them. Done: it
       grows to fit, a second click on the icon closes it, a failure shows a toast, and a size the buttons don't
       offer (105, 115…) shows as „Teraz: 115%”
-- [ ] **Import › „Upuść wszystko naraz”: a click anywhere on the box opens the file picker** (now only the small
+- [x] **Import › „Upuść wszystko naraz”: a click anywhere on the box opens the file picker** (now only the small
       „albo wybierz pliki” / „lub folder…” links do). One Windows dialog can't pick files and folders at once, so:
       the box opens the file picker (several files at once), and the „lub folder…” link stays for a whole folder
-      (dropping a folder works already) — agreed 2026-09-29
+      (dropping a folder works already) — agreed 2026-09-29, done 2026-10-03
 - [ ] **Every picture opens bigger on a click** (2026-09-29): wherever the program shows an image — profile photos
       and gallery, the side panel, the Import (file list, step 4), Źródła, Brakujące pliki — a click shows it large
       (the lightbox Media already has), and a click outside it or Esc makes it small again; check each place
@@ -330,9 +349,10 @@ This is the roadmap, with a checkbox per task.
       questions and the step reached are remembered, and the Import continues where it stopped
 - [ ] **Import step 1: removing a file is slow** (1–2 s for each „×”, 2026-09-29): each removal reads and checks
       the whole package again; the row should go at once
-- [ ] **The toast after an import is squeezed** (your screenshot, 2026-09-29): „Zaimportowano 13 osób ·
+- [x] **The toast after an import is squeezed** (your screenshot, 2026-09-29): „Zaimportowano 13 osób ·
       Sadowscy-Chodel-2026-09-29 · 5 plików” breaks into many short lines because the two buttons („Cofnij import”,
-      „Pokaż w drzewie”) take the width; lay it out so the text fits (e.g. the buttons under the text)
+      „Pokaż w drzewie”) take the width; lay it out so the text fits (e.g. the buttons under the text) — done
+      2026-10-03: with two buttons, or a detail line and a button, the buttons go under the text
 - [ ] **Całe drzewo: lines between parents and children** (2026-09-29), as in Rodzina, Przodkowie and Potomkowie;
       now it shows only the cards in generation bands, plus one line for the selected person's direct line
 - [x] **Tree toolbar: remove „Żyjący / Zmarli / Wszyscy”** (agreed 2026-09-29; done 2026-10-03): most people in an archive of
@@ -404,8 +424,9 @@ This is the roadmap, with a checkbox per task.
 - [ ] **Test families with long biographies** (2026-09-29): `heirloom-gen` and the AI-trial packages have no
       biography chapters, so this part of the profile can't be seen while testing; give some people a long life
       story in chapters
-- [ ] **Import step 1: „Wyczyść listę”** (agreed 2026-09-29): one click removes everything loaded into the import
-      in progress (e.g. the wrong folder was dropped), instead of „×” on every row; the archive isn't touched
+- [x] **Import step 1: „Wyczyść listę”** (agreed 2026-09-29): one click removes everything loaded into the import
+      in progress (e.g. the wrong folder was dropped), instead of „×” on every row; the archive isn't touched — done
+      2026-10-03: it asks first only when answers and decisions from steps 2–5 would be lost
 - [ ] **Ustawienia: „Cofnij wszystkie importy”** (agreed 2026-09-29): the archive goes back to how it was before
       the first import. Something to do only on purpose: several confirmations, each explaining exactly what will
       be removed (which imports, how many people and files); my suggestion: a backup copy (.zip) first. Each import

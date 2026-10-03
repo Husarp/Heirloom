@@ -4,7 +4,6 @@
 import { ArrowRight, Check, ChevronDown, ChevronRight, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useMemo, useState } from "react";
 import { call, type ApiError } from "../../api/transport";
-import type { ArchiveStatus } from "../../api/types";
 import { useStore } from "../../app/store";
 import { useApi } from "../../app/useApi";
 import { Checkbox, Spinner } from "../../components/bits";
@@ -12,7 +11,7 @@ import { count, people as peopleCount, plural } from "../../lib/format";
 import type { Graph } from "../tree/graph";
 import { Footer } from "./ImportWizard";
 import { MiniLegend, MiniTree, familyOf, mergeTarget } from "./MiniTree";
-import { askUndoImport } from "./undoImport";
+import { askUndoImport, undoImport } from "./undoImport";
 import { useWizard, type Act, type CommitResult, type CompareRow, type ImportPerson, type ImportState, type Step } from "./types";
 
 /** A merged person's lines that would change something in the archive. */
@@ -106,21 +105,7 @@ export function StepSummary({ state, act, goStep }: { state: ImportState; act: A
         notify(result.message, {
           detail: [result.batch, ...saved].join(" · "),
           actions: [{ label: "Pokaż w drzewie", run: () => useStore.getState().go({ name: "tree", view: "family" }) }],
-          action: {
-            label: "Cofnij import",
-            run: () =>
-              askUndoImport(result.batch, () =>
-                requireEdit(async () => {
-                  try {
-                    const status = await call<ArchiveStatus>("history.undo", { batch: result.batch });
-                    changed(status);
-                    notify("Import cofnięty — zmiana czeka na zapis.");
-                  } catch (e) {
-                    notify((e as ApiError).message, { kind: "err" });
-                  }
-                }),
-              ),
-          },
+          action: { label: "Cofnij import", run: () => askUndoImport(result.batch, () => requireEdit(() => undoImport(result.batch))) },
         });
       } catch (e) {
         const error = e as ApiError;
@@ -213,9 +198,12 @@ export function StepSummary({ state, act, goStep }: { state: ImportState; act: A
               const detail = skipped
                 ? "decyzja w kroku 3"
                 : p.decision === "merge"
-                  ? lines.length > 0
-                    ? `${lines.filter((r) => lineOn(p, r)).length} z ${count(lines.length, "zmiany", "zmian", "zmian")}`
-                    : "bez zmian w danych"
+                  ? [
+                      lines.length > 0 ? `${lines.filter((r) => lineOn(p, r)).length} z ${count(lines.length, "zmiany", "zmian", "zmian")}` : "bez zmian w danych",
+                      p.sameTarget.length > 0 && `ta sama osoba co ${p.sameTarget.map((o) => o.id).join(", ")}`,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
                   : [p.maiden && `z d. ${p.maiden}`, count(p.facts, "fakt", "fakty", "faktów"), p.files.length > 0 && count(p.files.length, "plik", "pliki", "plików")].filter(Boolean).join(" · ");
               return (
                 <div key={p.id}>
@@ -312,7 +300,8 @@ export function StepSummary({ state, act, goStep }: { state: ImportState; act: A
         <button className="btn secondary" onClick={() => goStep(4)}>
           Wróć
         </button>
-        <button className="btn primary" disabled={saving || included.length + state.files.filter((f) => f.status === "und" && f.people.length > 0).length === 0 || state.undecided > 0} onClick={commit}>
+        {/* Files are linked only to people of the batch who are saved: with nobody saved, nothing would be. */}
+        <button className="btn primary" disabled={saving || included.length === 0 || state.undecided > 0} onClick={commit}>
           {saving ? <Spinner size={15} /> : <Check size={15} />}
           Zatwierdź i zapisz wybrane ({peopleCount(included.length)})
         </button>

@@ -102,6 +102,31 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
       ],
     });
 
+  /** „Wyczyść listę”: everything loaded so far goes (the archive isn't touched); it asks only when answers and
+   *  decisions from the later steps would be lost. */
+  const clearAll = () => {
+    const run = async () => {
+      setStale(false);
+      await call("import.cancel").catch(() => {});
+      useWizard.getState().reset();
+      setState(null);
+      notify("Lista wyczyszczona.");
+    };
+    if (furthest <= 1) {
+      run();
+      return;
+    }
+    setAsk({
+      title: "Wyczyścić listę?",
+      text: "Odpowiedzi i decyzje z kroków 2–5 przepadną. Archiwum się nie zmieni.",
+      icon: "warn",
+      buttons: [
+        { label: "Anuluj", kind: "ghost" },
+        { label: "Wyczyść listę", kind: "danger", run },
+      ],
+    });
+  };
+
   const addPaths = (more: string[]) => {
     const { paths: current, exclude: out } = useWizard.getState();
     const fresh = more.filter((p) => !current.includes(p));
@@ -146,12 +171,14 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
   const copyInstructions = async () => {
     try {
       const { text: instructions, version } = await call<{ text: string; version: string }>("import.instructions");
-      if (await copyText(instructions)) notify(`Skopiowano instrukcję dla AI (format ${version}). Wklej ją do czatu razem z notatkami.`);
+      if (await copyText(instructions)) notify(`Skopiowano instrukcję dla AI (format ${version}). Przekaż ją osobie, która szuka w aktach — w środku jest opisane, którą część wkleić do czatu.`);
       else notify("Nie udało się skopiować do schowka.", { kind: "err" });
     } catch {
       notify("Nie udało się wczytać instrukcji.", { kind: "err" });
     }
   };
+
+  const pickMany = () => pickFiles("Wybierz pliki").then(addPaths);
 
   /** Takes a line off the list: the pasted text, a dropped file or folder, or a file from inside a folder. */
   const remove = (input: ImportInput) => {
@@ -210,6 +237,9 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
                 {droppedAt ? `Upuszczone o ${clock(droppedAt)} · ` : ""}nic nie zostało jeszcze zapisane
               </span>
             </span>
+            <button className="btn ghost" onClick={clearAll}>
+              Wyczyść listę
+            </button>
             <button className="btn secondary" onClick={() => pickFiles("Dodaj pliki").then(addPaths)}>
               <Plus size={14} />
               Dodaj pliki
@@ -286,7 +316,7 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
                 <TriangleAlert size={15} style={{ flex: "none" }} />
                 Tekst albo pliki zmieniły się po rozpoczęciu importu.
               </span>
-            ) : firstError && !recognised ? (
+            ) : firstError ? (
               <span className="row" style={{ gap: 7, color: "var(--err)", fontSize: 13, fontWeight: 500 }}>
                 <CircleX size={15} style={{ flex: "none" }} />
                 {firstError.message}
@@ -306,19 +336,35 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
       )}
 
       <div className="col" style={{ gap: 16 }}>
-        <div className={`imp-drop${over ? " over" : ""}`}>
+        {/* The whole box opens the file picker (several files at once); one Windows dialog can't pick files and folders
+            together, so a folder has its own link. */}
+        <div
+          className={`imp-drop${over ? " over" : ""}`}
+          role="button"
+          tabIndex={0}
+          aria-label="Wybierz pliki"
+          onClick={pickMany}
+          onKeyDown={(e) => {
+            if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+            e.preventDefault();
+            pickMany();
+          }}
+        >
           <FolderDown size={26} color="var(--text2)" />
           <span style={{ fontSize: 15, fontWeight: 600 }}>Upuść wszystko naraz</span>
           <span style={{ fontSize: 13, lineHeight: 1.5, color: "var(--text2)", textAlign: "center" }}>
             Odpowiedzi AI (.json lub tekst), zdjęcia, PDF-y i notatki .txt. Heirloom rozpozna każdy plik i pokaże listę.
           </span>
-          <span className="row" style={{ gap: 6, fontSize: 13 }}>
-            <button className="link" onClick={() => pickFiles("Wybierz pliki").then(addPaths)}>
-              albo wybierz pliki
-            </button>
-            <span style={{ color: "var(--text3)" }}>lub</span>
-            <button className="link" onClick={() => pickFolder("Wybierz folder").then((p) => p && addPaths([p]))}>
-              folder…
+          <span className="row" style={{ gap: 6, fontSize: 13, color: "var(--text2)" }}>
+            Kliknij, aby wybrać pliki ·
+            <button
+              className="link"
+              onClick={(e) => {
+                e.stopPropagation();
+                pickFolder("Wybierz folder").then((p) => p && addPaths([p]));
+              }}
+            >
+              lub folder…
             </button>
           </span>
         </div>
@@ -340,6 +386,7 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
                 <span className="ellipsis grow" style={{ fontWeight: 500 }}>
                   {h.name}
                 </span>
+                {!h.active && <span style={{ color: "var(--text3)" }}>cofnięty</span>}
                 <span style={{ color: "var(--text3)" }}>{shortWhen(h.ts)}</span>
                 <span style={{ color: "var(--text2)", minWidth: 64, textAlign: "right" }}>{h.people > 0 ? people(h.people) : count(h.files, "plik", "pliki", "plików")}</span>
               </div>

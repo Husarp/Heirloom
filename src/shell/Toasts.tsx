@@ -20,6 +20,8 @@ function ToastItem({ toast: t }: { toast: Toast }) {
   const actions = [...(t.action ? [t.action] : []), ...(t.actions ?? [])];
   const [paused, setPaused] = useState(false);
   const left = useRef(actions.length ? 10_000 : 6_000);
+  // Two buttons (or a detail line and a button) would squeeze the text into a narrow column: they go under it.
+  const stacked = actions.length >= 2 || (!!t.detail && actions.length > 0);
 
   useEffect(() => {
     if (paused) return;
@@ -34,7 +36,7 @@ function ToastItem({ toast: t }: { toast: Toast }) {
   return (
     <div
       role="status"
-      className={`toast${t.kind === "err" ? " err" : ""}`}
+      className={`toast${t.kind === "err" ? " err" : ""}${stacked ? " stacked" : ""}`}
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}
@@ -45,18 +47,20 @@ function ToastItem({ toast: t }: { toast: Toast }) {
         <span className="toast-title">{t.text}</span>
         {t.detail && <span className="toast-detail">{t.detail}</span>}
       </div>
-      {actions.map((a) => (
-        <button
-          key={a.label}
-          className="toast-action"
-          onClick={() => {
-            a.run();
-            dismiss(t.id);
-          }}
-        >
-          {a.label}
-        </button>
-      ))}
+      <div className="toast-actions">
+        {actions.map((a) => (
+          <button
+            key={a.label}
+            className="toast-action"
+            onClick={() => {
+              a.run();
+              dismiss(t.id);
+            }}
+          >
+            {a.label}
+          </button>
+        ))}
+      </div>
       <button className="toast-close" onClick={() => dismiss(t.id)} aria-label="Zamknij" title="Zamknij">
         <X size={15} />
       </button>
