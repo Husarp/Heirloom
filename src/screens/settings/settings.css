@@ -111,8 +111,13 @@
   pointer-events: none;
 }
 
-.set-disabled {
+/* A row that isn't built yet (SettingRow `soon`): greyed text, its control visible but inert. */
+.set-soon > .col {
+  color: var(--text2);
+}
+.set-soon-control {
   display: inline-flex;
+  flex: none;
   opacity: 0.45;
   pointer-events: none;
 }

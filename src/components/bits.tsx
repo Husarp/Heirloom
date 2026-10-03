@@ -428,15 +428,33 @@ export function EmptyState({ icon, title, text, action }: { icon?: ReactNode; ti
   );
 }
 
-/** Label + optional description on the left, a control on the right (Settings rows). */
-export function SettingRow({ label, note, children, last }: { label: ReactNode; note?: ReactNode; children?: ReactNode; last?: boolean }) {
+/** Label + optional description on the left, a control on the right (Settings rows). `soon`: not built yet — the
+ *  row is greyed with a „wkrótce” badge and its control is shown but can't be used (one look for all such rows). */
+export function SettingRow({ label, note, children, last, soon }: { label: ReactNode; note?: ReactNode; children?: ReactNode; last?: boolean; soon?: boolean }) {
   return (
-    <div className="row" style={{ minHeight: 60, padding: "10px 18px", gap: 20, borderBottom: last ? undefined : "1px solid var(--border)" }}>
+    <div
+      className={`row${soon ? " set-soon" : ""}`}
+      aria-disabled={soon || undefined}
+      style={{ minHeight: 60, padding: "10px 18px", gap: 20, borderBottom: last ? undefined : "1px solid var(--border)" }}
+    >
       <div className="col grow" style={{ gap: 2 }}>
-        <span style={{ fontSize: 14, fontWeight: 500 }}>{label}</span>
+        <span className="row" style={{ gap: 8, fontSize: 14, fontWeight: 500 }}>
+          {label}
+          {soon && (
+            <span className="badge" title="Będzie w jednej z kolejnych wersji">
+              wkrótce
+            </span>
+          )}
+        </span>
         {note && <span style={{ fontSize: 12, color: "var(--text3)" }}>{note}</span>}
       </div>
-      {children}
+      {soon ? (
+        <span className="set-soon-control" inert>
+          {children}
+        </span>
+      ) : (
+        children
+      )}
     </div>
   );
 }

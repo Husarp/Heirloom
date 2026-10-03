@@ -162,27 +162,24 @@ function SettingsFilesSection({ archive }: { archive: ArchiveStatus }) {
     <Section id="settingsFiles" title="Pliki ustawień Heirlooma">
       <SettingRow
         label="Gdzie trzymać"
+        soon
         note={
           <>
             Wygląd i układ drzewa, osobno od danych rodziny
             <br />
-            <span className="selectable">Teraz: {archive.sidecar}</span> · zmiana miejsca w kolejnej wersji
+            <span className="selectable">Teraz: {archive.sidecar}</span>
           </>
         }
       >
-        <span title="Zmiana miejsca będzie możliwa w kolejnej wersji">
-          <span className="set-disabled" aria-disabled="true">
-            <Segmented
-              size={28}
-              value={nextToData ? "data" : "app"}
-              onChange={() => {}}
-              options={[
-                { value: "data", label: "Obok danych" },
-                { value: "app", label: "W programie" },
-              ]}
-            />
-          </span>
-        </span>
+        <Segmented
+          size={28}
+          value={nextToData ? "data" : "app"}
+          onChange={() => {}}
+          options={[
+            { value: "data", label: "Obok danych" },
+            { value: "app", label: "W programie" },
+          ]}
+        />
       </SettingRow>
       <SettingRow label="Ustawienia wyglądu" note="Wygląd programu i wybory z tej strony w jednym pliku">
         <button className="btn secondary set-btn" onClick={exportSettings}>
@@ -270,17 +267,8 @@ function ExportSection({ archive, setBusy }: { archive: ArchiveStatus; setBusy: 
 
   return (
     <Section id="export" title="Eksport">
-      <SettingRow
-        label={
-          <span className="row" style={{ gap: 8 }}>
-            GEDCOM 5.5.1 <span className="badge">wersja 2</span>
-          </span>
-        }
-        note="dla MyHeritage i Ancestry"
-      >
-        <button className="btn secondary set-btn" disabled>
-          Eksportuj…
-        </button>
+      <SettingRow label="GEDCOM 5.5.1" note="dla MyHeritage i Ancestry" soon>
+        <button className="btn secondary set-btn">Eksportuj…</button>
       </SettingRow>
       <SettingRow label="GEDZIP" note="GEDCOM 7 + zdjęcia w jednym pliku" last>
         <button className="btn secondary set-btn" onClick={exportGedzip}>
@@ -338,10 +326,8 @@ function ToolsSection({ onRebuilt }: { onRebuilt: () => void }) {
           Otwórz
         </button>
       </SettingRow>
-      <SettingRow label="Zmniejsz zdjęcia bez utraty jakości" note="W przygotowaniu — nic nie dzieje się samo">
-        <button className="btn secondary set-btn" disabled>
-          Zmniejsz…
-        </button>
+      <SettingRow label="Zmniejsz zdjęcia bez utraty jakości" note="Nic nie dzieje się samo" soon>
+        <button className="btn secondary set-btn">Zmniejsz…</button>
       </SettingRow>
       <SettingRow label="Sprawdź archiwum" note="Spójność danych i plików">
         <button className="btn secondary set-btn" disabled={checking} onClick={check}>
