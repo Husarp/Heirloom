@@ -8,6 +8,9 @@ export const CARD_W = 204;
 export const CARD_H = 72;
 const PARTNER_GAP = 48;
 const SIBLING_GAP = 24;
+// Rodzina with 9 or more siblings: their cards are narrower (no photo), so the row still fits.
+export const NARROW_W = 150;
+const NARROW_GAP = 16;
 const FAMILY_PITCH = 230;
 const PEDIGREE_COLUMN = 280;
 const PEDIGREE_ROW = 88;
@@ -23,6 +26,8 @@ export interface SceneCard {
   /** An unknown ancestor: a dashed box with this text instead of a person. */
   stub?: string;
   focus?: boolean;
+  /** A narrower card (NARROW_W) than CARD_W. */
+  w?: number;
 }
 
 export interface SceneLink {
@@ -57,7 +62,7 @@ export interface SceneBox {
   w: number;
   h: number;
   label: string;
-  action: "siblings-open" | "siblings-close" | "add-parents";
+  action: "add-parents";
   of?: string;
 }
 
@@ -90,7 +95,7 @@ function bounds(scene: Omit<Scene, "bounds">): Scene["bounds"] {
     maxX = Math.max(maxX, x + w);
     maxY = Math.max(maxY, y + h);
   };
-  for (const c of scene.cards) grow(c.x, c.y, CARD_W, CARD_H);
+  for (const c of scene.cards) grow(c.x, c.y, c.w ?? CARD_W, CARD_H);
   for (const b of scene.boxes) grow(b.x, b.y, b.w, b.h);
   for (const l of scene.labels) grow(l.x, l.y - 16, 120, 20);
   if (minX === Infinity) return { minX: 0, minY: 0, maxX: CARD_W, maxY: CARD_H };
@@ -138,24 +143,24 @@ function bend(x0: number, y0: number, y1: number, x1: number): string {
 }
 
 /** Parents above, a descent line to a sibling bar and down into each child (spec §3.9 routing). */
-function descent(links: SceneLink[], key: string, fromX: number, fromY: number, children: { id: string; x: number; y: number; kind: LinkKind }[], barOffset: number, parents: string[], rounded = false) {
+function descent(links: SceneLink[], key: string, fromX: number, fromY: number, children: { id: string; x: number; y: number; w?: number; kind: LinkKind }[], barOffset: number, parents: string[], rounded = false) {
   if (!children.length) return;
   const barY = children[0].y - barOffset;
   if (rounded) {
-    for (const c of children) links.push({ key: `${key}-${c.id}`, d: elbow(fromX, fromY, barY, c.x + CARD_W / 2, c.y), kind: c.kind, people: [...parents, c.id] });
+    for (const c of children) links.push({ key: `${key}-${c.id}`, d: elbow(fromX, fromY, barY, c.x + (c.w ?? CARD_W) / 2, c.y), kind: c.kind, people: [...parents, c.id] });
     return;
   }
-  const xs = children.map((c) => c.x + CARD_W / 2);
+  const xs = children.map((c) => c.x + (c.w ?? CARD_W) / 2);
   const left = Math.min(fromX, ...xs);
   const right = Math.max(fromX, ...xs);
   links.push({ key: `${key}-down`, d: `M${fromX} ${fromY} V${barY}`, kind: "birth", people: parents });
   if (right > left) links.push({ key: `${key}-bar`, d: `M${left} ${barY} H${right}`, kind: "birth", people: parents });
   for (const c of children) {
-    links.push({ key: `${key}-${c.id}`, d: `M${c.x + CARD_W / 2} ${barY} V${c.y}`, kind: c.kind, people: [...parents, c.id] });
+    links.push({ key: `${key}-${c.id}`, d: `M${c.x + (c.w ?? CARD_W) / 2} ${barY} V${c.y}`, kind: c.kind, people: [...parents, c.id] });
   }
 }
 
-export function layoutFamily(graph: Graph, focusId: string, options: { siblingsOpen: boolean; editing: boolean; rounded?: boolean }): Scene {
+export function layoutFamily(graph: Graph, focusId: string, options: { editing: boolean; rounded?: boolean }): Scene {
   const cards: SceneCard[] = [];
   const links: SceneLink[] = [];
   const unions: SceneUnion[] = [];
@@ -188,61 +193,70 @@ export function layoutFamily(graph: Graph, focusId: string, options: { siblingsO
     links.push({ key: `partner-${p}`, d: `M${l.x + CARD_W} ${CARD_H / 2} H${r.x}`, kind: "partner", people: [focusId, p] });
     unions.push({ key: `union-${p}`, x: midX, y: CARD_H / 2, people: [focusId, p] });
   }
+  const rowLeft = Math.min(...cards.map((c) => c.x));
+  const rowRight = Math.max(...cards.map((c) => c.x + CARD_W));
 
-  // Siblings: collapsed into "+N rodzeństwa", or shown to the left.
-  const parentUnionChildren = graph.unions.filter((u) => u.children.some((c) => c.id === focusId)).flatMap((u) => childrenOf(graph, u));
-  const siblings = [...new Set(parentUnionChildren)].filter((s) => s !== focusId && graph.people[s]);
-  const rowLeft = () => Math.min(...cards.filter((c) => c.y === 0).map((c) => c.x));
-  if (siblings.length && options.siblingsOpen) {
-    let x = rowLeft() - SIBLING_GAP - CARD_W;
-    for (const s of [...siblings].reverse()) {
-      place(s, x, 0);
-      x -= CARD_W + SIBLING_GAP;
-    }
-    boxes.push({ key: "siblings-close", x: rowLeft() - 130, y: (CARD_H - 34) / 2, w: 110, h: 34, label: "Zwiń rodzeństwo", action: "siblings-close" });
-  } else if (siblings.length) {
-    const label = siblings.length === 1 ? "+1 rodzeństwo" : `+${siblings.length} rodzeństwa`;
-    boxes.push({ key: "siblings-open", x: rowLeft() - 150, y: (CARD_H - 34) / 2, w: 120, h: 34, label, action: "siblings-open" });
+  // Row -1: the parents of the person and of each partner, as couples. A partner's parents sit straight above the
+  // partner and the person's own parents move aside for them; where that doesn't fit (several partners), the person's
+  // parents stay above the person and the partners' parents move outwards.
+  const y = -FAMILY_PITCH;
+  type Block = { left: number; right: number };
+  const clash = (a: Block, list: Block[]) => list.some((b) => a.left < b.right + SIBLING_GAP && a.right > b.left - SIBLING_GAP);
+  const couple = (child: string) => {
+    const present = parentsOrdered(graph, child).filter(Boolean) as string[];
+    return { present, width: present.length === 2 ? CARD_W * 2 + PARTNER_GAP : present.length ? CARD_W : 0 };
+  };
+  const addBox = (x: number): Block => ({ left: x + (CARD_W - 150) / 2, right: x + (CARD_W + 150) / 2 });
+  const own = couple(focusId);
+  const others = partners.map((p) => ({ p, ...couple(p), cx: placed.get(p)!.x + CARD_W / 2 }));
+  // „Dodaj rodziców” stays right above its person.
+  const fixed: Block[] = [];
+  if (!own.width && options.editing) fixed.push(addBox(0));
+  for (const o of others) if (!o.width && options.editing) fixed.push(addBox(placed.get(o.p)!.x));
+  let ownLeft = CARD_W / 2 - own.width / 2;
+  const otherLeft = new Map<string, number>();
+  const straight: Block[] = [...fixed];
+  let fits = true;
+  for (const o of others.filter((o) => o.width)) {
+    const block = { left: o.cx - o.width / 2, right: o.cx + o.width / 2 };
+    if (clash(block, straight)) fits = false;
+    straight.push(block);
+    otherLeft.set(o.p, block.left);
   }
-
-  // Row -1: the parents of the person and of each partner, as couples above their child.
-  const coupleAbove = (child: string, cx: number, avoid: { left: number; right: number }[], preferRight: boolean) => {
-    const [f, m] = parentsOrdered(graph, child);
-    const present = [f, m].filter(Boolean) as string[];
-    if (!present.length) return null;
-    const y = -FAMILY_PITCH;
-    const width = present.length === 2 ? CARD_W * 2 + PARTNER_GAP : CARD_W;
-    let left = cx - width / 2;
-    // Keep clear of couples already placed (partners' parents move outwards).
-    for (let guard = 0; guard < 20 && avoid.some((a) => left < a.right + SIBLING_GAP && left + width > a.left - SIBLING_GAP); guard++) {
-      left += preferRight ? CARD_W / 2 : -CARD_W / 2;
+  if (fits && own.width) {
+    const candidates = [ownLeft, ...straight.map((b) => b.left - SIBLING_GAP - own.width), ...straight.map((b) => b.right + SIBLING_GAP)]
+      .filter((l) => !clash({ left: l, right: l + own.width }, straight))
+      .sort((a, b) => Math.abs(a - ownLeft) - Math.abs(b - ownLeft));
+    if (candidates.length && Math.abs(candidates[0] - ownLeft) <= CARD_W + PARTNER_GAP) ownLeft = candidates[0];
+    else fits = false;
+  }
+  // A partner's „Dodaj rodziców” (edit mode) that has to move aside too, with its line bent to the partner.
+  const boxLeft = new Map<string, number>();
+  if (!fits) {
+    const occupied: Block[] = !own.width && options.editing ? [addBox(0)] : [];
+    if (own.width) occupied.push({ left: ownLeft, right: ownLeft + own.width });
+    for (const o of others) {
+      const width = o.width || (options.editing ? 150 : 0);
+      if (!width) continue;
+      let left = o.cx - width / 2;
+      for (let guard = 0; guard < 40 && clash({ left, right: left + width }, occupied); guard++) left += o.cx > CARD_W / 2 ? CARD_W / 2 : -CARD_W / 2;
+      occupied.push({ left, right: left + width });
+      (o.width ? otherLeft : boxLeft).set(o.p, left);
     }
-    const cardsHere: SceneCard[] = [];
+  }
+  const placeCouple = (child: string, present: string[], left: number) => {
     if (present.length === 2) {
-      cardsHere.push(place(present[0], left, y), place(present[1], left + CARD_W + PARTNER_GAP, y));
+      const pair = [place(present[0], left, y), place(present[1], left + CARD_W + PARTNER_GAP, y)];
       const midX = left + CARD_W + PARTNER_GAP / 2;
       links.push({ key: `pp-${child}`, d: `M${left + CARD_W} ${y + CARD_H / 2} H${left + CARD_W + PARTNER_GAP}`, kind: "partner", people: present });
       unions.push({ key: `pu-${child}`, x: midX, y: y + CARD_H / 2, people: present });
-      return { left, right: left + width, fromX: midX, fromY: y + CARD_H / 2, parents: present, cards: cardsHere };
+      return { fromX: midX, fromY: y + CARD_H / 2, cards: pair };
     }
-    cardsHere.push(place(present[0], left, y));
-    return { left, right: left + width, fromX: left + CARD_W / 2, fromY: y + CARD_H, parents: present, cards: cardsHere };
+    return { fromX: left + CARD_W / 2, fromY: y + CARD_H, cards: [place(present[0], left, y)] };
   };
-  const occupied: { left: number; right: number }[] = [];
-  const focusParents = coupleAbove(focusId, CARD_W / 2, occupied, true);
-  if (focusParents) {
-    occupied.push(focusParents);
-    const kids = [focusId, ...(options.siblingsOpen ? siblings : [])].map((id) => ({ id, x: placed.get(id)!.x, y: 0, kind: linkKind(pediOf(graph, id), false) }));
-    descent(links, "focus-parents", focusParents.fromX, focusParents.fromY, kids, 50, focusParents.parents, options.rounded);
-    if (!options.siblingsOpen && siblings.length) {
-      const box = boxes.find((b) => b.action === "siblings-open");
-      if (box) {
-        const barY = -50;
-        links.push({ key: "siblings-stub", d: `M${box.x + box.w / 2} ${barY} V${box.y}`, kind: "birth", people: focusParents.parents });
-        links.push({ key: "siblings-bar", d: `M${box.x + box.w / 2} ${barY} H${focusParents.fromX}`, kind: "birth", people: focusParents.parents });
-      }
-    }
-    for (const c of focusParents.cards) {
+  const ownCouple = own.width ? placeCouple(focusId, own.present, ownLeft) : null;
+  if (ownCouple) {
+    for (const c of ownCouple.cards) {
       const p = graph.people[c.id];
       if (p && p.ancestors > 0) pills.push({ key: `up-${c.id}`, x: c.x + CARD_W - 60, y: c.y - 11, label: `+${p.ancestors}`, target: c.id, direction: "up" });
     }
@@ -250,23 +264,81 @@ export function layoutFamily(graph: Graph, focusId: string, options: { siblingsO
     boxes.push({ key: `add-${focusId}`, x: (CARD_W - 150) / 2, y: -FAMILY_PITCH + (CARD_H - 52) / 2, w: 150, h: 52, label: "Dodaj rodziców", action: "add-parents", of: focusId });
     links.push({ key: `add-link-${focusId}`, d: `M${CARD_W / 2} ${-FAMILY_PITCH + (CARD_H + 52) / 2} V0`, kind: "placeholder", people: [] });
   }
-  for (const p of partners) {
-    const card = placed.get(p)!;
-    const cx = card.x + CARD_W / 2;
-    const couple = coupleAbove(p, cx, occupied, card.x > 0);
-    if (couple) {
-      occupied.push(couple);
-      descent(links, `pp-${p}`, couple.fromX, couple.fromY, [{ id: p, x: card.x, y: 0, kind: "birth" }], 50, couple.parents, options.rounded);
+  // The partners' parents come down to a lower bar than the siblings' (25 above the row, not 50), so the two never
+  // share a stretch of line; a third partner's and further out lower still, so they don't share one with the first two.
+  const landing: number[] = [];
+  for (const [i, o] of others.entries()) {
+    const card = placed.get(o.p)!;
+    const drop = 25 - 10 * Math.min(2, Math.floor(i / 2));
+    if (o.width) {
+      const c = placeCouple(o.p, o.present, otherLeft.get(o.p)!);
+      landing.push(c.fromX);
+      descent(links, `pp-${o.p}`, c.fromX, c.fromY, [{ id: o.p, x: card.x, y: 0, kind: "birth" }], drop, o.present, options.rounded);
     } else if (options.editing) {
-      boxes.push({ key: `add-${p}`, x: card.x + (CARD_W - 150) / 2, y: -FAMILY_PITCH + (CARD_H - 52) / 2, w: 150, h: 52, label: "Dodaj rodziców", action: "add-parents", of: p });
-      links.push({ key: `add-link-${p}`, d: `M${card.x + CARD_W / 2} ${-FAMILY_PITCH + (CARD_H + 52) / 2} V0`, kind: "placeholder", people: [] });
+      const left = boxLeft.get(o.p) ?? card.x + (CARD_W - 150) / 2;
+      const fromX = left + 75;
+      const fromY = -FAMILY_PITCH + (CARD_H + 52) / 2;
+      const toX = card.x + CARD_W / 2;
+      landing.push(fromX);
+      boxes.push({ key: `add-${o.p}`, x: left, y: -FAMILY_PITCH + (CARD_H - 52) / 2, w: 150, h: 52, label: "Dodaj rodziców", action: "add-parents", of: o.p });
+      const d = fromX === toX ? `M${toX} ${fromY} V0` : options.rounded ? elbow(fromX, fromY, -drop, toX, 0) : `M${fromX} ${fromY} V${-drop} H${toX} V0`;
+      links.push({ key: `add-link-${o.p}`, d, kind: "placeholder", people: [] });
+    }
+  }
+
+  // Siblings, always shown, in birth order: the older ones left of the person, the younger ones right of the
+  // partners, and half-siblings at the outer end on the side of the parent they share. From 9 on, narrower cards.
+  const birth = (id: string) => graph.people[id]?.birth?.sort ?? Number.MAX_SAFE_INTEGER;
+  const brood = [...new Set(graph.unions.filter((u) => u.children.some((c) => c.id === focusId)).flatMap((u) => u.children.map((c) => c.id)))]
+    .filter((id) => graph.people[id] && (id === focusId || !placed.has(id)))
+    .sort((a, b) => birth(a) - birth(b));
+  const at = brood.indexOf(focusId);
+  const older = brood.slice(0, at);
+  const younger = brood.slice(at + 1);
+  const [father, mother] = parentsOrdered(graph, focusId);
+  const halfOf = (parent: string | null, skip: string[]) =>
+    parent ? graph.people[parent].children.filter((id) => id !== focusId && graph.people[id] && !placed.has(id) && !brood.includes(id) && !skip.includes(id)).sort((a, b) => birth(a) - birth(b)) : [];
+  const halfLeft = halfOf(father, []);
+  const halfRight = halfOf(mother, halfLeft);
+  const narrow = older.length + younger.length + halfLeft.length + halfRight.length >= 9;
+  const w = narrow ? NARROW_W : CARD_W;
+  const gap = narrow ? NARROW_GAP : SIBLING_GAP;
+  // Clear of the partners' parents' lines coming down beside them.
+  let left = Math.min(rowLeft, ...landing.filter((x) => x < CARD_W / 2).map((x) => x - SIBLING_GAP)) - SIBLING_GAP;
+  let right = Math.max(rowRight, ...landing.filter((x) => x > CARD_W / 2).map((x) => x + SIBLING_GAP)) + SIBLING_GAP;
+  const half = (p: GraphPerson) => (p.sex === "M" ? "brat przyrodni" : p.sex === "F" ? "siostra przyrodnia" : "rodzeństwo przyrodnie");
+  const sibling = (id: string, x: number, isHalf: boolean) => {
+    const p = graph.people[id];
+    const sub = isHalf ? [half(p), subLine(p)].filter(Boolean).join(" · ") : subLine(p);
+    return place(id, x, 0, { sub, ...(narrow ? { w } : {}) });
+  };
+  const leftSide = [...halfLeft, ...older].reverse().map((id) => {
+    left -= w;
+    const card = sibling(id, left, halfLeft.includes(id));
+    left -= gap;
+    return card;
+  });
+  const rightSide = [...younger, ...halfRight].map((id) => {
+    const card = sibling(id, right, halfRight.includes(id));
+    right += w + gap;
+    return card;
+  });
+  const kid = (c: SceneCard) => ({ id: c.id, x: c.x, y: c.y, w: c.w, kind: linkKind(pediOf(graph, c.id), false) });
+  if (ownCouple) {
+    const full = [...leftSide, placed.get(focusId)!, ...rightSide].filter((c) => !halfLeft.includes(c.id) && !halfRight.includes(c.id)).sort((a, b) => a.x - b.x);
+    descent(links, "focus-parents", ownCouple.fromX, ownCouple.fromY, full.map(kid), 50, own.present, options.rounded);
+    // Half-siblings: from the shared parent's card, to a bar above the full siblings' one.
+    for (const [parent, ids] of [[father, halfLeft], [mother, halfRight]] as const) {
+      const from = parent ? placed.get(parent) : undefined;
+      if (!from || !ids.length) continue;
+      descent(links, `half-${parent}`, from.x + CARD_W / 2, from.y + CARD_H, ids.map((id) => kid(placed.get(id)!)).sort((a, b) => a.x - b.x), 75, [parent!], options.rounded);
     }
   }
 
   // Row +1: the children of each union, centred under it, pushed apart where they would overlap.
   const groups: { key: string; fromX: number; fromY: number; parents: string[]; kids: string[] }[] = [];
   for (const u of graph.unions.filter((u) => u.partners.includes(focusId))) {
-    const kids = childrenOf(graph, u);
+    const kids = childrenOf(graph, u).filter((id) => !placed.has(id));
     if (!kids.length) continue;
     const other = u.partners.find((x) => x !== focusId && placed.has(x));
     const marker = other ? unions.find((m) => m.people.includes(focusId) && m.people.includes(other)) : undefined;
@@ -290,7 +362,8 @@ export function layoutFamily(graph: Graph, focusId: string, options: { siblingsO
     cursor = left + width + SIBLING_GAP * 2;
   });
 
-  labels.push({ key: "focus-label", x: 0, y: -24, text: "Osoba w centrum", accent: true });
+  // Right of the line coming down from the parents (or „Dodaj rodziców”), not across it.
+  labels.push({ key: "focus-label", x: ownCouple || options.editing ? CARD_W / 2 + 8 : 0, y: -24, text: "Osoba w centrum", accent: true });
   const scene = { cards, links, unions, pills, boxes, labels };
   return { ...scene, bounds: bounds(scene) };
 }

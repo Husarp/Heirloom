@@ -13,6 +13,7 @@ pub mod lists;
 pub mod tree;
 pub mod media;
 pub mod people;
+pub mod running;
 pub mod text;
 mod tools;
 pub mod update;

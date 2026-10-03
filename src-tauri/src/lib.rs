@@ -1,14 +1,15 @@
 //! The app window: one command (`api`) that forwards to `heirloom-api` (`update.*` to its updater), and the
 //! `heirloom://` protocol that serves the archive's photos and documents (PLAN.md §5.3). With `--selftest <report>`
 //! the window is hidden, the interface checks itself (scripts/build.ps1 runs it before packaging) and the app quits.
+//! While it runs, `%LOCALAPPDATA%\Heirloom\running\<pid>.json` tells the installer whether closing it would lose work.
 
-use heirloom_api::{Api, ApiError, media, update::Updater};
+use heirloom_api::{Api, ApiError, media, running::RunningFile, update::Updater};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tauri::Manager;
+use tauri::{Manager, RunEvent};
 use tauri::http::{Response, StatusCode, header::CONTENT_TYPE};
 
 struct AppState(Mutex<Api>);
@@ -55,6 +56,72 @@ async fn call(
     api.call(&method, args)
 }
 
+/// The window's close question would ask about this much (useCloseGuard.ts): written for the installer.
+#[tauri::command]
+async fn unsaved_state(
+    running: tauri::State<'_, RunningFile>,
+    unsaved_changes: u32,
+    draft: bool,
+    archive: Option<String>,
+) -> Result<(), ApiError> {
+    running.set(unsaved_changes, draft, archive);
+    Ok(())
+}
+
+/// `taskkill` without /F - and anything else that closes a program politely - posts WM_CLOSE to every top-level
+/// window of the process, also to the invisible one through which tao (Tauri's event loop) gets the messages other
+/// threads send to the window's thread. Its default handling destroys that window, and from then on nothing sent
+/// that way arrives: the window's own close never happens, whatever the close question was answered, and Heirloom
+/// stays on screen half-alive until Task Manager ends it (0.4.0, installer run while Heirloom was open). That window
+/// now ignores WM_CLOSE; the real window still asks about unsaved changes, as its ✕ does.
+#[cfg(windows)]
+mod close_shield {
+    use std::sync::atomic::{AtomicIsize, Ordering};
+
+    const GWLP_WNDPROC: i32 = -4;
+    const WM_CLOSE: u32 = 0x0010;
+    const TAO_TARGET: &str = "Tao Thread Event Target";
+    static ORIGINAL: AtomicIsize = AtomicIsize::new(0);
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn EnumThreadWindows(thread: u32, each: unsafe extern "system" fn(isize, isize) -> i32, param: isize) -> i32;
+        fn GetClassNameW(window: isize, name: *mut u16, size: i32) -> i32;
+        fn GetWindowLongPtrW(window: isize, index: i32) -> isize;
+        fn SetWindowLongPtrW(window: isize, index: i32, value: isize) -> isize;
+        fn CallWindowProcW(previous: isize, window: isize, message: u32, wparam: usize, lparam: isize) -> isize;
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetCurrentThreadId() -> u32;
+    }
+
+    unsafe extern "system" fn shielded(window: isize, message: u32, wparam: usize, lparam: isize) -> isize {
+        if message == WM_CLOSE {
+            return 0;
+        }
+        unsafe { CallWindowProcW(ORIGINAL.load(Ordering::Relaxed), window, message, wparam, lparam) }
+    }
+
+    unsafe extern "system" fn each(window: isize, _: isize) -> i32 {
+        let mut name = [0u16; 64];
+        let n = unsafe { GetClassNameW(window, name.as_mut_ptr(), name.len() as i32) }.max(0) as usize;
+        if String::from_utf16_lossy(&name[..n]) != TAO_TARGET || ORIGINAL.load(Ordering::Relaxed) != 0 {
+            return 1;
+        }
+        // (On the window's own thread: no message reaches it between these two lines.)
+        ORIGINAL.store(unsafe { GetWindowLongPtrW(window, GWLP_WNDPROC) }, Ordering::Relaxed);
+        unsafe { SetWindowLongPtrW(window, GWLP_WNDPROC, shielded as *const () as isize) };
+        0
+    }
+
+    /// Called on the window's thread (Tauri's setup), where tao made that window.
+    pub fn install() {
+        unsafe { EnumThreadWindows(GetCurrentThreadId(), each, 0) };
+    }
+}
+
 /// The folder the self-test may use, or nothing on a normal start.
 #[tauri::command]
 fn selftest_folder(test: tauri::State<'_, SelfTest>) -> Option<String> {
@@ -93,12 +160,15 @@ pub fn run() {
     // The self-test never goes online either.
     let updater = Updater::new(if selftest.is_some() { None } else { Some(Updater::default_dir()) });
     updater.remove_old_downloads();
+    // The self-test is not a Heirloom the installer has to close.
+    let running = RunningFile::new(if selftest.is_some() { None } else { RunningFile::default_dir() });
     let watchdog = selftest.clone();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState(Mutex::new(api)))
         .manage(updater)
+        .manage(running)
         .manage(SelfTest(selftest))
         .register_asynchronous_uri_scheme_protocol("heirloom", move |_ctx, request, responder| {
             let roots = roots.clone();
@@ -114,6 +184,8 @@ pub fn run() {
             });
         })
         .setup(move |app| {
+            #[cfg(windows)]
+            close_shield::install();
             // A normal start shows the window as tauri.conf.json makes it; only the self-test hides it.
             if let Some((report, dir)) = watchdog {
                 if let Some(window) = app.get_webview_window("main") {
@@ -127,7 +199,12 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![call, selftest_folder, selftest_done])
-        .run(tauri::generate_context!())
-        .expect("error while running Heirloom");
+        .invoke_handler(tauri::generate_handler![call, unsaved_state, selftest_folder, selftest_done])
+        .build(tauri::generate_context!())
+        .expect("error while running Heirloom")
+        .run(|app, event| {
+            if let RunEvent::Exit = event {
+                app.state::<RunningFile>().remove();
+            }
+        });
 }

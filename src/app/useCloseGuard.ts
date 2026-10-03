@@ -1,11 +1,30 @@
 import { useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { inTauri } from "../api/transport";
 import { count } from "../lib/format";
 import { useStore } from "./store";
 
 /** Closing the window with unsaved changes asks first (saving is manual): „Zapisz i zamknij”, „Zamknij bez zapisu”
- *  or „Anuluj”. Without changes the window closes at once. */
+ *  or „Anuluj”. Without changes the window closes at once. What that question would ask about is also told to the
+ *  installer (installer/setup.py, through src-tauri's `unsaved_state`), so a HeirloomSetup run by hand knows whether
+ *  it may close Heirloom or must say there is unsaved work. */
 export function useCloseGuard() {
+  useEffect(() => {
+    if (!inTauri) return;
+    let last = "";
+    const report = (s: ReturnType<typeof useStore.getState>) => {
+      const unsavedChanges = s.archive?.unsavedChanges ?? 0;
+      const draft = s.leaveGuard !== null;
+      const archive = s.archive?.name ?? null;
+      const now = JSON.stringify([unsavedChanges, draft, archive]);
+      if (now === last) return;
+      last = now;
+      invoke("unsaved_state", { unsavedChanges, draft, archive }).catch(() => {});
+    };
+    report(useStore.getState());
+    return useStore.subscribe(report);
+  }, []);
+
   useEffect(() => {
     if (!inTauri) return;
     let unlisten: (() => void) | null = null;
