@@ -664,6 +664,10 @@ mod tests {
         assert_ne!(first["batch"], second["batch"], "each import is taken back on its own");
         let status = api.call("history.undo", json!({ "batch": second["batch"] })).unwrap();
         assert_eq!(status["people"], 4, "the first import's people stay");
+        // „N importów · każdy można cofnąć” counts only the imports still there.
+        let history = api.call("import.history", Value::Null).unwrap();
+        let active: Vec<(&str, bool)> = history.as_array().unwrap().iter().map(|h| (h["name"].as_str().unwrap(), h["active"].as_bool().unwrap())).collect();
+        assert_eq!(active, [(second["batch"].as_str().unwrap(), false), (first["batch"].as_str().unwrap(), true)]);
     }
 
     #[test]
