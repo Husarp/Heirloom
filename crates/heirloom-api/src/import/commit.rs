@@ -115,11 +115,8 @@ pub fn commit(s: &mut Session, draft: &mut Draft, author: &str, note: Option<&st
     }
     // Step 3 refuses joining two relatives with one archive person; a choice changed later (a relative ticked again)
     // is caught here, before anything is copied.
-    for p in &draft.batch.merged.persons {
-        let Some(decision) = draft.decisions.get(&p.id).filter(|d| is_included(Some(d)) && d.kind == Kind::Merge) else { continue };
-        if let Some(why) = decision.target.as_deref().and_then(|t| super::same_target_conflict(draft, &p.id, t)) {
-            return Err(ApiError::new("same_target", why));
-        }
+    if let Some(why) = super::first_conflict(draft) {
+        return Err(ApiError::new("same_target", why));
     }
     if s.archive.settings().read_only {
         return Err(ApiError::new("read_only", "To archiwum jest tylko do odczytu (Ustawienia › Archiwum)."));
@@ -1132,12 +1129,21 @@ mod tests {
         let marked = |id: &str| state["persons"].as_array().unwrap().iter().find(|p| p["id"] == id).unwrap()["sameTarget"].clone();
         assert_eq!(marked("P2"), json!([{ "id": "P4", "name": "Marianna Kowalska" }]));
         assert_eq!(marked("P1"), json!([]));
-        // A father set to „Pomiń” is not linked, so he may be the same person; set back, the commit refuses before
-        // anything is copied.
+        // A father set to „Pomiń” is not linked, so he may be the same person; setting him back (or ticking the line
+        // again in the summary) is refused.
         call(&mut s, &mut draft, "import.decide", json!({ "person": "P4", "kind": "new" })).unwrap();
         call(&mut s, &mut draft, "import.field", json!({ "person": "P1", "field": "father", "choice": "skip" })).unwrap();
         decide(&mut s, &mut draft, "P2", &x).unwrap();
+        assert_eq!(call(&mut s, &mut draft, "import.field", json!({ "person": "P1", "field": "father", "choice": "add" })).unwrap_err().code, "same_target");
+        assert_eq!(draft.as_ref().unwrap().decisions["P1"].fields["father"], "skip", "the choice is not taken");
+        call(&mut s, &mut draft, "import.field", json!({ "person": "P1", "field": "father", "choice": "variant" })).unwrap_err();
+        call(&mut s, &mut draft, "import.field", json!({ "person": "P1", "field": "father", "choice": "skip" })).unwrap();
+        call(&mut s, &mut draft, "import.include", json!({ "person": "P1", "field": "father", "include": false })).unwrap();
         call(&mut s, &mut draft, "import.field", json!({ "person": "P1", "field": "father", "choice": "add" })).unwrap();
+        assert_eq!(call(&mut s, &mut draft, "import.include", json!({ "person": "P1", "field": "father", "include": true })).unwrap_err().code, "same_target");
+        assert!(draft.as_ref().unwrap().decisions["P1"].excluded_fields.contains("father"));
+        // Should a choice still get past these, the commit refuses before anything is copied.
+        draft.as_mut().unwrap().decisions.get_mut("P1").unwrap().excluded_fields.clear();
         assert_eq!(call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap_err().code, "same_target");
         assert!(std::fs::read_dir(root.join("media")).map_or(true, |mut d| d.next().is_none()), "nothing copied");
     }

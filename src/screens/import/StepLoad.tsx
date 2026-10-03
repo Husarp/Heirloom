@@ -386,7 +386,7 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
                 <span className="ellipsis grow" style={{ fontWeight: 500 }}>
                   {h.name}
                 </span>
-                {!h.active && <span style={{ color: "var(--text3)" }}>cofnięty</span>}
+                {h.undone && <span style={{ color: "var(--text3)" }}>cofnięty</span>}
                 <span style={{ color: "var(--text3)" }}>{shortWhen(h.ts)}</span>
                 <span style={{ color: "var(--text2)", minWidth: 64, textAlign: "right" }}>{h.people > 0 ? people(h.people) : count(h.files, "plik", "pliki", "plików")}</span>
               </div>

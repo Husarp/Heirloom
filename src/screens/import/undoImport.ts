@@ -23,8 +23,9 @@ export async function undoImport(batch: string): Promise<void> {
   const { changed, notify } = useStore.getState();
   try {
     const past = await call<PastImport[]>("import.history");
-    if (past.find((h) => h.name === batch)?.active === false) {
-      notify("Ten import jest już cofnięty.");
+    const entry = past.find((h) => h.name === batch);
+    if (entry?.active === false) {
+      notify(entry.undone ? "Ten import jest już cofnięty." : "Nie ma czego cofnąć — wszystko z tego importu zmieniono później.");
       return;
     }
     const status = await call<ArchiveStatus>("history.undo", { batch });

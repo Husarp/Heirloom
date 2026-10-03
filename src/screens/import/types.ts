@@ -140,8 +140,10 @@ export interface PastImport {
   author: string;
   people: number;
   files: number;
-  /** False once it was undone (nothing of it is left to take back). */
+  /** Something of it is still as it saved it, so „Cofnij import” would take it back. */
   active: boolean;
+  /** Taken back: everything it changed is as it was before it (not merely changed since). */
+  undone: boolean;
 }
 
 export interface CommitResult {
