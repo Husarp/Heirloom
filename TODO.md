@@ -266,7 +266,7 @@ This is the roadmap, with a checkbox per task.
 - [x] **Całe drzewo — a label stays when its family is gone** (done 2026-10-03): „Dąbrowscy” stays at the edge of the screen although
       none of the family is visible; a label should show only while some of its family is on screen (now only
       left–right is checked, not up–down)
-- [ ] **Clicking a person works the same in every tree view** (your rule: one click = one result everywhere, so
+- [x] **Clicking a person works the same in every tree view** (your rule: one click = one result everywhere, so
       it's easy to remember): a click opens the side panel with that person, and „Otwórz profil” there goes to the
       full profile. Rodzina, Przodkowie and Potomkowie do this already; in Całe drzewo the click selects the person
       but the side panel is switched off for that view (`Tree.tsx:304`, `view !== "overview"`), so nothing seems to
@@ -274,8 +274,11 @@ This is the roadmap, with a checkbox per task.
       mouse's back button, Alt ←, or the ← button in the top bar — returns to the same view at the same zoom and
       place (the tree doesn't remember its zoom and position yet). The click part done 2026-10-03: Całe drzewo opens the side
       panel (its relatives move the camera there), rings the selected person (also after „Skocz do osoby…”), finds
-      the nearest person in the grid cell, Esc closes the panel, and only the left button selects in every view;
-      Back to the same place is still open
+      the nearest person in the grid cell, Esc closes the panel, and only the left button selects in every view.
+      Back to the same place done 2026-10-03: each Back/Forward entry of the tree keeps its view, person, selection,
+      zoom and position; a new centre (double-click, a pill, a relative in the panel, „Skocz do osoby…”) is a step
+      in history, the arrow keys and Home only update the current one; coming back fetches nothing and Całe drzewo
+      isn't rebuilt (a new centre there no longer fetches everyone again either)
 - [x] **Settings: no row that only looks like a setting** (checked 2026-09-29; every other row does change the app;
       the shared „wkrótce” look done 2026-10-03: greyed row, a „wkrótce” badge, the control visible but inert).
       Rows you can see but not change now:
@@ -288,11 +291,15 @@ This is the roadmap, with a checkbox per task.
   - Narzędzia › „Zmniejsz zdjęcia”: switched off (not for now, as you decided).
   Build the two you named (sibling order, branch colours). The others stay visible but greyed out, all marked
   the same way: „wkrótce” (agreed 2026-09-29); the two to build look the same until they're built
-- [ ] **„Osoba startowa” → a start setting with two options** (agreed 2026-09-29): open the archive on **Start**,
+- [x] **„Osoba startowa” → a start setting with two options** (agreed 2026-09-29; done 2026-10-03): open the archive on **Start**,
       or in **the last place** — whatever screen you were on (a profile, a tree view at its zoom and position, a
       list…), remembered per archive, also after closing the program. No chosen start person: „Osoba startowa”
       (Ustawienia › Drzewo) goes, and so does the first-open question „Od kogo zacząć drzewo?” that sets it; the
-      tree centres on the last viewed person, or on a suggested one when nobody was viewed yet
+      tree centres on the last viewed person, or on a suggested one when nobody was viewed yet. Done: Ustawienia ›
+      Archiwum › „Po otwarciu archiwum: Start · Ostatnie miejsce” (Start by default), kept on this computer in
+      aplikacja.json for each archive: the screen, the tree as last seen (view, person, zoom, position) and
+      „Ostatnio oglądane”. The Import, a new person and Ustawienia aren't restored (Start instead). The first-open
+      screen keeps its summary; Home in the tree goes to the suggested person (it did nothing before)
 - [x] **Top bar › „Rozmiar tekstu”: „150%” sticks out of the box** (your screenshot, 2026-09-29; done 2026-10-03): the popover is a
       fixed 230 px wide (`TextSizePopover.tsx:28`) and the four buttons need more; let it grow to fit them. Done: it
       grows to fit, a second click on the icon closes it, a failure shows a toast, and a size the buttons don't

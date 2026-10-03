@@ -12,6 +12,8 @@ export interface Appearance {
   textSize: number;
   density: "comfortable" | "compact";
   animations: boolean;
+  /** What opening an archive shows: the Start screen, or the place where it was left („Po otwarciu archiwum”). */
+  startIn: "start" | "last";
 }
 
 export interface FileWarning {
@@ -35,7 +37,6 @@ export interface ArchiveStatus {
   /** How many steps can be undone (a profile section undoes back to where it was opened). */
   undoDepth: number;
   changedOnDisk: boolean;
-  startPerson: string | null;
   warnings: FileWarning[];
   encoding: string;
   people: number;
@@ -68,6 +69,17 @@ export interface AppState {
   appearance: Appearance;
   lastEditor: string | null;
   archive: ArchiveStatus | null;
+  /** Where the open archive was left on this computer (aplikacja.json); null before anything was remembered. */
+  place: Place | null;
+}
+
+/** An archive's last place: the screen and the tree as last seen are routes of the UI (app/store.ts `Route`). */
+export interface Place {
+  route: unknown;
+  tree: unknown;
+  /** „Ostatnio oglądane”, newest first. */
+  viewed: string[];
+  at: string;
 }
 
 export interface SaveResult {

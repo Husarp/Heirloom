@@ -1,11 +1,17 @@
-//! Settings that belong to this computer, not to an archive: the recent archives and the appearance.
-//! Stored in `%APPDATA%\Heirloom\aplikacja.json`.
+//! Settings that belong to this computer, not to an archive: the recent archives, the appearance and the last
+//! place in each archive. Stored in `%APPDATA%\Heirloom\aplikacja.json`.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 const FILE: &str = "aplikacja.json";
 const RECENT_LIMIT: usize = 12;
+/// Places are kept for this many archives (the most recently used ones).
+const PLACES_LIMIT: usize = 20;
+/// „Ostatnio oglądane” on Start.
+const VIEWED_LIMIT: usize = 8;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -14,6 +20,23 @@ pub struct AppConfig {
     pub appearance: Appearance,
     /// The name last chosen in "Kto edytuje?", offered first next time.
     pub last_editor: Option<String>,
+    /// Where each archive was left, by archive id. Kept on this computer, never in the archive folder: on a shared
+    /// server, one person's last screen must not move another's.
+    pub places: BTreeMap<String, Place>,
+}
+
+/// Where an archive was left, for „Po otwarciu archiwum: Ostatnie miejsce”.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Place {
+    /// The screen (a route of the UI; not read here).
+    pub route: Value,
+    /// The tree as last seen: its view, person, zoom and position (also a route of the UI).
+    pub tree: Value,
+    /// „Ostatnio oglądane”: the profiles viewed, newest first (xrefs).
+    pub viewed: Vec<String>,
+    /// RFC 3339; the oldest places go first when there are too many.
+    pub at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -37,11 +60,13 @@ pub struct Appearance {
     /// `comfortable` or `compact`.
     pub density: String,
     pub animations: bool,
+    /// What opening an archive shows: `start` (the Start screen) or `last` (the place where it was left).
+    pub start_in: String,
 }
 
 impl Default for Appearance {
     fn default() -> Self {
-        Appearance { theme: "system".into(), text_size: 100, density: "comfortable".into(), animations: true }
+        Appearance { theme: "system".into(), text_size: 100, density: "comfortable".into(), animations: true, start_in: "start".into() }
     }
 }
 
@@ -77,6 +102,26 @@ impl AppConfig {
     pub fn forget(&mut self, path: &str) {
         self.recent.retain(|r| !same_path(&r.path, path));
     }
+
+    /// Updates the parts of an archive's place that are given.
+    pub fn set_place(&mut self, archive_id: &str, route: Option<Value>, tree: Option<Value>, viewed: Option<Vec<String>>, at: String) {
+        let place = self.places.entry(archive_id.to_string()).or_default();
+        if let Some(route) = route {
+            place.route = route;
+        }
+        if let Some(tree) = tree {
+            place.tree = tree;
+        }
+        if let Some(mut viewed) = viewed {
+            viewed.truncate(VIEWED_LIMIT);
+            place.viewed = viewed;
+        }
+        place.at = at;
+        while self.places.len() > PLACES_LIMIT {
+            let Some(oldest) = self.places.iter().min_by(|a, b| a.1.at.cmp(&b.1.at)).map(|(id, _)| id.clone()) else { break };
+            self.places.remove(&oldest);
+        }
+    }
 }
 
 /// Windows paths are case-insensitive.
@@ -97,6 +142,30 @@ mod tests {
         config.remember(entry("d:\\a"));
         let paths: Vec<_> = config.recent.iter().map(|r| r.path.as_str()).collect();
         assert_eq!(paths, ["d:\\a", "D:\\B"]);
+    }
+
+    #[test]
+    fn places_merge_and_keep_the_newest_archives() {
+        let mut config = AppConfig::default();
+        let route = serde_json::json!({ "name": "people" });
+        config.set_place("a", Some(route.clone()), None, Some((0..12).map(|i| format!("@I{i}@")).collect()), "2026-10-01T10:00:00Z".into());
+        config.set_place("a", None, Some(serde_json::json!({ "name": "tree" })), None, "2026-10-01T10:00:01Z".into());
+        let a = &config.places["a"];
+        assert_eq!((&a.route, a.tree["name"].as_str(), a.viewed.len()), (&route, Some("tree"), 8));
+        for k in 0..PLACES_LIMIT {
+            config.set_place(&format!("b{k}"), Some(route.clone()), None, None, format!("2026-10-02T10:00:{k:02}Z"));
+        }
+        assert_eq!(config.places.len(), PLACES_LIMIT);
+        assert!(!config.places.contains_key("a"), "the oldest place goes");
+    }
+
+    #[test]
+    fn an_older_file_loads_with_the_new_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(FILE), br#"{"appearance": {"theme": "dark"}}"#).unwrap();
+        let config = AppConfig::load(dir.path());
+        assert_eq!((config.appearance.theme.as_str(), config.appearance.start_in.as_str()), ("dark", "start"));
+        assert!(config.places.is_empty());
     }
 
     #[test]

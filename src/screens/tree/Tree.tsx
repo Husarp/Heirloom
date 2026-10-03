@@ -2,7 +2,7 @@ import { Crosshair, GitCommitVertical, IdCard, LocateFixed, Maximize, Minus, Pal
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { call } from "../../api/transport";
 import type { ArchiveStatus } from "../../api/types";
-import { useStore } from "../../app/store";
+import { rememberPlace, useStore, type TreeCamera, type TreeRoute } from "../../app/store";
 import { useApi } from "../../app/useApi";
 import { useDark } from "../../app/useAppearance";
 import { Dropdown, Segmented, Spinner } from "../../components/bits";
@@ -31,13 +31,16 @@ export function Tree({ hidden }: { hidden: boolean }) {
   const viewedList = useStore((s) => s.recentlyViewed);
   const mode = useStore((s) => s.mode);
   const go = useStore((s) => s.go);
+  const replaceRoute = useStore((s) => s.replaceRoute);
   const setCrumb = useStore((s) => s.setCrumb);
   const requireEdit = useStore((s) => s.requireEdit);
   const animations = useStore((s) => s.app?.appearance.animations ?? true);
   const dark = useDark();
   const view: View = route.name === "tree" ? route.view : "family";
   const [focus, setFocus] = useState<string | null>(route.name === "tree" && route.person ? route.person : null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(route.name === "tree" ? (route.sel ?? route.person ?? null) : null);
+  // A camera to come back to (Back, „Ostatnie miejsce”), handed to the canvas of that view and that person.
+  const [restore, setRestore] = useState<{ view: View; person: string; cam: TreeCamera } | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
   const [hovered, setHovered] = useState<string | null>(null);
   const [siblingsOpen, setSiblingsOpen] = useState(false);
@@ -52,56 +55,74 @@ export function Tree({ hidden }: { hidden: boolean }) {
   const canvas = useRef<FocusCanvasHandle>(null);
   const overview = useRef<OverviewHandle>(null);
 
-  // Whom the tree starts from: the route, the archive's start person, the last person viewed, else a suggestion.
+  // The route leads: a new person in it (Back, Forward, a link from another screen) becomes the centre, and a route
+  // that was left carries the camera and the selection to come back to.
   useEffect(() => {
-    if (route.name === "tree" && route.person && route.person !== focus) {
+    if (route.name !== "tree") return;
+    if (route.person && route.person !== focus) {
       setFocus(route.person);
-      setSelected(route.person);
-    }
+      setSelected(route.sel ?? route.person);
+      setSiblingsOpen(false);
+    } else if (route.sel) setSelected(route.sel);
+    if (route.cam && route.person) setRestore({ view: route.view, person: route.person, cam: route.cam });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route]);
+  // …and follows the tree: a new centre chosen here (or below) is written into the current route, so coming back
+  // to it lands on the same person.
+  useEffect(() => {
+    const current = useStore.getState().route;
+    if (hidden || !focus || current.name !== "tree" || current.person === focus) return;
+    replaceRoute({ name: "tree", view: current.view, person: focus });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus]);
+  // Opened without a person: where the tree was last seen in this archive (at its zoom and place), the last person
+  // viewed, else a suggestion.
   useEffect(() => {
     if (focus) return;
-    const start = archive?.startPerson ?? viewedList[0]?.id;
+    const place = useStore.getState().treePlace;
+    const start = place?.person ?? viewedList[0]?.id;
     if (start) {
       setFocus(start);
-      setSelected(start);
+      setSelected(place?.person ? (place.sel ?? start) : start);
+      if (place?.person && place.cam && place.view === view) setRestore({ view, person: place.person, cam: place.cam });
       return;
     }
-    call<{ suggestions: { person: { id: string } }[] }>("archive.firstOpen")
-      .then((d) => {
-        const id = d.suggestions[0]?.person.id;
-        if (id) {
-          setFocus(id);
-          setSelected(id);
+    suggested()
+      .then((s) => {
+        if (s) {
+          setFocus(s.id);
+          setSelected(s.id);
         }
       })
       .catch(() => {});
-  }, [focus, archive?.startPerson, viewedList]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus, viewedList]);
 
   // Przodkowie and Potomkowie use the full width (spec §4.2, §4.3; the panel opens when someone is chosen there);
   // Rodzina shows it (§4.1).
   useEffect(() => setPanelOpen(view === "family"), [view]);
 
   const depth = view === "overview" ? null : DEPTH[view];
-  const { data: graphData, loading, error: graphError } = useApi<Graph>(!hidden && focus && depth ? "tree.graph" : null, { id: focus, up: depth?.up, down: depth?.down });
+  // Paused while hidden: coming back fetches nothing (and redraws nothing) unless the archive changed meanwhile.
+  const { data: graphData, loading, error: graphError } = useApi<Graph>(focus && depth ? "tree.graph" : null, { id: focus, up: depth?.up, down: depth?.down }, !hidden);
   // While another person loads, the previous graph stays on screen; a graph fetched for another view does not.
   const graph = graphData && depth && graphData.up === depth.up && graphData.down === depth.down ? graphData : null;
   // The person in the middle is gone (deleted, or their adding undone): start again from a suggestion.
   useEffect(() => {
     if (graphError?.code !== "not_found") return;
-    call<{ suggestions: { person: { id: string } }[] }>("archive.firstOpen")
-      .then((d) => {
-        const id = d.suggestions.find((s) => s.person.id !== focus)?.person.id;
-        if (id) {
-          setFocus(id);
-          setSelected(id);
+    suggested(focus)
+      .then((s) => {
+        if (s) {
+          setFocus(s.id);
+          setSelected(s.id);
         }
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graphError]);
-  const { data: overviewData, loading: overviewLoading } = useApi<OverviewData>(!hidden && view === "overview" ? "tree.overview" : null, { focus });
+  // Everyone at once; the centre person's line is drawn from it on screen, so a new centre fetches nothing, and
+  // neither does coming back from another view while the archive is unchanged.
+  const { data: overviewData, loading: overviewLoading } = useApi<OverviewData>("tree.overview", undefined, !hidden && view === "overview");
 
   useEffect(() => {
     if (hidden) return;
@@ -169,10 +190,34 @@ export function Tree({ hidden }: { hidden: boolean }) {
     [graph, lineSet, view, lineOn, selected, focus],
   );
 
-  const refocus = useCallback((id: string) => {
-    setFocus(id);
-    setSelected(id);
-    setSiblingsOpen(false);
+  // A new person in the centre is a step in Back/Forward history; keyboard steps (`replace`) only update the current
+  // one, so Back doesn't walk back key by key.
+  const refocus = useCallback(
+    (id: string, replace = false) => {
+      setSelected(id);
+      setSiblingsOpen(false);
+      setRestore(null);
+      if (id === focus) return;
+      const next: TreeRoute = { name: "tree", view, person: id };
+      if (replace) replaceRoute(next);
+      else go(next);
+    },
+    [focus, view, go, replaceRoute],
+  );
+
+  // Back and Forward (and the last place) keep the camera and the selection of the tree as it was left.
+  const snapshot = useRef<() => Pick<TreeRoute, "person" | "cam" | "sel">>(() => ({}));
+  snapshot.current = () => ({
+    person: focus ?? undefined,
+    sel: selected ?? undefined,
+    cam: (view === "overview" ? overview.current?.getView() : canvas.current?.getView()) ?? restore?.cam,
+  });
+  useEffect(() => {
+    const take = () => snapshot.current();
+    useStore.getState().setTreeSnapshot(take);
+    return () => {
+      if (useStore.getState().treeSnapshot === take) useStore.getState().setTreeSnapshot(null);
+    };
   }, []);
 
   // Keyboard (design 17g, PLAN §4.2): ↑ a parent (↑ again: the other parent), ↓ the first child, ← → siblings and
@@ -199,7 +244,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
         if (scene?.cards.some((c) => c.id === next && !c.stub)) {
           setSelected(next);
           canvas.current?.reveal(next);
-        } else refocus(next);
+        } else refocus(next, true);
         setAnnounce(describe(graph, next));
       };
       switch (e.key) {
@@ -238,14 +283,16 @@ export function Tree({ hidden }: { hidden: boolean }) {
             setPanelOpen(true);
           }
           break;
-        case "Home": {
-          const start = archive?.startPerson;
-          if (start) {
-            refocus(start);
-            setAnnounce(graph.people[start] ? describe(graph, start) : "Osoba startowa");
-          }
+        case "Home":
+          // The suggested central person (the one with the most links).
+          suggested()
+            .then((s) => {
+              if (!s) return;
+              refocus(s.id, true);
+              setAnnounce(graph.people[s.id] ? describe(graph, s.id) : s.name);
+            })
+            .catch(() => {});
           break;
-        }
         case "Escape":
           setPanelOpen(false);
           break;
@@ -256,7 +303,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [hidden, view, graph, focus, selected, scene, refocus, go, archive?.startPerson]);
+  }, [hidden, view, graph, focus, selected, scene, refocus, go]);
 
   // Całe drzewo has no keyboard walk; Esc still closes the panel there.
   useEffect(() => {
@@ -270,7 +317,10 @@ export function Tree({ hidden }: { hidden: boolean }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [hidden, view]);
 
-  const setView = (v: View) => go({ name: "tree", view: v, person: focus ?? undefined });
+  const setView = (v: View) => {
+    setRestore(null);
+    go({ name: "tree", view: v, person: focus ?? undefined });
+  };
 
   const saveDisplay = (key: string, value: string) => {
     call<ArchiveStatus>("archive.setSettings", { display: { [key]: value } })
@@ -331,10 +381,13 @@ export function Tree({ hidden }: { hidden: boolean }) {
                 setPanelOpen(true);
               }}
               onOpen={(id) => {
-                refocus(id);
+                setRestore(null);
                 go({ name: "tree", view: "family", person: id });
               }}
               onZoom={setZoom}
+              restore={restore?.view === "overview" ? restore.cam : null}
+              onRestored={() => setRestore(null)}
+              onCamera={rememberPlace}
             />
           ) : (
             <Loading count={archive?.people ?? 0} busy={overviewLoading} />
@@ -365,6 +418,9 @@ export function Tree({ hidden }: { hidden: boolean }) {
               else if (action === "add-parents" && of) requireEdit(() => go({ name: "edit", id: null, relation: { kind: "parent", of } }));
             }}
             onZoom={setZoom}
+            restore={restore && restore.view === view && restore.person === focus ? restore.cam : null}
+            onRestored={() => setRestore(null)}
+            onCamera={rememberPlace}
           />
         ) : (
           firstLoad && <Loading count={archive?.people ?? 0} busy />
@@ -482,6 +538,12 @@ export function Tree({ hidden }: { hidden: boolean }) {
       </div>
     </div>
   );
+}
+
+/** The suggested central person (archive.firstOpen: the one with the most links first), other than `except`. */
+async function suggested(except?: string | null): Promise<{ id: string; name: string } | undefined> {
+  const d = await call<{ suggestions: { person: { id: string; name: string } }[] }>("archive.firstOpen");
+  return d.suggestions.find((s) => s.person.id !== except)?.person;
 }
 
 /** What a screen reader hears after a keyboard step (design 17g): „Józef Kowalski, 1878–1951. Rodzice: Antoni
