@@ -187,15 +187,16 @@ pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Val
                         _ => Kind::Undecided,
                     };
                     let target = args.get("target").and_then(Value::as_str).map(str::to_string);
-                    let decision = d.decisions.get_mut(&id).ok_or_else(|| ApiError::bad_args("person"))?;
+                    let current = d.decisions.get(&id).ok_or_else(|| ApiError::bad_args("person"))?;
                     if kind == Kind::Merge {
                         let fallback = d.candidates.get(&id).and_then(|c| c.first()).map(|c| c.xref.clone());
-                        decision.target = target.or(decision.target.clone()).or(fallback);
-                        if decision.target.is_none() {
-                            return Err(ApiError::new("bad_args", "Wybierz osobę do połączenia."));
+                        let target = target.or(current.target.clone()).or(fallback).ok_or_else(|| ApiError::new("bad_args", "Wybierz osobę do połączenia."))?;
+                        if let Some(why) = (!current.excluded).then(|| same_target_conflict(d, &id, &target)).flatten() {
+                            return Err(ApiError::new("same_target", why));
                         }
+                        d.decisions.get_mut(&id).expect("checked").target = Some(target);
                     }
-                    decision.kind = kind;
+                    d.decisions.get_mut(&id).expect("checked").kind = kind;
                 }
                 "import.field" => {
                     let id = req(args, "person")?;
@@ -206,7 +207,14 @@ pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Val
                 "import.include" => {
                     let id = req(args, "person")?;
                     let include = args.get("include").and_then(Value::as_bool).unwrap_or(true);
-                    let decision = d.decisions.get_mut(&id).ok_or_else(|| ApiError::bad_args("person"))?;
+                    let current = d.decisions.get(&id).ok_or_else(|| ApiError::bad_args("person"))?;
+                    // Ticked again in the summary: the same rule as joining in step 3.
+                    if include && args.get("field").is_none() && current.kind == Kind::Merge {
+                        if let Some(why) = current.target.as_deref().and_then(|t| same_target_conflict(d, &id, t)) {
+                            return Err(ApiError::new("same_target", why));
+                        }
+                    }
+                    let decision = d.decisions.get_mut(&id).expect("checked");
                     match args.get("field").and_then(Value::as_str) {
                         Some(field) if include => {
                             decision.excluded_fields.remove(field);
@@ -545,6 +553,74 @@ fn duplicate_in_archive(d: &Derived, root: &std::path::Path, path: &std::path::P
     None
 }
 
+/// Joining `pid` with the archive person `target` when another person of the batch is already joined with them and the
+/// two are relatives in the batch (a parent, a child, a partner, a sibling, the other half of a wedding): saving would
+/// make one person their own relative, so it is refused here, in step 3, rather than at the end. Unrelated people may
+/// be joined with one person (the AI can describe one human twice). Links the commit leaves out (a relative set to
+/// „Pomiń” in the comparison) don't count.
+pub fn same_target_conflict(draft: &Draft, pid: &str, target: &str) -> Option<String> {
+    let batch = &draft.batch.merged;
+    let name = |id: &str| batch.persons.iter().find(|p| p.id == id).map(batch_name).unwrap_or_else(|| id.to_string());
+    for other in &batch.persons {
+        let Some(decision) = draft.decisions.get(&other.id) else { continue };
+        if other.id == pid || decision.excluded || decision.kind != Kind::Merge || decision.target.as_deref() != Some(target) {
+            continue;
+        }
+        if let Some(word) = relation_word(draft, pid, &other.id) {
+            return Some(format!(
+                "Ta osoba z archiwum jest już połączona z: {} ({}), a w paczce to {word} osoby {}. Jedna osoba nie może być swoim własnym krewnym — wybierz kogoś innego albo „Nowa”.",
+                name(&other.id),
+                other.id,
+                name(pid)
+            ));
+        }
+    }
+    None
+}
+
+/// What `b` is to `a` in the batch („ojciec”, „żona”, „brat”…), counting only the links the commit would write
+/// (commit.rs: a merged person's relative set to „Pomiń” is not linked; `a` is taken as being merged).
+fn relation_word(draft: &Draft, a: &str, b: &str) -> Option<&'static str> {
+    let batch = &draft.batch.merged;
+    let sex = |id: &str| batch.persons.iter().find(|p| p.id == id).and_then(|p| p.sex.clone());
+    let skipped = |who: &str, field: &str| {
+        draft.decisions.get(who).is_some_and(|d| (who == a || d.kind == Kind::Merge) && (d.excluded_fields.contains(field) || d.fields.get(field).map(String::as_str) == Some("skip")))
+    };
+    let word = |id: &str, male: &'static str, female: &'static str, other: &'static str| match sex(id).as_deref() {
+        Some("M") => male,
+        Some("F") => female,
+        _ => other,
+    };
+    let partner = word(b, "mąż", "żona", "małżonek");
+    for r in &batch.relationships {
+        let (parent, child, x, y) = (r.parent.as_deref(), r.child.as_deref(), r.a.as_deref(), r.b.as_deref());
+        match r.relation.as_deref() {
+            Some("parent") if parent == Some(b) && child == Some(a) && !skipped(a, if sex(b).as_deref() == Some("F") { "mother" } else { "father" }) => {
+                return Some(word(b, "ojciec", "matka", "rodzic"));
+            }
+            Some("parent") if parent == Some(a) && child == Some(b) && !skipped(b, if sex(a).as_deref() == Some("F") { "mother" } else { "father" }) => {
+                return Some(word(b, "syn", "córka", "dziecko"));
+            }
+            Some("partners") if (x, y) == (Some(a), Some(b)) || (x, y) == (Some(b), Some(a)) => {
+                if !skipped(a, "spouse") && !skipped(b, "spouse") {
+                    return Some(partner);
+                }
+            }
+            Some("sibling") if (x, y) == (Some(a), Some(b)) || (x, y) == (Some(b), Some(a)) => return Some(word(b, "brat", "siostra", "rodzeństwo")),
+            _ => {}
+        }
+    }
+    // A wedding (banns, divorce) links its two principals as partners whatever was chosen.
+    for e in batch.events.iter().filter(|e| matches!(e.kind.as_deref(), Some("marriage" | "banns" | "divorce"))) {
+        let explicit: Vec<&str> = e.people.iter().filter(|r| r.role.as_deref() == Some("principal")).map(|r| r.p.as_str()).collect();
+        let principals: Vec<&str> = if explicit.is_empty() { e.people.iter().filter(|r| r.role.as_deref().is_none_or(|x| x == "spouse")).map(|r| r.p.as_str()).collect() } else { explicit };
+        if principals.contains(&a) && principals.contains(&b) {
+            return Some(partner);
+        }
+    }
+    None
+}
+
 /// The name as the app shows people: the married name when there is one (the maiden name goes with „z d.”).
 fn batch_name(p: &format::Person) -> String {
     p.names.iter().find(|n| n.kind.as_deref() == Some("married")).or(p.names.first()).map(|n| format!("{} {}", n.given.clone().unwrap_or_default(), n.surname.clone().unwrap_or_default()).trim().to_string()).unwrap_or_else(|| p.id.clone())
@@ -728,6 +804,17 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
         let facts = batch.events.iter().filter(|e| e.people.iter().any(|r| r.p == p.id)).count();
         let files: Vec<String> = batch.media.iter().filter(|m| m.depicts.contains(&p.id) || m.about.contains(&p.id)).filter_map(|m| m_number(&m.id).map(m_label)).collect();
         let target = decision.and_then(|x| x.target.clone());
+        // Others of the batch joined with the same archive person (allowed when they aren't relatives): their data
+        // goes into that one person.
+        let same_target: Vec<Value> = match (decision, &target) {
+            (Some(x), Some(t)) if x.kind == Kind::Merge && !x.excluded => batch
+                .persons
+                .iter()
+                .filter(|o| o.id != p.id && draft.decisions.get(&o.id).is_some_and(|y| y.kind == Kind::Merge && !y.excluded && y.target.as_ref() == Some(t)))
+                .map(|o| json!({ "id": o.id, "name": batch_name(o) }))
+                .collect(),
+            _ => Vec::new(),
+        };
         let compare = match (decision.map(|x| x.kind), &target) {
             (Some(Kind::Merge) | Some(Kind::Undecided), Some(t)) => compare_rows(s, draft, &p.id, t),
             _ => Vec::new(),
@@ -742,6 +829,7 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
             "status": status,
             "decision": decision.map(|x| match x.kind { Kind::New => "new", Kind::Merge => "merge", Kind::Skip => "skip", Kind::Undecided => "undecided" }),
             "target": target,
+            "sameTarget": same_target,
             "candidates": candidates,
             "compare": compare,
             "facts": facts,
