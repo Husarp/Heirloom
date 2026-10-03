@@ -30,7 +30,7 @@
   | **No "Ty" (no home person)** | Relationships are always shown relative to the person being viewed. The tree opens on the last person viewed, else on a suggested one (the start person setting was removed 2026-10-03) | From the designer brief (2026-09-28) |
   | **Modes** | Browsing by default. Editing is switched on separately and asks "Kto edytuje?" (who is editing); that name goes into the change history | From the designer brief (2026-09-28) |
   | **The researcher's AI** | Free ChatGPT, maybe free Gemini | Small batches, parts of at most 10 persons, results copied from the chat (no downloads) |
-  | **Fully offline** | Nothing is downloaded while the app runs: fonts, icons and every other asset ship with the app | Web links (e.g. Wikipedia) open in the browser only when clicked |
+  | **Fully offline** | Nothing is downloaded while the app runs: fonts, icons and every other asset ship with the app. The one exception (2026-10-03): it asks GitHub for the newest version's number, which „Sprawdzaj aktualizacje” switches off | Web links (e.g. Wikipedia) open in the browser only when clicked |
   | **Approved 2026-09-28** | Open on Start and load the tree on demand (§11.1). The family archive is an open folder with GEDCOM, editable with a clear indication, and the Import is the built-in converter (§11.2) | The sections below are updated to match |
   | **Resize** | Staying with Tauri; no Electron comparison | Your decision, 2026-09-28 |
 
@@ -129,7 +129,8 @@
    - Julian/Gregorian double dates, historical place names, Polish kinship terms.
 6. **Edit where you read.** Editing happens in place on the profile, and everything can be done from the keyboard.
 7. **Offline and private.** No account, no cloud, no internet needed: fonts and icons ship with the app. The family
-   data lives outside the code repository.
+   data lives outside the code repository. The only request the app makes online asks GitHub for the newest version
+   number (nothing from the archive goes with it), and it can be switched off.
 
 ## 4. What the app does
 
@@ -453,8 +454,14 @@ This is the model the app works with, in memory and in the SQLite cache. Where e
   section had when it was opened; „Cofnij zapis” takes back one save's history entries.
 - **Installer (2026-09-29):** not Tauri's NSIS bundle but the owner's standard (`../APP-STANDARDS.md` §1): a Python +
   PyInstaller `HeirloomSetup-<version>.exe` that installs, updates and uninstalls per user, built by
-  `scripts/build.ps1` after a self-test of the packaged app. Update checks (§2–§3) wait for a decision: they would
-  contact GitHub, and Heirloom works offline.
+  `scripts/build.ps1` after a self-test of the packaged app.
+- **Updates (2026-10-03, owner's decision: the full standard, and the repo Husarp/Heirloom is public):**
+  `../APP-STANDARDS.md` §2–§3. Rust (`heirloom-api/src/update.rs`, ureq over rustls with Windows' certificate store)
+  asks `/releases/latest` at start and when the window comes back, at most every 5 minutes, and compares versions as
+  numbers; a banner on Start (✕ hides it until the next start) and Ustawienia › O programie („Sprawdzaj
+  aktualizacje”, „Sprawdź teraz”, „GitHub”, „Pobierz aktualizację”). The update downloads the release's `.exe` with
+  the progress shown, asks about unsaved changes, runs the installer and closes. The installer comes from
+  `.github/workflows/windows-build.yml`.
 
 ## 6. Performance targets (acceptance criteria)
 

@@ -1,0 +1,69 @@
+# Builds HeirloomSetup-<version>.exe on a Windows runner with scripts/build.ps1, unchanged: the version check, the app,
+# its self-test and the installer. Started by hand (Actions › Windows build › Run workflow, or
+# `gh workflow run windows-build.yml`) or by pushing a v* tag; a tag also attaches the installer to that tag's release,
+# where the app's update check finds it (APP-STANDARDS.md §2–§4).
+name: Windows build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # gh release upload
+
+jobs:
+  build:
+    runs-on: windows-latest
+    # A first build takes about 15 minutes, a cached one less; anything near an hour is stuck.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # build.ps1 looks for Python with PyInstaller in .venv (or takes -Python).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: PyInstaller in .venv
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python.exe -m pip install --disable-pip-version-check pyinstaller
+          if ($LASTEXITCODE) { throw "Installing PyInstaller failed" }
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build (scripts/build.ps1)
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/build.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HeirloomSetup
+          path: |
+            build/HeirloomSetup-*.exe
+            build/BUILT.json
+          if-no-files-found: error
+
+      - name: Attach the installer to the tag's release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          $built = Get-Content build/BUILT.json -Raw | ConvertFrom-Json
+          if ($env:TAG -ne "v$($built.version)") { throw "The tag $env:TAG does not match the version built, $($built.version)" }
+          $exe = (Get-ChildItem build/HeirloomSetup-*.exe | Select-Object -First 1).FullName
+          gh release view $env:TAG --repo $env:REPO *> $null
+          if ($LASTEXITCODE) { throw "There is no release for $env:TAG yet: create it, then run this workflow on the tag again (the installer is also in this run's artifact)" }
+          gh release upload $env:TAG $exe --repo $env:REPO --clobber
+          if ($LASTEXITCODE) { throw "Attaching $exe to the release $env:TAG failed" }

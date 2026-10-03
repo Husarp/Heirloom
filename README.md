@@ -7,7 +7,9 @@ A Windows desktop app for keeping a family's history in one place:
 
 People are added from files that an external AI chat prepares from a researcher's notes and scans. The app's Import
 checks them, matches them with the people already in the archive, and saves only what you approve. The interface is
-in Polish, and the app works fully offline.
+in Polish, and the app works without the internet. The only thing it ever asks online is GitHub's number for the
+newest Heirloom version (nothing from the archive goes with it); „Sprawdzaj aktualizacje” in Ustawienia › O programie
+switches that off.
 
 ## Status
 
@@ -45,6 +47,7 @@ You need Rust (`%USERPROFILE%\.cargo\bin` on the PATH) and Node.js. Run `npm ins
 | Run the app in a window, with live reload | `npx tauri dev` |
 | Build the app (`target\release\heirloom.exe`) | `npx tauri build --no-bundle` |
 | Build the installer `build\HeirloomSetup-<version>.exe` (checks the versions, self-tests the app) | `scripts\build.ps1` (Python with PyInstaller in `.venv`, or `-Python <python.exe>`) |
+| The same build on GitHub (Windows runner; a `v*` tag also attaches the exe to that tag's release) | Actions › „Windows build” › Run workflow, or `gh workflow run windows-build.yml` |
 | The same screens in a normal browser, on a test family | `cargo run -p heirloom-bridge -- --open test-archives/demo`, then `npm run dev` and open http://localhost:1420 |
 | Run all Rust tests | `cargo test --workspace` |
 | Type-check and test the interface | `npx tsc --noEmit -p tsconfig.json` and `npx vitest run` |
@@ -62,6 +65,12 @@ You need Rust (`%USERPROFILE%\.cargo\bin` on the PATH) and Node.js. Run `npm ins
   administrator rights (APP-STANDARDS.md §1). It never closes a running Heirloom (it asks you to save and close it)
   and never touches the family archives; on uninstall the program's own
   settings and thumbnails go to the Recycle Bin only if you tick the box.
+- Updates (APP-STANDARDS.md §2–§3, `crates/heirloom-api/src/update.rs`): at start and on coming back to the window
+  (at most every 5 minutes) the app asks `api.github.com/repos/Husarp/Heirloom/releases/latest`; a newer version shows
+  a banner on Start. „Aktualizuj” downloads that release's `.exe` to `%TEMP%\Heirloom-aktualizacja` with the progress
+  shown, asks about unsaved changes, starts the installer and closes; the installer is deleted at the next start.
+- `.github/workflows/windows-build.yml`: runs `scripts/build.ps1` on a Windows runner and keeps the installer as the
+  run's artifact.
 - `test-archives/` (test families) and `test-files/` (the gedcom.io files) are ignored by Git.
 - `crates/heirloom-api/tests/fixtures/ai-trial/`: fictional AI answers for the Import tests (a careful package, a
   sloppy one and a later one; `make-images.ps1` draws their scans). Kept on the developer's computer only, not in

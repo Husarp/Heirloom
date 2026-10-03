@@ -50,7 +50,13 @@ if ((Get-FileHash $exe).Hash -ne (Get-FileHash "$dist\heirloom.exe").Hash) { thr
 if (-not $NoSelfTest) {
     $report = "$Build\selftest.txt"
     Remove-Item $report -ErrorAction SilentlyContinue
-    Start-Process "$dist\heirloom.exe" -ArgumentList "--selftest", "`"$report`"" -Wait
+    $app = Start-Process "$dist\heirloom.exe" -ArgumentList "--selftest", "`"$report`"" -PassThru
+    # The app's own watchdog answers within 60 s; one that never got that far (a system error box on a build server
+    # with nobody to click it) would otherwise keep the build waiting for ever.
+    if (-not $app.WaitForExit(120000)) {
+        Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+        throw "Self-test: heirloom.exe gave no answer within 2 minutes"
+    }
     $result = Get-Content $report -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
     if (-not $result -or -not $result.StartsWith("OK $version")) { throw "Self-test failed:`n$result" }
     Write-Output "Self-test: $($result.Trim())"
