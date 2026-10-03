@@ -3,6 +3,37 @@
 Format: `X.Y.Z — YYYY-MM-DD HH:MM: description`. Newest on top.
 X = major change, Y = feature / bigger change, Z = small change.
 
+## 0.4.0 — 2026-10-03 15:52: Fixes from the first test, update checks, a public repository
+- **Tree:**
+  - „Koloruj wg” works in every view and every mode, and a change shows at once (also in Całe drzewo, which
+    re-tints instead of rebuilding); „nazwisko” follows the surname a person bears, „strona” counts from the person
+    in the centre, with its own colour key;
+  - one click opens the side panel in every view, Całe drzewo included (the person gets a ring there, the click
+    finds the nearest person, only the left button selects, Esc closes the panel);
+  - Back, Forward and Alt ← return to the same view, person, zoom and position; coming back to the tree no
+    longer loads it again;
+  - Całe drzewo's surname labels stay in place while zooming, move aside instead of disappearing, and hide when
+    their family is off screen;
+  - the toolbar loses „Żyjący / Zmarli / Wszyscy”, and „Filtry” becomes „Karty: ze zdjęciem / inicjały”.
+- **„Po otwarciu archiwum: Start · Ostatnie miejsce”** (Ustawienia › Archiwum) replaces „Osoba startowa” and the
+  first-open question „Od kogo zacząć drzewo?”; Home in the tree goes to the suggested person.
+- **Ustawienia:** the rows that can't be changed yet are all marked „wkrótce”; the „Rozmiar tekstu” box fits 150%.
+- **Import:**
+  - „Wyczyść listę”, a click anywhere on the drop box opens the file picker, the toast after an import is no
+    longer squeezed, the „transkrypcja” chip in step 4 shows the file's transcription;
+  - two related people of a package can't be joined with one archive person (refused already in step 3);
+  - a failed import removes the files it copied; `zrodla-ai/` is written only after a successful save;
+  - fixes: a dropped file that is gone, the paste view hiding an error, file counts, undone imports told apart,
+    system files (Thumbs.db, desktop.ini…) skipped, clearer format/version errors, a repeated part reported, one
+    warning for all files without a number.
+- **Updates (APP-STANDARDS §2–§3):** Heirloom asks GitHub for the newest version (at start and when the window comes
+  back, at most every 5 minutes; „Sprawdzaj aktualizacje” in Ustawienia › O programie can switch it off), shows a
+  banner, and downloads and runs the new installer itself after asking to save. It sends nothing else.
+- **Backups** are named in local time.
+- **Development:** the repository is public; the design files, the designer's documents and the AI-trial test
+  packages stay on the developer's computer (the AI-trial tests skip without them). The Windows installer is built
+  on GitHub (`.github/workflows/windows-build.yml`). New Rust dependency: `ureq` (for the update check).
+
 ## 0.3.3 — 2026-09-29 04:09: An import in progress survives „Zapisz jako nowe archiwum”
 - **Fix (from the backend review, the one finding still open):** „Zapisz import” saves earlier edits first, and
   in a file from another program that first save can become a new archive — which threw the import away (steps
