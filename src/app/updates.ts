@@ -36,7 +36,8 @@ function autoCheck() {
   clearTimeout(retry);
   if (!useStore.getState().app?.updates.check) return;
   call<UpdateStatus>("update.check", { manual: false })
-    .then((status) => useUpdates.setState({ status }))
+    // A newer answer replaces what the last „Sprawdź teraz” said (an error from when there was no internet, say).
+    .then((status) => useUpdates.setState({ status, said: null }))
     .catch((e: ApiError) => {
       if (e.code === "offline" || e.code === "timeout") retry = setTimeout(autoCheck, RETRY_MS);
     });
