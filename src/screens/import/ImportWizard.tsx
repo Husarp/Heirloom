@@ -4,8 +4,8 @@
 import { Check, CircleCheck, Network, RotateCcw, Users } from "lucide-react";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { call, type ApiError } from "../../api/transport";
-import type { ArchiveStatus } from "../../api/types";
 import { useStore } from "../../app/store";
+import { useApi } from "../../app/useApi";
 import { Spinner } from "../../components/bits";
 import { count } from "../../lib/format";
 import { StepCheck } from "./StepCheck";
@@ -13,8 +13,8 @@ import { StepFiles } from "./StepFiles";
 import { StepLoad } from "./StepLoad";
 import { StepMatch } from "./StepMatch";
 import { StepSummary } from "./StepSummary";
-import { useWizard, type CommitResult, type ImportState, type Step } from "./types";
-import { askUndoImport } from "./undoImport";
+import { useWizard, type CommitResult, type ImportState, type PastImport, type Step } from "./types";
+import { askUndoImport, undoImport } from "./undoImport";
 import "./import.css";
 
 const STEPS = ["Wczytaj", "Sprawdź", "Dopasuj osoby", "Zdjęcia i pliki", "Podsumowanie"];
@@ -121,23 +121,11 @@ export function Footer({ status, children }: { status: ReactNode; children: Reac
 function Done({ result }: { result: CommitResult }) {
   const go = useStore((s) => s.go);
   const requireEdit = useStore((s) => s.requireEdit);
-  const changed = useStore((s) => s.changed);
-  const notify = useStore((s) => s.notify);
   const reset = useWizard((w) => w.reset);
-  const [undone, setUndone] = useState(false);
-  const undo = () =>
-    askUndoImport(result.batch, () =>
-      requireEdit(async () => {
-        try {
-          const status = await call<ArchiveStatus>("history.undo", { batch: result.batch });
-          changed(status);
-          setUndone(true);
-          notify("Import cofnięty — zmiana czeka na zapis.");
-        } catch (e) {
-          notify((e as ApiError).message, { kind: "err" });
-        }
-      }),
-    );
+  // Undone here, from the import's toast or anywhere else: the history knows (fetched again after every change).
+  const { data: past } = useApi<PastImport[]>("import.history");
+  const undone = past?.find((h) => h.name === result.batch)?.active === false;
+  const undo = () => askUndoImport(result.batch, () => requireEdit(() => undoImport(result.batch)));
   const parts = [
     result.people > 0 && count(result.people, "nowa osoba", "nowe osoby", "nowych osób"),
     result.merged > 0 && count(result.merged, "połączona", "połączone", "połączonych"),

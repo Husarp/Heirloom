@@ -757,6 +757,32 @@ textarea.input {
 .toast.err > svg {
   color: var(--toast-err);
 }
+/* Actions sit in the row, or under the text when there are two of them (or a detail line too). */
+.toast .toast-actions {
+  display: contents;
+}
+.toast.stacked {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  row-gap: 4px;
+}
+.toast.stacked > svg {
+  margin-top: 1px;
+}
+.toast.stacked .toast-actions {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: -10px;
+}
+.toast.stacked .toast-close {
+  grid-column: 3;
+  grid-row: 1;
+  margin-top: -6px;
+}
 
 /* ---------- Checkboxes and radios ---------- */
 

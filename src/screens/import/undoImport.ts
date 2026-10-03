@@ -1,4 +1,7 @@
+import { call, type ApiError } from "../../api/transport";
+import type { ArchiveStatus } from "../../api/types";
 import { useStore } from "../../app/store";
+import type { PastImport } from "./types";
 
 /** „Cofnij import” takes a whole batch out of the data, so it asks first. The undo is an unsaved change like any
  *  other: until Zapisz, Ctrl Z brings the import back. */
@@ -12,4 +15,22 @@ export function askUndoImport(batch: string, run: () => void) {
       { label: "Cofnij import", kind: "danger", run },
     ],
   });
+}
+
+/** Takes the batch back (after askUndoImport and „Kto edytuje?”). An import already taken back — from the toast or the
+ *  Done screen — says so, instead of reporting a change that did nothing. */
+export async function undoImport(batch: string): Promise<void> {
+  const { changed, notify } = useStore.getState();
+  try {
+    const past = await call<PastImport[]>("import.history");
+    if (past.find((h) => h.name === batch)?.active === false) {
+      notify("Ten import jest już cofnięty.");
+      return;
+    }
+    const status = await call<ArchiveStatus>("history.undo", { batch });
+    changed(status);
+    notify("Import cofnięty — zmiana czeka na zapis.");
+  } catch (e) {
+    notify((e as ApiError).message, { kind: "err" });
+  }
 }

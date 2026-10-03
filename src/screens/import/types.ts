@@ -47,6 +47,8 @@ export interface ImportPerson {
   status: "new" | "merged" | "skipped" | "match" | "review";
   decision: "new" | "merge" | "skip" | "undecided" | null;
   target: string | null;
+  /** Others of the batch joined with the same archive person (only people who aren't relatives can be). */
+  sameTarget: { id: string; name: string }[];
   candidates: Candidate[];
   compare: CompareRow[];
   facts: number;
@@ -71,6 +73,18 @@ export interface ImportFile {
   people: { id: string; name: string | null }[];
   transcription: boolean;
   image: boolean;
+}
+
+/** A described file's texts (`import.fileDetail`), read when its transcription is opened. */
+export interface ImportFileDetail {
+  file: string;
+  caption: string | null;
+  documentType: string | null;
+  date: string | null;
+  place: string | null;
+  transcription: string | null;
+  translation: string | null;
+  note: string | null;
 }
 
 export interface ImportRelationship {
@@ -126,6 +140,8 @@ export interface PastImport {
   author: string;
   people: number;
   files: number;
+  /** False once it was undone (nothing of it is left to take back). */
+  active: boolean;
 }
 
 export interface CommitResult {

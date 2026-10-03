@@ -1,14 +1,16 @@
 // Import · 4 Zdjęcia i pliki (spec §4.13): every file of the batch with its status, kind, caption and people; the
 // profile photo per person. Files are copied into media/ only when the import is confirmed.
 
-import { ArrowRight, Check, CircleCheck, CircleHelp, Copy, FileText, Image as ImageIcon, ImageOff, Plus, Star, TriangleAlert, Upload, UserPlus } from "lucide-react";
+import { ArrowRight, Check, CircleCheck, CircleHelp, Copy, ExternalLink, FileText, Image as ImageIcon, ImageOff, Plus, Star, TriangleAlert, Upload, UserPlus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { importFileUrl } from "../../api/transport";
-import { Avatar, useDismiss } from "../../components/bits";
+import { call, importFileUrl, type ApiError } from "../../api/transport";
+import { useStore } from "../../app/store";
+import { Dialog } from "../../components/Dialog";
+import { Avatar, Spinner, useDismiss } from "../../components/bits";
 import { count } from "../../lib/format";
-import { pickFiles } from "../../lib/native";
+import { openPath, pickFiles } from "../../lib/native";
 import { Footer } from "./ImportWizard";
-import { useWizard, type Act, type ImportFile, type ImportState, type Step } from "./types";
+import { useWizard, type Act, type ImportFile, type ImportFileDetail, type ImportState, type Step } from "./types";
 
 const STATUS: Record<ImportFile["status"], { label: string; icon: typeof Check; className: string }> = {
   ok: { label: "dopasowany", icon: Check, className: "accent" },
@@ -168,6 +170,7 @@ function ProfilePicker({ current, images, onPick }: { current: string | null; im
 
 function FileCard({ f, state, act, profileOf, highlighted }: { f: ImportFile; state: ImportState; act: Act; profileOf: string | null; highlighted: boolean }) {
   const [caption, setCaption] = useState(f.caption ?? "");
+  const [reading, setReading] = useState(false);
   useEffect(() => setCaption(f.caption ?? ""), [f.caption]);
   const status = STATUS[f.status];
   const skipped = f.status === "skipped";
@@ -233,7 +236,11 @@ function FileCard({ f, state, act, profileOf, highlighted }: { f: ImportFile; st
               {p.name ?? p.id}
             </span>
           ))}
-          {f.transcription && <span className="imp-chip muted">transkrypcja</span>}
+          {f.transcription && (
+            <button className="imp-chip link" onClick={() => setReading(true)} title="Pokaż transkrypcję">
+              transkrypcja
+            </button>
+          )}
           <span className="grow" />
           {skipped ? (
             <button className="link" onClick={() => act("import.file", { file: f.file, skip: false })}>
@@ -255,6 +262,83 @@ function FileCard({ f, state, act, profileOf, highlighted }: { f: ImportFile; st
             </>
           )}
         </div>
+      </div>
+      {reading && <TranscriptionDialog f={f} loadId={state.loadId} onClose={() => setReading(false)} />}
+    </div>
+  );
+}
+
+/** The AI's transcription of a file next to the file itself, with the translation and the note (read-only: corrections
+ *  are made in Media after the import). */
+function TranscriptionDialog({ f, loadId, onClose }: { f: ImportFile; loadId: number; onClose: () => void }) {
+  const notify = useStore((s) => s.notify);
+  const [detail, setDetail] = useState<ImportFileDetail | null>(null);
+  useEffect(() => {
+    call<ImportFileDetail>("import.fileDetail", { file: f.file })
+      .then(setDetail)
+      .catch((e: ApiError) => {
+        notify(e.message, { kind: "err" });
+        onClose();
+      });
+    // Read once per file; `onClose` changes with every render of the card.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [f.file]);
+  const meta = detail ? [detail.documentType, detail.date, detail.place].filter(Boolean).join(" · ") : "";
+  return (
+    <Dialog width={920} onClose={onClose} labelledBy="imp-transcription-title">
+      <div className="dialog-body">
+        <div className="col" style={{ gap: 2 }}>
+          <div className="dialog-title" id="imp-transcription-title">
+            {f.file} · {detail?.caption || f.name || "transkrypcja"}
+          </div>
+          {meta && <span style={{ fontSize: 13, color: "var(--text2)" }}>{meta}</span>}
+        </div>
+        <div className="imp-transcription">
+          <div className="imp-transcription-file">
+            {f.index != null && f.image ? (
+              <img src={importFileUrl(f.index, 1024, loadId)} alt={f.name ?? f.file} />
+            ) : (
+              <span className="col" style={{ gap: 8, alignItems: "center", color: "var(--text2)", fontSize: 13 }}>
+                <FileText size={28} />
+                {f.name ?? f.file}
+                {f.path && (
+                  <button className="btn secondary sm" onClick={() => openPath(f.path!)}>
+                    <ExternalLink size={13} />
+                    Otwórz
+                  </button>
+                )}
+              </span>
+            )}
+          </div>
+          <div className="imp-transcription-text scroll">
+            {!detail ? (
+              <Spinner size={18} />
+            ) : (
+              <>
+                {detail.transcription && <TextPart label="Transkrypcja" text={detail.transcription} />}
+                {detail.translation && <TextPart label="Tłumaczenie" text={detail.translation} />}
+                {detail.note && <TextPart label="Notatka" text={detail.note} />}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="dialog-foot">
+        <span style={{ flex: 1, fontSize: 12, color: "var(--text3)" }}>Poprawisz to w Mediach po imporcie.</span>
+        <button className="btn primary" onClick={onClose}>
+          Zamknij
+        </button>
+      </div>
+    </Dialog>
+  );
+}
+
+function TextPart({ label, text }: { label: string; text: string }) {
+  return (
+    <div className="col" style={{ gap: 6 }}>
+      <span className="label-caps">{label}</span>
+      <div className="serif selectable" style={{ fontSize: 15, lineHeight: 1.7, color: "var(--text2)", whiteSpace: "pre-wrap" }}>
+        {text}
       </div>
     </div>
   );

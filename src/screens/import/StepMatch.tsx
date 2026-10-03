@@ -197,6 +197,11 @@ function Decision({ p, state, act }: { p: ImportPerson; state: ImportState; act:
         </button>
       ))}
 
+      {merging && p.sameTarget.length > 0 && (
+        <div className="imp-note-box">
+          Ta sama osoba z archiwum co {p.sameTarget.map((o) => `${o.name} (${o.id})`).join(", ")} — ich dane zostaną połączone w jedną osobę.
+        </div>
+      )}
       {p.compare.length > 0 && p.decision !== "skip" && p.decision !== "new" && <Compare p={p} act={act} />}
       {p.decision === "new" && (
         <div className="imp-note-box">

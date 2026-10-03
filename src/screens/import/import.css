@@ -177,7 +177,12 @@
   justify-content: center;
   gap: 6px;
   padding: 20px;
+  cursor: pointer;
   transition: border-color 0.12s, background-color 0.12s;
+}
+.imp-drop:hover {
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--line));
+  background: color-mix(in oklab, var(--accent-soft) 45%, var(--surface));
 }
 .imp-drop.over {
   border-color: var(--accent);
@@ -836,6 +841,33 @@
 }
 .imp-chip.muted {
   color: var(--text3);
+}
+/* Step 4: a file's transcription next to the file. */
+.imp-transcription {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+  height: min(60vh, 560px);
+}
+.imp-transcription-file {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface2);
+  border-radius: var(--r-card);
+  overflow: hidden;
+}
+.imp-transcription-file img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.imp-transcription-text {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+  padding-right: 4px;
 }
 .imp-file-body .link {
   font-size: 12px;
