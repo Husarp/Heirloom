@@ -29,3 +29,4 @@ Desktop.ini
 /crates/heirloom-api/tests/fixtures/
 /docs/.changes-plan-details.json
 /docs/CHANGES_PLAN.md
+/src-tauri/gen/schemas/linux-schema.json
