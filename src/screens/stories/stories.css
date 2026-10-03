@@ -1,0 +1,339 @@
+/* Historie (design/IMPLEMENTATION_SPEC.md §4.28): list `1fr` + reading panel 540 px. */
+
+.stories {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  /* One row exactly as tall as the window, so the list and the panel scroll on their own. */
+  grid-template-rows: minmax(0, 1fr);
+}
+.stories.with-panel {
+  grid-template-columns: minmax(0, 1fr) 540px;
+}
+
+.stories-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.stories-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 24px 12px;
+}
+.stories-count {
+  font-size: 18px;
+  color: var(--text3);
+}
+
+.stories-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 24px 14px;
+  font-size: 13px;
+}
+
+/* Dropdown chip-button (§5.4): key + bold value; open = accent border and ring. */
+.stories-chip {
+  color: var(--text);
+  max-width: 320px;
+}
+.stories-chip b,
+.stories-sort b {
+  font-weight: 600;
+  color: var(--text);
+}
+.stories-chip.open {
+  border: 1.5px solid var(--accent);
+  box-shadow: var(--ring);
+}
+.stories-chevron {
+  color: var(--text3);
+  flex: none;
+}
+.stories-chip.open .stories-chevron {
+  transform: rotate(180deg);
+}
+
+.stories-sort {
+  height: 30px;
+  padding: 0 4px;
+  border-radius: var(--r-ctl);
+  color: var(--text2);
+  white-space: nowrap;
+}
+.stories-sort:hover {
+  color: var(--text);
+}
+
+.popover.stories-menu {
+  top: 36px;
+  max-height: 360px;
+  overflow: auto;
+  padding: 4px 0;
+}
+.stories-menu-count {
+  font-size: 12px;
+  color: var(--text3);
+  font-weight: 400;
+}
+
+.stories-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.stories-decade {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 24px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--f-serif);
+  font-size: 16px;
+  font-weight: 600;
+}
+.stories-decade span {
+  font-family: var(--f-sans);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text3);
+}
+
+.stories-row {
+  width: 100%;
+  display: flex;
+  gap: 14px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  text-align: left;
+}
+.stories-row:hover {
+  background: var(--surface2);
+}
+.stories-row.selected {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.stories-row-icon {
+  color: var(--accent-text);
+  flex: none;
+}
+.stories-row-title {
+  font-family: var(--f-serif);
+  font-size: 17px;
+  font-weight: 600;
+}
+.stories-row-title.saying {
+  font-style: italic;
+  font-weight: 500;
+}
+.stories-row-meta {
+  font-size: 12px;
+  color: var(--text3);
+}
+.stories-row-excerpt {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.stories-none {
+  padding: 32px 24px;
+  font-size: 14px;
+  color: var(--text3);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stories-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-top: 1px solid var(--border);
+}
+
+/* ---------- Reading panel ---------- */
+
+.stories-panel {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 28px;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+}
+.stories-panel > * {
+  flex: none;
+}
+
+.stories-kind {
+  gap: 6px;
+  color: var(--accent-text);
+}
+
+.stories-title {
+  font-family: var(--f-serif);
+  font-size: 30px;
+  line-height: 1.2;
+  font-weight: 600;
+  text-wrap: pretty;
+  user-select: text;
+}
+.stories-title.saying {
+  font-style: italic;
+  font-weight: 500;
+}
+
+.stories-meta {
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text2);
+}
+.stories-meta > span {
+  gap: 5px;
+}
+.stories-meta svg {
+  color: var(--text3);
+  flex: none;
+}
+
+/* A place link, drawn like a person mention (§4.28). */
+.stories-place {
+  color: var(--accent-text);
+  border-bottom: 1px solid color-mix(in oklab, var(--accent) 45%, transparent);
+  border-radius: 2px;
+}
+.stories-place:hover {
+  background: var(--accent-soft);
+  border-bottom-color: var(--accent);
+}
+
+.stories-person {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 0 3px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: var(--surface);
+  font-size: 13px;
+}
+.stories-person:hover {
+  border-color: var(--line);
+}
+.stories-main {
+  font-size: 11px;
+  color: var(--text3);
+}
+
+.reading.stories-body {
+  font-size: 17px;
+  line-height: 1.75;
+}
+.reading.stories-body p {
+  margin-bottom: 12px;
+}
+.reading.stories-body p:last-child {
+  margin-bottom: 0;
+}
+
+/* Powiedzonko without a title: the pull quote of §5.9. */
+.stories-quote {
+  font-family: var(--f-serif);
+  font-size: 28px;
+  line-height: 1.3;
+  font-style: italic;
+  font-weight: 500;
+  max-width: 620px;
+  user-select: text;
+}
+.stories-quote p {
+  margin: 0 0 8px;
+}
+.stories-quote p:last-child {
+  margin-bottom: 0;
+}
+
+.stories-photos {
+  display: flex;
+  gap: 8px;
+}
+.stories-photo {
+  flex: 0 0 calc((100% - 16px) / 3);
+  aspect-ratio: 4 / 3;
+  border-radius: var(--r-ctl);
+}
+
+/* Provenance box (§4.28): where the story comes from and how sure it is. */
+.stories-provenance {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--surface2);
+  border-radius: var(--r-ctl);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.stories-source {
+  text-align: left;
+}
+.stories-source:hover {
+  text-decoration: underline;
+}
+.stories-source .source-mark {
+  cursor: inherit;
+}
+
+/* Certainty pill, stories variant (§5.4): „pewne” in accent, the rest outlined. */
+.stories-pill {
+  padding: 2px 8px;
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--text2);
+  white-space: nowrap;
+}
+.stories-pill.sure {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent-text);
+}
+
+.stories-form {
+  gap: 12px;
+}
+.stories-form textarea {
+  min-height: 180px;
+}
+.stories-hint {
+  font-size: 12px;
+  color: var(--text3);
+}

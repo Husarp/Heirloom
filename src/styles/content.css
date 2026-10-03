@@ -1,0 +1,270 @@
+/* Reading text, mentions, hover cards and callouts (spec §5.8–§5.9). */
+
+.mention {
+  color: var(--accent-text);
+  border-bottom: 1px solid color-mix(in oklab, var(--accent) 45%, transparent);
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background-color 0.12s;
+}
+.mention:hover,
+.mention:focus-visible {
+  background: var(--accent-soft);
+  border-bottom-color: var(--accent);
+}
+
+/* Keyboard focus on a mention (design 17g): the ring close to the text; the card opens as on hover. */
+.mention:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* A mention of someone who isn't in the archive any more. */
+.mention.broken {
+  color: var(--text2);
+  border-bottom: 1px dashed var(--warn);
+  cursor: help;
+}
+.mention.broken:hover {
+  background: var(--warn-soft);
+}
+
+.hover-card {
+  position: fixed;
+  z-index: 70;
+  width: 296px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.rel-chip {
+  align-self: flex-start;
+  padding: 3px 8px;
+  border-radius: var(--r-ctl);
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.reading {
+  font-family: var(--f-serif);
+  font-size: 18px;
+  line-height: 1.7;
+  color: var(--text);
+  user-select: text;
+}
+.reading p {
+  margin: 0 0 14px;
+  max-width: 68ch;
+  text-wrap: pretty;
+}
+.reading p:last-child {
+  margin-bottom: 0;
+}
+.reading h3 {
+  font-size: 21px;
+  line-height: 1.3;
+  font-weight: var(--head-w);
+  margin: 8px 0 10px;
+}
+.reading ul,
+.reading ol {
+  margin: 0 0 14px;
+  padding-left: 22px;
+  max-width: 66ch;
+}
+.reading blockquote {
+  margin: 0 0 14px;
+  padding-left: 16px;
+  border-left: 2px solid var(--border);
+  color: var(--text2);
+  font-style: italic;
+}
+
+.pull-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 8px 0;
+  max-width: 620px;
+}
+.pull-quote .quote-text {
+  font-family: var(--f-serif);
+  font-size: 28px;
+  line-height: 1.3;
+  font-style: italic;
+  font-weight: 500;
+}
+.pull-quote .quote-text p {
+  margin: 0;
+}
+.pull-quote .attribution {
+  font-family: var(--f-sans);
+  font-size: 13px;
+  color: var(--text3);
+}
+
+.callout {
+  display: flex;
+  gap: 14px;
+  padding: 16px 20px;
+  background: var(--surface2);
+  border-radius: var(--r-card);
+  font-family: var(--f-sans);
+  font-size: 15px;
+  line-height: 1.55;
+}
+.callout .callout-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+  margin-bottom: 4px;
+}
+
+.story-card {
+  padding: 22px 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.story-card .story-title {
+  font-family: var(--f-serif);
+  font-size: 22px;
+  line-height: 1.3;
+  font-weight: var(--head-w);
+}
+.story-card .story-excerpt {
+  font-family: var(--f-serif);
+  font-size: 17px;
+  line-height: 1.65;
+  color: var(--text2);
+}
+
+.source-mark {
+  font-family: var(--f-sans);
+  font-size: 11px;
+  color: var(--accent-text);
+  margin-left: 2px;
+  cursor: default;
+}
+
+.info-box {
+  padding: 12px 14px;
+  background: var(--surface2);
+  border-radius: var(--r-card);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text2);
+}
+.info-box b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--r-ctl);
+  font-size: 13px;
+}
+.banner.success {
+  background: var(--accent-soft);
+}
+.banner.warn {
+  background: var(--warn-soft);
+  font-size: 14px;
+}
+.banner.info {
+  background: var(--surface2);
+}
+.banner.err {
+  background: var(--err-soft);
+  border: 1px solid var(--err);
+  border-radius: var(--r-card);
+}
+
+.stat-block {
+  display: grid;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+.stat-block > div {
+  padding: 14px 18px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stat-block > div:last-child {
+  border-right: none;
+}
+.stat-block .value {
+  font-family: var(--f-serif);
+  font-size: 30px;
+  line-height: 1.1;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.stat-block .key {
+  font-size: 13px;
+  color: var(--text2);
+}
+
+/* The rich-text editor (spec §5.12). */
+.rich-editor {
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  position: relative;
+}
+.rich-editor:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+.rich-toolbar {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text2);
+}
+.rich-body .ProseMirror {
+  padding: 18px 22px 22px;
+  outline: none;
+  min-height: inherit;
+}
+.rich-body .ProseMirror p {
+  margin: 0 0 12px;
+  max-width: 66ch;
+}
+.rich-body .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--text3);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+.rich-body .ProseMirror .mention {
+  background: var(--accent-soft);
+}

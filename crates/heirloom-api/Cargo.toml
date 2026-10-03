@@ -1,0 +1,24 @@
+[package]
+name = "heirloom-api"
+description = "The app's commands (JSON in, JSON out), shared by the Tauri window and the browser bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+heirloom-core = { path = "../heirloom-core" }
+blake3 = "1"
+dirs = "6"
+fs4 = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp", "tiff"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+time = { version = "0.3", features = ["formatting", "macros", "local-offset"] }
+uuid = { version = "1", features = ["v4"] }
+zip = { version = "8", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[dev-dependencies]
+heirloom-gen = { path = "../heirloom-gen" }
+tempfile = "3"

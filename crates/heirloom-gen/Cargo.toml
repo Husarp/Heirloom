@@ -1,0 +1,16 @@
+[package]
+name = "heirloom-gen"
+description = "Generates realistic test families as Heirloom archive folders (for tests and performance runs)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+heirloom-core = { path = "../heirloom-core" }
+image = { version = "0.25", default-features = false, features = ["png"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"

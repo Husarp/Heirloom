@@ -1,0 +1,125 @@
+/* Design tokens, direction 1a „Muzeum” (design/IMPLEMENTATION_SPEC.md §1, with the contrast fixes of design v2, page 17). Light is the default; dark is set with
+   data-theme="dark" on <html> (the app resolves „Systemowy” itself). */
+
+:root {
+  --bg: #f7f4ee;
+  --surface: #ffffff;
+  --surface2: #efebe3;
+  --border: #dfd8cc;
+  --text: #1f1c18;
+  --text2: #554e45;
+  --text3: #6b6256;
+  --accent: #2f5d50;
+  --accent-ink: #ffffff;
+  --accent-soft: #e1eae5;
+  --accent-text: #2f5d50;
+  --accent-hover: #1f3f36;
+  --sidebar: #efeae1;
+  --sidebar-text: #3a342d;
+  --sidebar-muted: #6b6256;
+  --sidebar-border: #dfd8cc;
+  --nav-active-bg: #e1eae5;
+  --nav-active-text: #2f5d50;
+  --canvas: #f2eee7;
+  --grid: #dcd5c9;
+  --line: #857c6f;
+  --card: #ffffff;
+  /* Tree cards on the canvas (D2); popovers and dialogs (G2, the same as --border in light). */
+  --card-border: #c9c0b2;
+  --pop-border: #dfd8cc;
+  --err: #a3392b;
+  --err-soft: #f6e3df;
+  --warn: #7a5d0e;
+  --warn-soft: #f4ecd3;
+  /* Toasts are dark in the light theme and light in the dark one (design 17f). */
+  --toast-bg: #24211d;
+  --toast-text: #f3eee6;
+  --toast-icon: #9fd0be;
+  --toast-action: #9fd0be;
+  --toast-err: #e08a7c;
+  /* The letter on a mini card (LOD 3, D3): white, or dark ink on the light branch colours 4, 6, 9 and 10. */
+  --lod-ink: #ffffff;
+  --lod-ink-dk: #1f1c18;
+
+  --b1: #b5562f;
+  --b2: #2f7a6b;
+  --b3: #7a5ba6;
+  --b4: #a8861e;
+  --b5: #3d6fa8;
+  --b6: #6e8b2e;
+  --b7: #b0437a;
+  --b8: #4f5d75;
+  --b9: #c07a1a;
+  --b10: #2e8fa3;
+  --b11: #8c3b3b;
+  --b12: #5e7f5b;
+
+  --f-serif: "Newsreader Variable", Georgia, serif;
+  --f-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --f-mono: Consolas, ui-monospace, monospace;
+  --r-card: 8px;
+  --r-ctl: 6px;
+  --r-ctl-2: 4px;
+  --head-w: 500;
+  --name-w: 600;
+
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.14);
+  --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.28);
+  --ring: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent);
+  --backdrop: rgba(20, 18, 15, 0.45);
+
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #1b1a17;
+  --surface: #24221e;
+  --surface2: #2d2a25;
+  --border: #3b3731;
+  --text: #ede7dd;
+  --text2: #bdb5a8;
+  --text3: #a69d90;
+  --accent: #7fb8a4;
+  --accent-ink: #10201a;
+  --accent-soft: #233730;
+  --accent-text: #8fc6b2;
+  --accent-hover: #b3dccd;
+  --sidebar: #171613;
+  --sidebar-text: #ddd6ca;
+  --sidebar-muted: #a69d90;
+  --sidebar-border: #2d2a25;
+  --nav-active-bg: #233730;
+  --nav-active-text: #8fc6b2;
+  --canvas: #1f1e1a;
+  --grid: #34312b;
+  --line: #7a7266;
+  --card: #24221e;
+  --card-border: #7a7266;
+  --pop-border: #4a453d;
+  --err: #e08a7c;
+  --err-soft: #3a2420;
+  --warn: #d9b45a;
+  --warn-soft: #35301f;
+  --toast-bg: #ede7dd;
+  --toast-text: #1f1c18;
+  --toast-icon: #2f5d50;
+  --toast-action: #2f5d50;
+  --toast-err: #a3392b;
+  --lod-ink: #10201a;
+  --lod-ink-dk: #10201a;
+
+  --b1: #e0875f;
+  --b2: #5fb8a5;
+  --b3: #a98bd6;
+  --b4: #d4b24a;
+  --b5: #72a2db;
+  --b6: #9dbb5a;
+  --b7: #dc7aa9;
+  --b8: #8d9bb5;
+  --b9: #e8a548;
+  --b10: #5fc0d2;
+  --b11: #c7716f;
+  --b12: #8fb38b;
+
+  color-scheme: dark;
+}

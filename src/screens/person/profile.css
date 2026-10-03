@@ -1,0 +1,713 @@
+/* Profil osoby (spec §4.6–§4.7). */
+
+.hero {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 36px;
+  padding: 40px 56px 36px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.portrait {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.portrait-empty {
+  width: 200px;
+  height: 256px;
+  border-radius: var(--r-card);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text3);
+  font-size: 12px;
+}
+.portrait-caption {
+  font-size: 12px;
+  color: var(--text3);
+  text-align: center;
+}
+
+.hero-name {
+  font-family: var(--f-serif);
+  font-size: 48px;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  font-weight: var(--head-w);
+}
+.hero-nickname {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 20px;
+  color: var(--text2);
+}
+.hero-life {
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 16px;
+}
+
+.profile-body {
+  display: grid;
+  grid-template-columns: 196px minmax(0, 720px);
+  gap: 64px;
+  padding: 40px 56px 72px;
+}
+
+.toc {
+  position: sticky;
+  top: 24px;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.toc-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text3);
+  padding: 0 0 10px 12px;
+}
+.toc-item {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  padding-left: 12px;
+  font-size: 14px;
+  color: var(--text2);
+  box-shadow: inset 1px 0 0 var(--border);
+  text-align: left;
+  min-width: 0;
+}
+.toc-item.sub {
+  padding-left: 26px;
+  font-size: 13px;
+  color: var(--text3);
+}
+.toc-item:hover {
+  color: var(--text);
+}
+.toc-item.active {
+  color: var(--accent-text);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.profile-article {
+  display: flex;
+  flex-direction: column;
+  gap: 48px;
+  min-width: 0;
+}
+
+.profile-section {
+  display: flex;
+  flex-direction: column;
+  scroll-margin-top: 16px;
+}
+
+.section-title {
+  font-family: var(--f-serif);
+  font-size: 28px;
+  font-weight: var(--head-w);
+  line-height: 1.2;
+}
+
+.lead {
+  font-family: var(--f-serif);
+  font-size: 19px;
+  line-height: 1.6;
+  text-wrap: pretty;
+  user-select: text;
+}
+.lead p {
+  margin: 0 0 10px;
+}
+
+.facts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  overflow: hidden;
+}
+.fact-cell {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  margin: 0 -1px -1px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.fact-key {
+  font-size: 12px;
+  color: var(--text3);
+}
+.fact-value {
+  font-size: 15px;
+  user-select: text;
+}
+.uncertain-strong {
+  text-decoration: underline dotted var(--text3);
+  text-underline-offset: 4px;
+}
+
+.family-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.family-tile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  min-width: 0;
+}
+.family-tile:hover {
+  border-color: var(--line);
+}
+
+.bio-part {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  scroll-margin-top: 16px;
+}
+.bio-title {
+  font-family: var(--f-serif);
+  font-size: 21px;
+  line-height: 1.3;
+  font-weight: var(--head-w);
+}
+.low-certainty .reading {
+  color: var(--text2);
+}
+
+.footnotes {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text2);
+}
+
+.item-tools {
+  display: inline-flex;
+  gap: 2px;
+  flex: none;
+}
+.item-tools .icon-btn {
+  width: 28px;
+  height: 28px;
+}
+
+.add-inline {
+  align-self: flex-start;
+  height: 34px;
+}
+
+.text-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-card);
+  background: color-mix(in oklab, var(--surface) 70%, var(--bg));
+}
+
+.story-full {
+  font-size: 17px;
+  line-height: 1.75;
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+.gallery-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.star-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gallery-add {
+  aspect-ratio: 4 / 3;
+  border: 1.5px dashed var(--line);
+  border-radius: var(--r-ctl);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text2);
+  font-size: 13px;
+}
+.gallery-add:hover {
+  color: var(--text);
+  border-color: var(--text3);
+}
+
+.doc-thumb {
+  width: 40px;
+  height: 52px;
+  border-radius: 3px;
+  background: var(--surface2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text2);
+  flex: none;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+}
+.timeline-row {
+  display: grid;
+  grid-template-columns: 110px 56px 22px minmax(0, 1fr);
+  column-gap: 10px;
+  min-height: 46px;
+}
+.timeline-row.family {
+  color: var(--text2);
+}
+.tl-date {
+  font-size: 14px;
+  text-align: right;
+  padding-top: 11px;
+}
+.tl-age {
+  font-size: 12px;
+  color: var(--text3);
+  padding-top: 12px;
+}
+.tl-rail {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+.tl-rail::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--border);
+}
+.tl-dot {
+  position: relative;
+  margin-top: 15px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--accent);
+}
+.timeline-row.family .tl-dot {
+  background: var(--surface);
+  border-color: var(--line);
+}
+.tl-content {
+  padding: 10px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.collapse-head {
+  width: 100%;
+  gap: 12px;
+  padding: 14px 18px;
+  text-align: left;
+}
+
+.origin-chip {
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--surface2);
+  border-radius: var(--r-ctl);
+  font-size: 13px;
+}
+
+.history-group {
+  width: 100%;
+  height: 48px;
+  gap: 10px;
+  padding: 0 16px;
+  font-size: 13px;
+}
+.history-group:hover {
+  background: var(--surface2);
+}
+.history-line {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr) 18px minmax(0, 1.3fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 36px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.other-row {
+  display: grid;
+  grid-template-columns: 120px 1fr auto;
+  gap: 12px;
+  min-height: 44px;
+  align-items: center;
+  padding: 8px 18px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+
+@media (max-width: 1250px) {
+  .profile-body {
+    grid-template-columns: 170px minmax(0, 1fr);
+    gap: 36px;
+    padding: 32px 32px 64px;
+  }
+  .hero {
+    padding: 32px 32px 28px;
+  }
+  .gallery-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Links to records that are gone (an undone import, a file from another program). */
+.broken-links {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in oklab, var(--warn) 45%, transparent);
+  background: var(--warn-soft);
+  border-radius: var(--r-card);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ---------- Editing in place (design 17a) ---------- */
+
+/* „Dane osobowe” open: the same band as the hero, framed by the accent. */
+.hero.editing {
+  padding: 28px 56px 24px;
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.section-kicker {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+.editing-tag {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  align-self: center;
+}
+
+.personal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  max-width: 760px;
+}
+.pf-grid2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.personal-form .field-label {
+  font-size: 12px;
+  font-weight: 500;
+}
+.input.name-input {
+  height: 52px;
+  font-family: var(--f-serif);
+  font-size: 28px;
+}
+.input.nick-input {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 17px;
+}
+.small-link {
+  align-self: flex-start;
+  font-size: 12px;
+}
+.pf-forms {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-card);
+}
+.pf-nodata {
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  min-height: 40px;
+}
+.personal-form .pf-grid2 > .pf-nodata {
+  margin-top: 22px;
+}
+
+/* Urodzenie / Chrzest / Zgon / Pochówek / Wyznanie: label, date, place, certainty. */
+.pf-events {
+  display: grid;
+  grid-template-columns: 96px 170px minmax(0, 1fr) 150px;
+  gap: 4px 12px;
+  align-items: center;
+}
+.pf-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text2);
+}
+.pf-col-label {
+  font-size: 11px;
+  color: var(--text3);
+}
+.pf-feedback {
+  font-size: 12px;
+  color: var(--text2);
+  min-height: 16px;
+  margin-bottom: 6px;
+}
+.pf-feedback.text {
+  color: var(--warn);
+}
+
+.select-wrap {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+.select-wrap select {
+  appearance: none;
+  padding-right: 30px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.select-wrap select:disabled {
+  cursor: default;
+  color: var(--text3);
+}
+.select-chevron {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text2);
+  pointer-events: none;
+}
+
+.input.no-data {
+  border: 1.5px dashed var(--line);
+  background: transparent;
+  color: var(--text3);
+  font-style: italic;
+  display: flex;
+  align-items: center;
+}
+
+.pf-tags {
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.tag-chip {
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  font-size: 13px;
+}
+.tag-chip button {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text2);
+  border-radius: 4px;
+}
+.tag-chip button:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+.place-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 12px;
+  text-align: left;
+}
+.place-option:hover,
+.place-option.active {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* A section being edited: framed, on the surface colour; its content stays where it was. */
+.profile-section.editing {
+  background: var(--surface);
+  box-shadow: 0 0 0 1.5px var(--accent);
+  border-radius: var(--r-card);
+  padding: 20px 22px;
+  margin: -21px -23px;
+}
+.section-edit {
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-radius: var(--r-ctl);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent-text);
+  white-space: nowrap;
+  align-self: center;
+}
+.section-edit:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+.section-edit:disabled {
+  color: var(--text3);
+  cursor: default;
+}
+.section-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.section-foot-hint {
+  font-size: 12px;
+  color: var(--text2);
+}
+
+/* Family tiles: a link to the person; while the section is edited, the kind of relation and „usuń” below. */
+.family-tile {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.family-tile-main {
+  gap: 10px;
+  min-width: 0;
+  text-align: left;
+}
+.family-grid.editing {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.family-tile-tools {
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.family-tile-tools .icon-btn {
+  width: 30px;
+  height: 30px;
+}
+.family-add {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1.5px dashed var(--line);
+  border-radius: var(--r-card);
+  font-size: 13px;
+  color: var(--text2);
+}
+.family-add:hover {
+  color: var(--text);
+  border-color: var(--text3);
+}
+.relation-chip {
+  height: 30px;
+  max-width: 220px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  font-size: 12px;
+  color: var(--text2);
+}
+.relation-chip:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.add-relative {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: color-mix(in oklab, var(--surface) 70%, var(--bg));
+}
+
+@media (max-width: 1250px) {
+  .hero.editing {
+    padding: 24px 32px 20px;
+  }
+  .pf-events {
+    grid-template-columns: 84px 140px minmax(0, 1fr) 132px;
+  }
+}

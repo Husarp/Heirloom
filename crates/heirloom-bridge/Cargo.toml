@@ -1,0 +1,13 @@
+[package]
+name = "heirloom-bridge"
+description = "Development only: serves the app's commands over HTTP on 127.0.0.1, so the UI can be tested in a normal browser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+heirloom-api = { path = "../heirloom-api" }
+serde_json = "1"
+tiny_http = "0.12"

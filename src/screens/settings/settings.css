@@ -1,0 +1,267 @@
+/* Ustawienia (design/IMPLEMENTATION_SPEC.md §4.34). */
+
+.settings {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 760px);
+  gap: 40px;
+  padding: 28px 40px 60px;
+}
+
+.set-nav {
+  position: sticky;
+  top: 20px;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.set-nav h1 {
+  font-family: var(--f-serif);
+  font-size: 30px;
+  line-height: 1.15;
+  font-weight: var(--head-w);
+  margin: 0 0 12px 10px;
+}
+.set-nav-item {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border-radius: var(--r-ctl);
+  font-size: 14px;
+  color: var(--text2);
+  text-align: left;
+  width: 100%;
+}
+.set-nav-item:hover:not(.active) {
+  background: var(--surface2);
+  color: var(--text);
+}
+.set-nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.set-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  min-width: 0;
+}
+.set-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scroll-margin-top: 20px;
+}
+.set-section h2 {
+  font-family: var(--f-serif);
+  font-size: 24px;
+  line-height: 1.2;
+  font-weight: var(--head-w);
+}
+
+/* A row that isn't a SettingRow (typing a name), with the same size. */
+.set-row {
+  min-height: 60px;
+  padding: 10px 18px;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.btn.set-btn {
+  height: 34px;
+  padding: 0 12px;
+  flex: none;
+}
+
+.set-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 180px;
+  flex: none;
+}
+.set-select select {
+  appearance: none;
+  width: 100%;
+  height: 34px;
+  padding: 0 30px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  background: var(--surface);
+  font-size: 13px;
+  cursor: pointer;
+}
+.set-select select:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.set-select select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+.set-select svg {
+  position: absolute;
+  right: 10px;
+  color: var(--text3);
+  pointer-events: none;
+}
+
+.set-disabled {
+  display: inline-flex;
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.keycap {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface2);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex: none;
+}
+
+/* Wielkość tekstu: a 160 × 4 track, a 16 px knob. */
+.text-size {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  color: var(--text2);
+}
+.text-size input {
+  appearance: none;
+  width: 160px;
+  height: 16px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.text-size input::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--accent) var(--fill), var(--surface2) var(--fill));
+}
+.text-size input::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--accent);
+}
+.text-size-value {
+  width: 44px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.swatches {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+.swatches span {
+  width: 22px;
+  height: 22px;
+}
+
+/* Zajęte miejsce (§5.20). */
+.storage {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 18px 16px;
+  /* About the loaded height, so sections below don't jump when the sizes arrive. */
+  min-height: 118px;
+}
+.storage-bar {
+  display: flex;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--surface2);
+  overflow: hidden;
+}
+.storage-bar span {
+  min-width: 3px;
+}
+.storage-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  font-size: 12px;
+  color: var(--text2);
+}
+.storage-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.storage-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.storage-legend b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Dialogs: the archive check, the cheat sheet, „Co nowego”. */
+.check-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.check-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text2);
+}
+.check-row .link {
+  font-size: 13px;
+}
+.shortcut-row {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  font-size: 13px;
+}
+.shortcut-keys {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+.whats-new {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text2);
+}
+
+@media (max-width: 1100px) {
+  .settings {
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: 28px;
+    padding: 24px 24px 48px;
+  }
+}

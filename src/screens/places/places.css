@@ -1,0 +1,175 @@
+/* Miejsca (spec §4.27). */
+
+.places {
+  grid-template-columns: 340px minmax(0, 1fr);
+}
+
+/* List rows, 40 px, indented 18 px per level. */
+.pl-row {
+  width: 100%;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 20px;
+  border-top: 1px solid var(--border);
+  font-size: 14px;
+  text-align: left;
+}
+.pl-row:hover {
+  background: var(--surface2);
+}
+.pl-row.on {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.pl-row.static {
+  cursor: default;
+}
+.pl-row.static:hover {
+  background: none;
+}
+.pl-row .icon {
+  flex: none;
+  display: flex;
+  color: var(--text3);
+}
+/* A bigger target than the 14 px chevron, without moving anything. */
+.pl-row .pl-toggle {
+  margin: -6px;
+  padding: 6px;
+}
+.pl-row .pl-toggle:hover {
+  color: var(--text);
+}
+.pl-row .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pl-row .type {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text3);
+}
+.pl-row .n {
+  flex: none;
+  min-width: 30px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* The place's page. */
+.pl-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 32px 40px;
+  transition: opacity 0.15s;
+}
+
+.pl-path {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text2);
+}
+.pl-path b {
+  color: var(--text);
+  font-weight: 600;
+}
+.pl-path .sep {
+  color: var(--text3);
+}
+.pl-path button:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.pl-title {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+.pl-title h2 {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--f-serif);
+  font-size: 44px;
+  line-height: 1.05;
+  font-weight: var(--head-w);
+  overflow-wrap: anywhere;
+}
+
+.pl-cards {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 14px;
+}
+.pl-card {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+.pl-period {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.pl-period:last-child {
+  border-bottom: none;
+}
+.pl-period b {
+  font-weight: 600;
+}
+.pl-facts {
+  gap: 8px;
+  font-size: 13px;
+}
+.pl-fact {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.pl-fact > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--text3);
+}
+
+/* Event rows, 44 px. */
+.pl-event {
+  width: 100%;
+  height: 44px;
+  display: grid;
+  grid-template-columns: 96px 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  text-align: left;
+}
+.pl-event:hover {
+  background: var(--surface2);
+}
+.pl-event .source {
+  max-width: 240px;
+  font-size: 12px;
+  color: var(--text3);
+}

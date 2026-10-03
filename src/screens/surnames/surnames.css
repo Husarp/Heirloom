@@ -1,0 +1,187 @@
+/* Nazwiska (spec §4.26). */
+
+.surnames {
+  grid-template-columns: 420px minmax(0, 1fr);
+}
+
+/* List rows, 56 px. */
+.sn-row {
+  width: 100%;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px 0 20px;
+  border-top: 1px solid var(--border);
+  text-align: left;
+}
+.sn-row:hover {
+  background: var(--surface2);
+}
+.sn-row.on {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.sn-row .name {
+  font-family: var(--f-serif);
+  font-size: 16px;
+  font-weight: 600;
+}
+.sn-row .meta {
+  font-size: 12px;
+  color: var(--text3);
+}
+.sn-row .n {
+  font-size: 14px;
+  font-weight: 600;
+}
+.sn-row .married {
+  font-size: 11px;
+  color: var(--text3);
+  white-space: nowrap;
+}
+
+/* The group's page. */
+.sn-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 22px 32px 40px;
+  transition: opacity 0.15s;
+}
+
+.sn-title {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+.sn-title h2 {
+  font-family: var(--f-serif);
+  font-size: 44px;
+  line-height: 1.05;
+  font-weight: var(--head-w);
+  overflow-wrap: anywhere;
+}
+.sn-branch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text2);
+}
+
+.sn-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+.sn-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 12px 16px;
+  border-right: 1px solid var(--border);
+}
+.sn-stats > div:last-child {
+  border-right: none;
+}
+.sn-stats .value {
+  font-family: var(--f-serif);
+  font-size: 22px;
+  line-height: 1.2;
+  font-weight: 600;
+}
+.sn-stats .value > button {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.sn-stats .value > button:hover {
+  text-decoration: underline;
+}
+.sn-stats .key {
+  font-size: 13px;
+  color: var(--text2);
+}
+.sn-stats .sub {
+  font-size: 12px;
+  color: var(--text3);
+}
+
+/* WARIANTY chips. */
+.sn-variant {
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+}
+.sn-variant .form {
+  font-family: var(--f-serif);
+  font-size: 16px;
+  font-weight: 600;
+}
+.sn-variant .n {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2);
+}
+.sn-variant .note {
+  font-size: 11px;
+  color: var(--text3);
+}
+
+/* The people card: underline tabs, then the table. */
+.sn-people {
+  overflow: hidden;
+}
+.sn-tabs {
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+/* The shared tabs draw their own bottom line; it lies on the card-wide one. */
+.sn-tabs > * {
+  margin-bottom: -1px;
+}
+
+.sn-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) 170px 120px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 12px;
+  padding: 0 16px;
+}
+.sn-grid.no-parents {
+  grid-template-columns: minmax(0, 1.3fr) 170px minmax(0, 1fr);
+}
+.sn-grid.head {
+  height: 32px;
+  background: var(--surface2);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2);
+}
+.sn-grid.person {
+  width: 100%;
+  height: 40px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  text-align: left;
+}
+.sn-grid.person:hover {
+  background: var(--surface2);
+}
+
+.sn-empty {
+  padding: 16px;
+  font-size: 13px;
+  color: var(--text3);
+}

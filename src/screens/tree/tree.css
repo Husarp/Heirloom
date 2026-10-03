@@ -1,0 +1,632 @@
+/* The tree (spec §3, §4.1–§4.5). */
+
+.tree-screen {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.tree-main {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  background: var(--canvas);
+}
+
+.tree-canvas {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background-color: var(--canvas);
+  background-image: radial-gradient(var(--grid) 1px, transparent 1.2px);
+  cursor: grab;
+  touch-action: none;
+}
+.tree-canvas:active {
+  cursor: grabbing;
+}
+
+.tree-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.tree-lines {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+}
+.tree-lines .link {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+}
+.lod-3 .tree-lines .link {
+  stroke-width: 2;
+}
+.lod-4 .tree-lines .link {
+  stroke-width: 2.5;
+}
+.tree-lines .link.adopted {
+  stroke-dasharray: 6 4;
+}
+.tree-lines .link.uncertain {
+  stroke-dasharray: 1.5 3.5;
+}
+.tree-lines .link.placeholder {
+  stroke-dasharray: 2 4;
+  opacity: 0.7;
+}
+.tree-lines .link.on {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+.lod-3 .tree-lines .link.on {
+  stroke-width: 3;
+}
+.lod-4 .tree-lines .link.on {
+  stroke-width: 3.5;
+}
+.tree-lines .union {
+  fill: var(--canvas);
+  stroke: var(--line);
+  vector-effect: non-scaling-stroke;
+}
+.tree-lines .union.on {
+  stroke: var(--accent);
+}
+.tree-lines .union-dot {
+  fill: var(--accent);
+}
+
+.tree-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 204px;
+  height: 72px;
+  box-sizing: border-box;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tree-card.full {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 0 14px;
+  transition: box-shadow 0.12s, border-color 0.12s;
+}
+.tree-card.full:hover {
+  border-color: var(--text3);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.1);
+}
+/* Keyboard focus in the tree (design 17g): a plain 2 px ring 3 px out on the chosen card, no blur. */
+.tree-canvas:focus-visible {
+  outline: none;
+}
+.tree-canvas:focus-visible .tree-card.selected:not(.stub) {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.tree-card.full.selected {
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 20%, transparent);
+  padding-left: 13px;
+}
+.tree-card .stripe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+}
+.tree-card .card-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.tree-card .card-name {
+  font-family: var(--f-serif);
+  font-size: 15px;
+  font-weight: var(--name-w);
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-card .card-sub {
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--text2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-card .card-meta {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+}
+.tree-card .card-dates {
+  white-space: nowrap;
+}
+.card-years {
+  display: inline-flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+.tree-card .card-photos {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--text3);
+}
+
+/* Compact: the box scales with the zoom, the text keeps its screen size. */
+.tree-card.compact {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 5px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 0 calc(6px * var(--inv)) 0 calc(9px * var(--inv));
+}
+.tree-card.compact .stripe {
+  width: calc(3px * var(--inv));
+}
+.tree-card.compact.selected {
+  border: calc(2px * var(--inv)) solid var(--accent);
+}
+.tree-card.compact .compact-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+.tree-card.compact .compact-name {
+  font-family: var(--f-serif);
+  font-size: calc(13px * var(--inv));
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-card.compact .compact-years {
+  font-size: calc(11px * var(--inv));
+  color: var(--text2);
+  white-space: nowrap;
+}
+
+.tree-card.mini {
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tree-card.mini.selected {
+  outline: calc(2px * var(--inv)) solid var(--text);
+}
+.tree-card.mini .mini-letter {
+  font-size: calc(10px * var(--inv));
+  font-weight: 600;
+  line-height: 1;
+}
+
+.tree-card.dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tree-card.dot .dot-shape {
+  width: calc(7px * var(--inv));
+  height: calc(7px * var(--inv));
+}
+
+.tree-card.stub {
+  border: 1.5px dashed var(--line);
+  border-radius: var(--r-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--text3);
+  cursor: default;
+}
+.lod-2 .tree-card.stub {
+  font-size: calc(11px * var(--inv));
+}
+
+.tree-label {
+  position: absolute;
+  font-size: calc(11px * var(--inv));
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text3);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.tree-label.accent {
+  color: var(--accent-text);
+}
+
+.tree-box {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text2);
+  border-radius: var(--r-card);
+}
+.tree-box.siblings-open,
+.tree-box.siblings-close {
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.tree-box.add-parents {
+  border: 1.5px dashed var(--line);
+  background: transparent;
+}
+.tree-box:hover {
+  color: var(--text);
+  border-color: var(--text3);
+}
+
+.tree-pill {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 11px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2);
+  white-space: nowrap;
+  transform-origin: 0 0;
+  transform: scale(var(--inv));
+}
+.lod-1 .tree-pill {
+  transform: none;
+}
+.tree-pill:hover {
+  color: var(--text);
+  border-color: var(--text3);
+}
+
+/* Toolbars and controls over the canvas (spec §3.2–§3.3). */
+.tree-toolbar {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  z-index: 3;
+  display: flex;
+  gap: 12px;
+  pointer-events: none;
+}
+.tree-toolbar > * {
+  pointer-events: auto;
+  /* A control never breaks inside („Koloruj wg: gałąź” on two lines); the row wraps whole controls instead. */
+  flex: none;
+  white-space: nowrap;
+}
+.tree-toolbar.row1 {
+  top: 14px;
+  justify-content: space-between;
+}
+.tree-toolbar.row2 {
+  top: 62px;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.mode-seg {
+  padding: 3px;
+}
+.mode-seg > button {
+  height: 30px;
+  padding: 0 11px;
+}
+
+.jump-box {
+  width: 210px;
+  height: 38px;
+  position: relative;
+}
+
+.zoom-stack {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 3;
+  width: 36px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.zoom-stack button {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text2);
+  border-bottom: 1px solid var(--border);
+}
+.zoom-stack button:last-child {
+  border-bottom: none;
+}
+.zoom-stack button:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
+.zoom-stack .zoom-readout {
+  height: 24px;
+  font-size: 11px;
+  color: var(--text3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
+.tree-legend {
+  position: absolute;
+  left: 64px;
+  right: 216px;
+  bottom: 16px;
+  height: 34px;
+  z-index: 3;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text2);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.tree-legend .item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.minimap {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  width: 184px;
+  height: 118px;
+  z-index: 3;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+/* The selected person (spec §4.1 side panel). */
+.tree-panel {
+  width: 340px;
+  flex: none;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.tree-panel-head {
+  height: 44px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px 0 20px;
+  border-bottom: 1px solid var(--border);
+}
+.tree-panel-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: auto;
+  min-height: 0;
+}
+.panel-photo {
+  width: 100%;
+  height: 176px;
+  /* A long list of relatives must not squeeze it (spec §4.1: 176 px). */
+  flex: none;
+  border-radius: var(--r-card);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text3);
+  font-size: 12px;
+}
+.panel-fact {
+  display: flex;
+  gap: 10px;
+  font-size: 13px;
+}
+.panel-fact > :first-child {
+  width: 28px;
+  flex: none;
+  color: var(--text3);
+}
+.panel-relative {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: var(--r-ctl);
+  padding: 0 4px;
+  width: 100%;
+  text-align: left;
+}
+.panel-relative:hover {
+  background: var(--surface2);
+}
+
+.tree-loading-card {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.skeleton-card {
+  position: absolute;
+  width: 204px;
+  height: 72px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+}
+
+/* Całe drzewo (spec §3.11). */
+.overview-host {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--canvas);
+}
+.overview-host canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.band-labels {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 96px;
+  z-index: 2;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  pointer-events: none;
+}
+.band-label {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+}
+.cluster-label {
+  position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  white-space: nowrap;
+  transform: translate(-50%, -100%);
+}
+.cluster-label:hover {
+  border-color: var(--text3);
+}
+.overview-info {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 3;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.overview-info .chip-info {
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  font-size: 12px;
+  color: var(--text2);
+  display: flex;
+  gap: 14px;
+}
+.zoom-h {
+  display: flex;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  overflow: hidden;
+}
+.zoom-h button,
+.zoom-h span {
+  width: 36px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--border);
+  color: var(--text2);
+}
+.zoom-h span {
+  width: 44px;
+  font-size: 11px;
+  color: var(--text3);
+}
+.zoom-h > :last-child {
+  border-right: none;
+}
+.zoom-h button:hover {
+  background: var(--surface2);
+}

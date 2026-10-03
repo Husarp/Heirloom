@@ -1,0 +1,862 @@
+/* Base styles and shared components (design/IMPLEMENTATION_SPEC.md §1–§2, §5). */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 var(--f-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+
+input,
+textarea,
+select,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+  padding: 0;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--accent-text);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--accent-hover);
+}
+
+/* One focus rule (design 17g): a 2 px accent ring 2 px out, only for the keyboard. Rows and menu items draw it
+   inside, so their neighbours don't cover it; text fields get an accent border and glow instead. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+:is(.list-row, .menu-item, .nav-item, .toc-item, [role="row"], [role="option"]):focus-visible {
+  outline-offset: -2px;
+}
+.seg > button:focus-visible {
+  outline-offset: 0;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--accent) 25%, transparent);
+}
+
+/* Read by screen readers, not shown. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.selectable,
+.selectable * {
+  user-select: text;
+}
+
+.serif {
+  font-family: var(--f-serif);
+}
+
+.mono {
+  font-family: var(--f-mono);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.muted {
+  color: var(--text2);
+}
+
+.faint {
+  color: var(--text3);
+}
+
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+}
+
+.label-caps {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text3);
+}
+
+.uncertain {
+  text-decoration: underline dotted var(--text3);
+  text-underline-offset: 3px;
+}
+
+/* Scrollbars that fit the warm palette. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--text3) 35%, transparent);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklab, var(--text3) 55%, transparent);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll {
+  overflow: auto;
+  min-height: 0;
+}
+
+/* ---------- Buttons (§5.1) ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: var(--r-ctl);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  line-height: 1;
+  transition: background-color 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.btn.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.btn.primary:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 88%, var(--text));
+}
+
+.btn.secondary {
+  background: var(--surface);
+  border: 1.5px solid var(--line);
+  color: var(--text);
+}
+.btn.secondary:hover:not(:disabled) {
+  background: var(--surface2);
+}
+
+.btn.ghost {
+  color: var(--text2);
+  padding: 0 10px;
+}
+.btn.ghost:hover:not(:disabled) {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+.btn.dashed {
+  border: 1px dashed var(--border);
+  color: var(--text2);
+  background: transparent;
+}
+.btn.dashed:hover:not(:disabled) {
+  border-color: var(--line);
+  color: var(--text);
+}
+
+.btn.danger {
+  background: var(--err);
+  color: var(--surface);
+  font-weight: 600;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+}
+
+.btn.sm {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.btn.xs {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.btn.lg {
+  height: 38px;
+  font-size: 14px;
+}
+
+.btn .kbd-hint {
+  font-size: 11px;
+  opacity: 0.8;
+  font-weight: 400;
+}
+
+.icon-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-ctl);
+  color: var(--text2);
+  flex: none;
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--surface2);
+  color: var(--text);
+}
+.icon-btn:disabled {
+  color: var(--text3);
+  opacity: 0.6;
+}
+
+.link {
+  color: var(--accent-text);
+  font-weight: 500;
+  cursor: pointer;
+}
+.link:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+/* ---------- Segmented controls (§2.4, §3.2) ---------- */
+
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1.5px solid var(--line);
+  border-radius: var(--r-ctl);
+  background: var(--surface);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.seg > button {
+  height: 26px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: var(--r-ctl-2);
+  color: var(--text2);
+  font-weight: 500;
+}
+.seg > button:hover:not(.on) {
+  color: var(--text);
+}
+
+.seg.accent > button.on {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.seg.neutral > button.on {
+  background: var(--surface2);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.seg.full {
+  display: flex;
+}
+.seg.full > button {
+  flex: 1;
+  justify-content: center;
+}
+
+/* ---------- Inputs (§5) ---------- */
+
+/* Field edges use --line (at least 3:1 with the background, D7); --border stays for dividers. */
+.input {
+  height: 40px;
+  padding: 0 11.5px;
+  border: 1.5px solid var(--line);
+  border-radius: var(--r-ctl);
+  background: var(--surface);
+  font-size: 15px;
+  outline: none;
+  width: 100%;
+  min-width: 0;
+  user-select: text;
+}
+.input:focus {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+.input::placeholder,
+textarea::placeholder {
+  color: var(--text3);
+}
+.input.sm {
+  height: 34px;
+  font-size: 13px;
+}
+
+textarea.input {
+  height: auto;
+  padding: 9.5px 11.5px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.field > .field-label {
+  font-size: 13px;
+  color: var(--text2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1.5px solid var(--line);
+  border-radius: var(--r-ctl);
+  background: var(--surface);
+  color: var(--text3);
+  font-size: 13px;
+}
+.search-box input {
+  border: none;
+  outline: none;
+  background: transparent;
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  font-size: 13px;
+  user-select: text;
+}
+.search-box input::placeholder {
+  color: var(--text3);
+}
+.search-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+
+.kbd {
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: var(--surface);
+  color: var(--text2);
+  font-family: var(--f-sans);
+  white-space: nowrap;
+}
+
+/* ---------- Cards, chips, badges ---------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.card-head .title {
+  font-size: 14px;
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text2);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.chip.on {
+  background: var(--accent-soft);
+  border-color: color-mix(in oklab, var(--accent) 40%, transparent);
+  color: var(--accent-text);
+  font-weight: 500;
+}
+.chip.dashed {
+  border-style: dashed;
+  background: transparent;
+}
+.chip:is(button):hover:not(.on) {
+  color: var(--text);
+  border-color: var(--line);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: var(--r-ctl);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--surface2);
+  color: var(--text2);
+}
+.badge.accent {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.badge.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.badge.err {
+  background: var(--err-soft);
+  color: var(--err);
+}
+.badge.new {
+  background: transparent;
+  color: var(--accent-text);
+  border: 1px dashed var(--accent);
+}
+.badge.outline {
+  background: transparent;
+  color: var(--text3);
+  border: 1px solid var(--border);
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text2);
+}
+
+.icon-tile {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-ctl);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.icon-tile.neutral {
+  background: var(--surface2);
+  color: var(--text2);
+}
+
+/* ---------- Avatars ---------- */
+
+.avatar {
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  background: var(--surface2);
+  font-family: var(--f-sans);
+}
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ---------- Lists ---------- */
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border-top: 1px solid var(--border);
+}
+.list-row:first-child {
+  border-top: none;
+}
+.list-row.clickable {
+  cursor: pointer;
+}
+.list-row.clickable:hover {
+  background: var(--surface2);
+}
+.list-row.selected {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* ---------- Dialogs (§2.10) ---------- */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--backdrop);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+
+.dialog {
+  background: var(--surface);
+  border: 1px solid var(--pop-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-dialog);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 48px);
+}
+.dialog-body {
+  padding: 22px 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: auto;
+}
+.dialog-title {
+  font-family: var(--f-serif);
+  font-size: 22px;
+  line-height: 1.25;
+  font-weight: 600;
+}
+.dialog-text {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text2);
+}
+.dialog-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--border);
+}
+.dialog-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+/* ---------- Popovers and menus ---------- */
+
+.popover {
+  position: absolute;
+  background: var(--surface);
+  border: 1px solid var(--pop-border);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-pop);
+  z-index: 30;
+  overflow: hidden;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--text);
+  width: 100%;
+  text-align: left;
+}
+.menu-item:hover,
+.menu-item.active {
+  background: var(--surface2);
+}
+.menu-item.on {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.menu-item svg {
+  color: var(--text3);
+  flex: none;
+}
+.menu-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text3);
+  padding: 8px 12px 4px;
+}
+
+/* ---------- Toasts (design 17f): bottom right, 420 px, newest at the bottom, at most 3 ---------- */
+
+.toasts {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  width: 420px;
+  max-width: calc(100vw - 48px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 60;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 8px 12px 16px;
+  background: var(--toast-bg);
+  color: var(--toast-text);
+  border-radius: var(--r-card);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.24);
+  font-size: 14px;
+}
+.toast > svg {
+  flex: none;
+  color: var(--toast-icon);
+}
+.toast .toast-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.35;
+}
+.toast .toast-title {
+  font-weight: 500;
+}
+.toast .toast-detail {
+  font-size: 12px;
+  opacity: 0.8;
+}
+.toast .toast-action {
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: var(--r-ctl);
+  color: var(--toast-action);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.toast .toast-action:hover {
+  background: color-mix(in oklab, var(--toast-text) 12%, transparent);
+}
+.toast .toast-close {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-ctl);
+  opacity: 0.8;
+  flex: none;
+}
+.toast .toast-close:hover {
+  opacity: 1;
+  background: color-mix(in oklab, var(--toast-text) 12%, transparent);
+}
+.toast.err > svg {
+  color: var(--toast-err);
+}
+
+/* ---------- Checkboxes and radios ---------- */
+
+.check {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--accent-ink);
+}
+.check.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.radio {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.radio.on {
+  border-color: var(--accent);
+}
+.radio.on::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.toggle {
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--line);
+  position: relative;
+  flex: none;
+  transition: background-color 0.15s;
+}
+.toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s;
+}
+.toggle.on {
+  background: var(--accent);
+}
+.toggle.on::after {
+  transform: translateX(16px);
+}
+
+/* ---------- Skeletons, spinners ---------- */
+
+.skel {
+  background: var(--surface2);
+  border-radius: 5px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+/* ---------- Animations off ---------- */
+
+:root.no-anim *,
+:root.no-anim *::before,
+:root.no-anim *::after {
+  transition: none !important;
+  animation-duration: 0s !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation-duration: 0s !important;
+  }
+}

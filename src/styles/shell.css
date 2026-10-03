@@ -1,0 +1,437 @@
+/* The app shell: sidebar, top bar, bars under it (design/IMPLEMENTATION_SPEC.md §2). */
+
+.app {
+  display: flex;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  position: relative;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 232px;
+  flex: none;
+  background: var(--sidebar);
+  color: var(--sidebar-text);
+  border-right: 1px solid var(--sidebar-border);
+  display: flex;
+  flex-direction: column;
+  padding: 14px 12px;
+  gap: 2px;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px 18px;
+  border-radius: var(--r-ctl);
+  text-align: left;
+  width: 100%;
+}
+.sidebar-head:hover .switcher {
+  color: var(--sidebar-text);
+}
+
+.logo-tile {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-ctl);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: var(--f-serif);
+  font-weight: 700;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.wordmark {
+  font-family: var(--f-serif);
+  font-size: 19px;
+  font-weight: var(--head-w);
+  line-height: 1.1;
+}
+
+.sidebar .archive-name {
+  font-size: 12px;
+  color: var(--sidebar-muted);
+}
+
+.sidebar .switcher {
+  color: var(--sidebar-muted);
+  flex: none;
+}
+
+.nav-item {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border-radius: var(--r-ctl);
+  font-size: 14px;
+  color: var(--sidebar-text);
+  width: 100%;
+  text-align: left;
+}
+.nav-item:hover:not(.active):not(:disabled) {
+  background: color-mix(in oklab, var(--sidebar-text) 7%, transparent);
+}
+.nav-item.active {
+  background: var(--nav-active-bg);
+  color: var(--nav-active-text);
+  font-weight: 600;
+}
+.nav-item:disabled {
+  opacity: 0.45;
+}
+
+.sidebar-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px;
+  border-top: 1px solid var(--sidebar-border);
+  font-size: 12px;
+  color: var(--sidebar-muted);
+  margin-top: auto;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.topbar {
+  height: 52px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.crumbs {
+  width: 260px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text2);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.crumbs .current {
+  color: var(--text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.crumbs button:hover {
+  color: var(--text);
+}
+
+.topbar-search {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+.topbar-search > button {
+  width: 440px;
+  max-width: 100%;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  background: var(--surface2);
+  color: var(--text3);
+  font-size: 13px;
+  text-align: left;
+}
+.topbar-search > button:hover {
+  border-color: var(--line);
+}
+
+.topbar-right {
+  min-width: 260px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.mode-toggle {
+  height: 32px;
+}
+.mode-toggle > button {
+  font-weight: 600;
+}
+.mode-toggle.locked {
+  opacity: 0.5;
+}
+
+/* The edit-mode bar (design 17a; Uzupełnienie 3: always clear who edits and which file). */
+.edit-bar {
+  height: 48px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px 0 24px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid color-mix(in oklab, var(--accent) 30%, transparent);
+  font-size: 13px;
+  white-space: nowrap;
+  min-width: 0;
+}
+.edit-bar strong {
+  color: var(--accent-text);
+  font-weight: 600;
+  flex: none;
+}
+.edit-bar-who {
+  color: var(--text2);
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.edit-bar-file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.edit-bar-file b {
+  font-weight: 600;
+}
+.edit-bar-file .mono {
+  font-size: 12px;
+  color: var(--text2);
+}
+.edit-bar-count {
+  gap: 7px;
+  font-weight: 500;
+  flex: none;
+}
+.edit-bar-count .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn);
+  flex: none;
+}
+.edit-bar-saved {
+  gap: 6px;
+  color: var(--accent-text);
+  font-weight: 500;
+  flex: none;
+}
+.edit-bar .bar-btn {
+  height: 34px;
+  flex: none;
+}
+.edit-bar .btn.ghost.bar-btn {
+  color: var(--text2);
+}
+.edit-bar .btn.ghost.bar-btn.strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.edit-bar .btn.ghost.bar-btn:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+}
+/* Narrow windows: the folder goes first, then the shortcut hints, then who edits; „Zapisz” always stays. */
+@media (max-width: 1320px) {
+  .edit-bar-file .mono,
+  .edit-bar .kbd-hint {
+    display: none;
+  }
+}
+@media (max-width: 1180px) {
+  .edit-bar-who {
+    display: none;
+  }
+}
+
+.readonly-bar {
+  height: 44px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 24px;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.page {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.page-title {
+  font-family: var(--f-serif);
+  font-size: 32px;
+  line-height: 1.1;
+  font-weight: var(--head-w);
+}
+
+/* Full-window screens (archive picker, loading, first open). */
+.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  background: var(--bg);
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+}
+
+.tooltip {
+  position: absolute;
+  padding: 8px 12px;
+  background: var(--text);
+  color: var(--bg);
+  border-radius: var(--r-ctl);
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+  z-index: 50;
+  pointer-events: none;
+  max-width: 280px;
+}
+
+/* Szukaj · Ctrl K (design 17e). */
+.palette-backdrop {
+  align-items: flex-start;
+  padding-top: 72px;
+  background: rgba(20, 18, 15, 0.28);
+}
+.palette {
+  width: 680px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 120px);
+}
+.palette-input {
+  height: 56px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--border);
+}
+.palette-input input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 17px;
+  user-select: text;
+}
+.palette-input input::placeholder {
+  color: var(--text3);
+}
+.palette-meta {
+  font-size: 12px;
+  color: var(--text2);
+  white-space: nowrap;
+}
+.palette-list {
+  padding: 6px 0 8px;
+  max-height: 480px;
+}
+.palette-group {
+  padding: 12px 18px 4px;
+}
+.palette-item {
+  margin: 0 6px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border-radius: var(--r-ctl);
+  cursor: pointer;
+}
+.palette-item.active {
+  background: var(--accent-soft);
+}
+.palette-item mark {
+  background: color-mix(in oklab, var(--warn) 22%, transparent);
+  color: inherit;
+  font-weight: 600;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.palette-why {
+  font-size: 12px;
+  color: var(--text2);
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--surface2);
+  white-space: nowrap;
+  flex: none;
+}
+.palette-enter {
+  font-size: 11px;
+  color: var(--text2);
+  white-space: nowrap;
+  flex: none;
+}
+.palette-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 36px 32px 28px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+.palette-empty b {
+  font-size: 20px;
+  font-weight: 600;
+}
+.palette-empty span {
+  max-width: 440px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text2);
+}
+.palette-foot {
+  height: 38px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 18px;
+  border-top: 1px solid var(--border);
+  background: var(--surface2);
+  font-size: 12px;
+  color: var(--text2);
+}

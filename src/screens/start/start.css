@@ -1,0 +1,61 @@
+.start {
+  padding: 24px 36px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 1400px;
+}
+
+.start-grid {
+  display: grid;
+  /* minmax(0, …): a long unbroken line (a full place path) must not widen its column past the window. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) minmax(0, 0.9fr);
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 1200px) {
+  .start-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.person-line {
+  width: 100%;
+  height: 40px;
+  gap: 10px;
+  padding: 0 4px;
+  border-radius: var(--r-ctl);
+}
+.person-line:hover {
+  background: var(--surface2);
+}
+
+.quick-action {
+  width: 100%;
+  height: 56px;
+  gap: 12px;
+}
+
+.person-chip {
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  font-size: 13px;
+  background: var(--surface);
+}
+.person-chip:hover {
+  border-color: var(--line);
+}
+
+.empty-start {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+}

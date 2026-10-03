@@ -1,0 +1,118 @@
+/* Historia zmian (design/IMPLEMENTATION_SPEC.md §4.21). */
+
+.activity {
+  padding: 28px 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 960px;
+}
+
+.activity-sub {
+  font-size: 13px;
+  color: var(--text2);
+}
+
+/* Pill tabs (§5.3): active accent-soft, inactive transparent. */
+.activity-tabs {
+  gap: 6px;
+  font-size: 13px;
+}
+.activity-tab {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--r-ctl);
+  color: var(--text2);
+}
+.activity-tab:hover:not(.on) {
+  color: var(--text);
+}
+.activity-tab.on {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.activity-hint {
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text3);
+}
+.activity-hint .link {
+  margin-left: 4px;
+}
+
+.activity-none {
+  padding: 8px 0;
+  font-size: 14px;
+  color: var(--text3);
+}
+
+.activity-day {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text3);
+  padding: 6px 0;
+}
+
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+
+.activity-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.activity-row:last-child {
+  border-bottom: none;
+}
+
+.activity-icon {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: var(--r-ctl);
+  background: var(--surface2);
+  color: var(--text2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.activity-subject {
+  font-family: var(--f-serif);
+  font-size: 15px;
+}
+button.activity-subject {
+  color: var(--accent-text);
+  text-align: left;
+}
+button.activity-subject:hover {
+  text-decoration: underline;
+}
+
+.activity-note {
+  font-size: 12px;
+  color: var(--text3);
+}
+
+.activity-when {
+  font-size: 12px;
+  color: var(--text3);
+  white-space: nowrap;
+}
+
+.activity-undo {
+  gap: 5px;
+  flex: none;
+}

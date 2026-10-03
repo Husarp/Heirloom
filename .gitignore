@@ -1,0 +1,22 @@
+# Build outputs
+target/
+dist/
+node_modules/
+# The installer build (scripts/build.ps1)
+/build/
+.venv/
+
+# Test archives made by heirloom-gen (never commit family data; real archives live outside this folder)
+/test-archives/
+
+# Editors / OS
+.vs/
+*.swp
+Thumbs.db
+Desktop.ini
+
+# Another company's design system that came with the Claude Design export (FEEDBACK J1); not ours to publish
+/design/_ds/
+
+# The official GEDCOM 7 test files from gedcom.io (downloaded by scripts/fetch-gedcom-test-files.ps1)
+/test-files/

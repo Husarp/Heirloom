@@ -1,0 +1,79 @@
+.picker {
+  width: 1000px;
+  max-width: calc(100vw - 48px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 40px;
+  padding: 72px 0 48px;
+  align-self: flex-start;
+}
+
+.action-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  width: 100%;
+  transition: border-color 0.12s, background-color 0.12s;
+}
+.action-card:hover {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent-soft) 40%, var(--surface));
+}
+.action-card-text {
+  font-size: 12px;
+  color: var(--text2);
+}
+/* The main first-launch action, filled with the accent (design 17c). */
+.action-card.first-choice {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.action-card.first-choice:hover {
+  background: color-mix(in oklab, var(--accent) 88%, var(--text));
+}
+.action-card.first-choice .icon-tile {
+  background: color-mix(in oklab, var(--accent-ink) 16%, transparent);
+  color: var(--accent-ink);
+}
+.action-card.first-choice .action-card-text {
+  color: var(--accent-ink);
+}
+
+.recent .forget {
+  opacity: 0;
+}
+.recent:hover .forget {
+  opacity: 1;
+}
+
+.first-open {
+  width: 760px;
+  max-width: calc(100vw - 48px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 64px 0 48px;
+  align-self: flex-start;
+}
+
+.option-card {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  text-align: left;
+}
+.option-card.on {
+  border: 1.5px solid var(--accent);
+  padding: 9.5px 11.5px;
+}

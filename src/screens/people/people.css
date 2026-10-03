@@ -1,0 +1,144 @@
+.people {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.people-head {
+  padding: 24px 24px 14px;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+.people-filters {
+  padding: 0 24px 14px;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.filter-chip {
+  padding: 0 8px 0 10px;
+}
+.filter-chip button {
+  display: flex;
+  color: var(--accent-text);
+  margin-left: 2px;
+}
+
+.people-body {
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+  margin-left: 24px;
+}
+
+.people-table {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  border-radius: var(--r-card) 0 0 0;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.people-row {
+  display: grid;
+  align-items: center;
+  column-gap: 12px;
+  padding: 0 16px;
+  font-size: 13px;
+  min-width: 0;
+}
+.people-row > * {
+  min-width: 0;
+}
+.people-row.header {
+  height: 40px;
+  flex: none;
+  background: var(--surface2);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2);
+  border-bottom: 1px solid var(--border);
+}
+.sort-header {
+  gap: 4px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.sort-header:hover {
+  color: var(--text);
+}
+.people-row.person {
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.people-row.person:hover {
+  background: var(--surface2);
+}
+.people-row.group {
+  display: flex;
+  gap: 8px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  width: 100%;
+  text-align: left;
+}
+
+.also-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  font-size: 11px;
+  color: var(--text2);
+  white-space: nowrap;
+  flex: none;
+}
+
+.surname-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 14px;
+  text-align: left;
+}
+.surname-option:hover {
+  background: var(--surface2);
+}
+.surname-option.on {
+  background: var(--accent-soft);
+}
+
+.people-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+.people-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  min-width: 0;
+}
+.people-card:hover {
+  border-color: var(--line);
+}
+
+:root.compact .people-row.header {
+  height: 34px;
+}
