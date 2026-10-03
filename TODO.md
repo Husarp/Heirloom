@@ -256,12 +256,14 @@ This is the roadmap, with a checkbox per task.
       way to walk further up may be wanted
 
 ## From your first test of the app (2026-09-29; planned only, not started)
-- [ ] **Całe drzewo — surname labels come and go while zooming:** a family's label disappears although there is
+- [x] **Całe drzewo — surname labels come and go while zooming** (done 2026-10-03): a family's label disappears although there is
       room for it (test family: at 15 % „Jabłońscy” show; at 23 % „Ostrowscy” appear and „Jabłońscy” vanish; at
       36 % both show). Now a label that would overlap another is dropped, bigger families first; it should move
       aside instead (a second row, or elsewhere over its own family), and a label already shown should stay while
-      it still fits
-- [ ] **Całe drzewo — a label stays when its family is gone:** „Dąbrowscy” stays at the edge of the screen although
+      it still fits. Now `labels.ts`: measured widths, left/right/lower spots, shown labels placed first and kept
+      with a little less room; on the test family both show at 15, 23 and 36 %. A one- or two-person family at the
+      screen's edge can still blink while zooming in a crowded corner
+- [x] **Całe drzewo — a label stays when its family is gone** (done 2026-10-03): „Dąbrowscy” stays at the edge of the screen although
       none of the family is visible; a label should show only while some of its family is on screen (now only
       left–right is checked, not up–down)
 - [ ] **Clicking a person works the same in every tree view** (your rule: one click = one result everywhere, so
