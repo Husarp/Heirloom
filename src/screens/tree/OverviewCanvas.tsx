@@ -3,7 +3,7 @@
 // buffer is screen-sized and only grows, so resizing the window never rebuilds it (Phase 0 finding).
 
 import { Application, BitmapFont, BitmapText, Container, Graphics, Sprite, type Renderer } from "pixi.js";
-import { Minus, Plus, LocateFixed } from "lucide-react";
+import { Minus, Plus, LocateFixed, Maximize } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { TreeCamera } from "../../app/store";
 import { cardYears, count, roman } from "../../lib/format";
@@ -603,6 +603,9 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
           <span>{Math.round(z * 100)}%</span>
           <button onClick={() => api.current?.zoomBy(1.3)} title="Przybliż">
             <Plus size={15} />
+          </button>
+          <button onClick={() => api.current?.fit()} title="Dopasuj do ekranu">
+            <Maximize size={15} />
           </button>
           <button onClick={() => focus && api.current?.centerOn(focus)} title="Wyśrodkuj na wybranej osobie" style={{ color: "var(--accent-text)" }}>
             <LocateFixed size={15} />

@@ -107,7 +107,7 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
       if (!card) return;
       const { w, h } = size();
       const zoom = Math.max(cameraRef.current.zoom, 0.8);
-      apply({ zoom, x: w / 2 - (card.x + CARD_W / 2) * zoom, y: h / 2 - (card.y + CARD_H / 2) * zoom }, withAnimation);
+      apply({ zoom, x: w / 2 - (card.x + (card.w ?? CARD_W) / 2) * zoom, y: h / 2 - (card.y + CARD_H / 2) * zoom }, withAnimation);
     },
     [scene, apply],
   );
@@ -134,7 +134,7 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
       const y = c.y + card.y * c.zoom;
       // The toolbars cover the top 110 px.
       const margin = 24;
-      if (x < margin || y < 110 || x + CARD_W * c.zoom > w - margin || y + CARD_H * c.zoom > h - margin) centerOn(id);
+      if (x < margin || y < 110 || x + (card.w ?? CARD_W) * c.zoom > w - margin || y + CARD_H * c.zoom > h - margin) centerOn(id);
     },
     [scene, centerOn],
   );
@@ -156,7 +156,7 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
   useEffect(() => cameraMoved.current?.(), [camera]);
 
   // A new scene: another person in the middle moves the camera to them with animation; the same person in a new
-  // layout (fresh data, siblings unfolded) moves the camera with their card, so they stay put on screen.
+  // layout (fresh data, edit mode) moves the camera with their card, so they stay put on screen.
   const lastFocus = useRef<string | null>(null);
   const lastSpot = useRef<{ x: number; y: number } | null>(null);
   // The first placement needs the canvas size; a window that isn't shown yet (minimised) reports 0 × 0.
@@ -341,6 +341,7 @@ function Card({
 }) {
   const base: CSSProperties = {
     transform: `translate(${card.x}px, ${card.y}px)`,
+    width: card.w,
     transition: animate ? "transform 280ms ease, opacity 200ms" : undefined,
     opacity: dimmed ? 0.35 : 1,
   };
@@ -397,9 +398,9 @@ function Card({
     );
   }
   return (
-    <div className={`tree-card full${selected ? " selected" : ""}${card.focus ? " focus" : ""}`} style={base} {...events}>
+    <div className={`tree-card full${selected ? " selected" : ""}${card.focus ? " focus" : ""}${card.w ? " narrow" : ""}`} style={base} {...events}>
       <span className="stripe" style={{ background: branchColor }} />
-      <Avatar initials={p.initials} branch={color ?? undefined} photo={photos ? p.photo : null} size={40} tint={22} />
+      {!card.w && <Avatar initials={p.initials} branch={color ?? undefined} photo={photos ? p.photo : null} size={40} tint={22} />}
       <span className="card-text">
         <span className="card-name">{cardName(p)}</span>
         {card.sub && <span className="card-sub">{card.sub}</span>}

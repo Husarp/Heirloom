@@ -11,22 +11,32 @@ The program's own settings (%APPDATA%\\Heirloom: recent archives, theme), its th
 cache) and the window's data (%LOCALAPPDATA%\\com.husarp.heirloom) stay too, unless the box is ticked while
 uninstalling - and then they go to the Recycle Bin; Windows asks first if a folder can't go there.
 
-Heirloom saves only when told to, so a running Heirloom is never closed by force: after the family says OK it gets
-the same request as its own close button (taskkill without /F), so it asks about unsaved changes itself.
+Heirloom saves only when told to, and a running Heirloom says whether closing it now would lose work: it keeps
+%LOCALAPPDATA%\\Heirloom\\running\\<pid>.json (crates/heirloom-api/src/running.rs) up to date - unsaved changes, an open
+section's draft - and removes it when it exits. With nothing unsaved, OK closes it the way its own ✕ does (WM_CLOSE to
+its window). With unsaved work the page says so and offers „Czekaj” (save in Heirloom; the installer watches and goes
+on by itself once nothing is left to save or Heirloom is gone), „Zamknij mimo to” (asked once more, then taskkill /F)
+and „Anuluj”. An older Heirloom that writes no such file (0.4.0) is asked to close and asks about its changes itself.
+Never taskkill without /F: it sends WM_CLOSE to every top-level window of the process, also to the invisible one
+Heirloom's event loop runs through, which then hangs Heirloom - the freeze seen with 0.4.0. And no program file is
+moved or replaced while heirloom.exe runs (copy_files checks that once more right before).
 
 The window (Heirloom's light look: the colours of src/styles/tokens.css, its logo, serif headings) goes welcome
-(Zainstaluj X / Aktualizuj A -> X) -> "Heirloom jest uruchomiony" when it is open -> progress (a bar driven by the real
-steps, „Pokaż szczegóły” for the log) -> finish (a ticked „Uruchom Heirloom”). A failure keeps the error on screen
-with „Spróbuj ponownie” and „Zamknij”: the files it replaced are put back first, and the old version is started again
-when the window closes. Uninstalling uses the same window.
+(Zainstaluj X / Aktualizuj A -> X) -> "Heirloom jest uruchomiony" / "Heirloom ma niezapisane zmiany" when it is open ->
+progress (a bar driven by the real steps, „Pokaż szczegóły” for the log) -> finish (a ticked „Uruchom Heirloom”). A
+failure keeps the error on screen with „Spróbuj ponownie” and „Zamknij”: the files it replaced are put back first, and
+the old version is started again when the window closes. Uninstalling uses the same window.
 
 In-app update: Heirloom asks about unsaved changes, starts `HeirloomSetup-X.Y.Z.exe --update` and exits. This waits
-up to 15 s for heirloom.exe to be gone, shows only the progress page, starts Heirloom again and closes by itself.
+up to 15 s for heirloom.exe to be gone (then the "running" page, as above), shows only the progress page, starts
+Heirloom again and closes by itself.
 
 Everything that touches Windows runs on a worker thread (`work`), which only posts to a queue; the Tk thread drains
 it (`SetupWindow._drain`).
 """
+import csv
 import ctypes
+import json
 import math
 import os
 import queue
@@ -56,6 +66,7 @@ UNINSTALL_KEY = rf"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{FOLDER}"
 # The Microsoft Edge WebView2 runtime draws Heirloom's window (it comes with Windows 11 and current Windows 10).
 WEBVIEW2 = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 CLOSE_WAIT = 15   # seconds a closing Heirloom gets before the window says it is still open
+WATCH_EVERY = 0.8   # seconds between two looks at a running Heirloom (the "running" page)
 
 
 # ---------- Windows folders, asked from Windows itself (a redirected desktop, OneDrive, a moved AppData) ----------
@@ -91,6 +102,8 @@ INSTALL_DIR = LOCAL / "Programs" / FOLDER if LOCAL else None
 # Where an install moves the files it replaces until it has finished (put back if a step fails).
 BACKUP = LOCAL / "Programs" / f"{FOLDER}.poprzednia-wersja" if LOCAL else None
 # The program's own data. Never the family archives, and never %LOCALAPPDATA%\Heirloom\archives (see the docstring).
+# What a running Heirloom says about itself (crates/heirloom-api/src/running.rs): <pid>.json.
+RUNNING = LOCAL / "Heirloom" / "running" if LOCAL else None
 OWN_DATA = [p for p in (ROAMING and ROAMING / "Heirloom", LOCAL and LOCAL / "Heirloom" / "cache", LOCAL and LOCAL / "com.husarp.heirloom") if p]
 
 SYSTEM32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
@@ -135,6 +148,15 @@ def version_key(text: str | None) -> tuple:
     return tuple(parts)
 
 
+def plural(n: int) -> int:
+    """Polish number forms: 0 = one („1 zmiana”), 1 = few („3 zmiany”), 2 = many („5 zmian”)."""
+    return 0 if n == 1 else 1 if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else 2
+
+
+def count_pl(n: int, one: str, few: str, many: str) -> str:
+    return f"{n} {(one, few, many)[plural(n)]}"
+
+
 def has_webview2() -> bool:
     """Registered for the whole machine (either registry view) or for this user."""
     places = [(winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{WEBVIEW2}"),
@@ -151,27 +173,149 @@ def has_webview2() -> bool:
     return False
 
 
-def app_running() -> bool:
+def heirloom_pids() -> list | None:
+    """The running heirloom.exe processes (tasklist as CSV: "heirloom.exe","1234",…); None when tasklist failed."""
     result = run("tasklist", "/FI", f"IMAGENAME eq {EXE_NAME}", "/NH", "/FO", "CSV")
-    return EXE_NAME.lower() in result.stdout.lower()
+    if result.returncode != 0:
+        return None
+    return [int(row[1]) for row in csv.reader(result.stdout.splitlines())
+            if len(row) > 1 and row[0].lower() == EXE_NAME and row[1].isdigit()]
+
+
+def app_running() -> bool:
+    return bool(heirloom_pids())
+
+
+# ---------- a running Heirloom: what it would lose, and closing it ----------
+
+def said_by(pid: int) -> dict | None:
+    """What Heirloom with this pid wrote about itself, or None: an older Heirloom (0.4.0 writes nothing) or a file
+    that can't be read."""
+    if RUNNING is None:
+        return None
+    try:
+        state = json.loads((RUNNING / f"{pid}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return state if isinstance(state, dict) and state.get("pid") == pid else None
+
+
+def forget_gone(pids):
+    """Files left by a Heirloom that did not exit normally (a crash, Task Manager): no heirloom.exe has their pid. Only
+    older than a minute - one that has just started may not have been in the process list yet."""
+    if RUNNING is None or not RUNNING.is_dir():
+        return
+    for path in RUNNING.glob("*.json"):
+        try:
+            if path.stem.isdigit() and int(path.stem) not in pids and time.time() - path.stat().st_mtime > 60:
+                path.unlink()
+        except OSError:
+            pass
+
+
+def look() -> dict:
+    """Is Heirloom running, and would closing it now lose work? kind: "none", "unsaved" (changes, or an open section's
+    draft), "unknown" (it doesn't say - Heirloom 0.4.0) or "clean". Never raises: a failed look is "none" (and
+    copy_files still won't touch a running exe)."""
+    try:
+        pids = heirloom_pids()
+    except Exception:
+        pids = None
+    if pids is None:   # (tasklist failed: no file is taken for a leftover - its Heirloom may well be running)
+        pids = []
+    else:
+        forget_gone(pids)
+    said = [s for s in (said_by(pid) for pid in pids) if s]
+    unsaved = sum(int(s.get("unsavedChanges") or 0) for s in said)
+    draft = any(bool(s.get("draft")) for s in said)
+    archives = sorted({str(s["archive"]) for s in said if s.get("archive") and (s.get("unsavedChanges") or s.get("draft"))})
+    kind = ("none" if not pids else "unsaved" if unsaved or draft else "unknown" if len(said) < len(pids) else "clean")
+    return {"kind": kind, "pids": pids, "unsaved": unsaved, "draft": draft, "archives": archives}
+
+
+WNDENUMPROC = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+TAO_TARGET = "Tao Thread Event Target"
+
+
+def user32():
+    u = ctypes.windll.user32
+    u.EnumWindows.argtypes = [WNDENUMPROC, wintypes.LPARAM]
+    u.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    u.GetWindow.argtypes, u.GetWindow.restype = [wintypes.HWND, wintypes.UINT], wintypes.HWND
+    u.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+    u.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    for name in ("IsWindowVisible", "IsIconic", "SetForegroundWindow"):
+        getattr(u, name).argtypes = [wintypes.HWND]
+    u.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    u.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    return u
+
+
+def app_windows(pids) -> list:
+    """Heirloom's own windows: visible, top-level, not owned, not tool windows. Never the invisible one its event loop
+    runs through (TAO_TARGET): WM_CLOSE there destroys it and leaves Heirloom hung."""
+    u, found = user32(), []
+
+    def each(hwnd, _):
+        pid = wintypes.DWORD()
+        u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if (pid.value in pids and u.IsWindowVisible(hwnd) and not u.GetWindow(hwnd, 4)   # GW_OWNER
+                and not u.GetWindowLongW(hwnd, -20) & 0x80):                              # GWL_EXSTYLE, WS_EX_TOOLWINDOW
+            name = ctypes.create_unicode_buffer(64)
+            u.GetClassNameW(hwnd, name, 64)
+            if name.value != TAO_TARGET:
+                found.append(hwnd)
+        return True
+    u.EnumWindows(WNDENUMPROC(each), 0)
+    return found
+
+
+def ask_to_close(pids) -> bool:
+    """What a click on its ✕ does (WM_CLOSE to its window only): it closes, or asks about unsaved changes itself."""
+    windows = app_windows(pids)
+    for hwnd in windows:
+        user32().PostMessageW(hwnd, 0x0010, 0, 0)   # WM_CLOSE
+    return bool(windows)
+
+
+def bring_forward(pids):
+    """Heirloom's window to the front (restored if minimised), so its changes can be saved."""
+    u = user32()
+    for hwnd in app_windows(pids):
+        if u.IsIconic(hwnd):
+            u.ShowWindow(hwnd, 9)   # SW_RESTORE
+        u.SetForegroundWindow(hwnd)
+
+
+def force_close(pids) -> bool:
+    """„Zamknij mimo to”, after asking once more: ended at once, unsaved work lost (its WebView2 helpers end by
+    themselves). Never /T: this installer can be Heirloom's child (--update, or opened from Heirloom), and the tree
+    would take it along. True when it is gone within CLOSE_WAIT."""
+    for pid in pids:
+        run("taskkill", "/F", "/PID", str(pid))
+    start = time.monotonic()
+    while set(pids) & set(heirloom_pids() or []):
+        if time.monotonic() - start > CLOSE_WAIT:
+            return False
+        time.sleep(0.3)
+    for pid in pids:   # (Heirloom had no chance to remove them itself)
+        if RUNNING is not None:
+            (RUNNING / f"{pid}.json").unlink(missing_ok=True)
+    return True
 
 
 # ---------- steps ----------
 
 class StillRunning(Exception):
-    """Heirloom did not close within CLOSE_WAIT seconds; nothing was changed."""
+    """Heirloom did not close within CLOSE_WAIT seconds, or is running again; nothing was changed."""
 
 
-def close_app(log, ask: bool, each):
-    """Waits until heirloom.exe is gone. ask: first send it the request its own close button sends (taskkill
-    without /F), so with unsaved changes it asks about them in its window - never closed by force."""
+def close_app(log, each):
+    """Waits until heirloom.exe is gone: an update (Heirloom has asked about unsaved changes and is exiting), or a
+    Heirloom closed on the "running" page a moment ago."""
     if not app_running():
         return
-    if ask:
-        log("Zamykam Heirloom (jeśli masz niezapisane zmiany, zapyta o nie w swoim oknie)…")
-        run("taskkill", "/IM", EXE_NAME)
-    else:
-        log("Czekam, aż Heirloom się zamknie…")
+    log("Czekam, aż Heirloom się zamknie…")
     start = time.monotonic()
     while time.monotonic() - start < CLOSE_WAIT:
         time.sleep(0.5)
@@ -180,6 +324,32 @@ def close_app(log, ask: bool, each):
             log("Heirloom jest zamknięty.")
             return
     raise StillRunning()
+
+
+def exe_in_use() -> bool:
+    """A running heirloom.exe can't be opened for writing (Windows keeps it mapped) - whoever started it. Also true
+    for a moment after it exits (antivirus, WebView2 closing)."""
+    try:
+        with open(INSTALL_DIR / EXE_NAME, "r+b"):
+            return False
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+
+
+def until_free(log):
+    """Checked right before the first file moves: no heirloom.exe running (StillRunning: back to the "running" page),
+    and its exe not held (by a Heirloom the process list missed, or for a moment after it exited)."""
+    for attempt in range(20):
+        if app_running():
+            raise StillRunning()
+        if not exe_in_use():
+            return
+        if attempt == 0:
+            log("Czekam, aż Windows zwolni plik heirloom.exe…")
+        time.sleep(0.5)
+    raise OSError(f"Plik {INSTALL_DIR / EXE_NAME} jest wciąż zajęty przez inny program (może antywirusowy).")
 
 
 def move(source: Path, target: Path):
@@ -204,6 +374,7 @@ class Copied:
 
 def copy_files(log, each, copied: Copied):
     """each(fraction_done, name) for every megabyte copied (the progress bar)."""
+    until_free(log)
     log("Kopiuję program…")
     if BACKUP.exists():   # left by an install that was cut off
         shutil.rmtree(BACKUP)
@@ -406,7 +577,7 @@ def overall(weights, step: int, fraction: float = 0.0) -> float:
     return (sum(weights[:step]) + part) / sum(weights)
 
 
-def work(mode: str, post, remove_own_data: bool = False, ask_to_close: bool = False):
+def work(mode: str, post, remove_own_data: bool = False):
     """The worker thread: installs or uninstalls and reports through post(kind, value) - never touches Tk.
     Kinds: "log" (a step), "file" (the file being copied), "progress" ((value, end of this step), 0-1), then
     "done" (("installed" | "uninstalled", folders left on the disk)) or "failed" (("running" | "error", message,
@@ -422,7 +593,7 @@ def work(mode: str, post, remove_own_data: bool = False, ask_to_close: bool = Fa
     copied = Copied()
     try:
         at(0)
-        close_app(log, ask_to_close, lambda fraction: at(0, fraction))
+        close_app(log, lambda fraction: at(0, fraction))
         if mode == "uninstall":
             left = uninstall(log, remove_own_data, at)
             at(len(weights))
@@ -439,7 +610,7 @@ def work(mode: str, post, remove_own_data: bool = False, ask_to_close: bool = Fa
         post("done", ("installed", []))
     except StillRunning:
         log(f"Heirloom wciąż jest otwarty po {CLOSE_WAIT} s. Nic nie zostało zmienione.")
-        post("failed", ("running", "", None))
+        post("failed", ("running", "", None))   # (nothing was changed: back to the "running" page)
     except Exception as e:      # show it rather than vanish
         log(f"Coś poszło nie tak: {e}")
         undone = None
@@ -667,7 +838,13 @@ class SetupWindow(tk.Tk):
         self.outcome = None
         self.was_running = False     # Heirloom was open and closed for this install: started again at the end
         self.start_old = False       # a failed update put the old version back: start it when the window closes
-        self.ask_to_close = False
+        # The "running" page: what look() found, „Czekaj” (or OK) clicked, „Zamknij mimo to” being confirmed, the
+        # force close under way ("closing") or failed ("stuck"), the pids already asked to close, and which watcher
+        # thread's news counts (a new page stops the old one).
+        self.found = None
+        self.waiting = self.confirming = self.closing = self.stuck = False
+        self.asked = set()
+        self.watch = 0
         self.remove_own_data = tk.BooleanVar(value=False)
         self.run_app = tk.BooleanVar(value=True)
         self.shown, self.target, self.end = 0.0, 0.0, 0.0   # the bar: drawn / reported / end of this step
@@ -812,6 +989,7 @@ class SetupWindow(tk.Tk):
 
     def show(self, page: str):
         self.page = page
+        self.watch += 1   # (stops the "running" page's watcher; that page starts a new one)
         for child in self.body.winfo_children():
             child.destroy()
         self._keep = []
@@ -819,27 +997,114 @@ class SetupWindow(tk.Tk):
         self._fit()
 
     def _go(self):
-        """Welcome answered (or „Spróbuj ponownie”): is Heirloom open? (asked off the Tk thread) - then on."""
+        """Welcome answered (or „Spróbuj ponownie”, or Heirloom still open after CLOSE_WAIT): is Heirloom open, and
+        with unsaved work? (asked off the Tk thread) - then on."""
         if self.primary:
             self.primary.enable(False)
-        threading.Thread(target=lambda: self.events.put(("running", self._is_running())), daemon=True).start()
+        threading.Thread(target=lambda: self.events.put(("running", look())), daemon=True).start()
+
+    def _on_running(self, found: dict):
+        if found["kind"] == "none":
+            self._progress()
+            return
+        self.found, self.asked = found, set()
+        self.waiting = self.confirming = self.closing = self.stuck = False
+        self.was_running = True
+        self.show("running")
+
+    def _watch(self):
+        """Looks at Heirloom every WATCH_EVERY s while the "running" page is shown (a thread: tasklist takes a moment)."""
+        self.watch += 1
+        mine = self.watch
+
+        def loop():
+            while self.watch == mine:
+                time.sleep(WATCH_EVERY)
+                if self.watch == mine:
+                    self.events.put(("look", (mine, look())))
+        threading.Thread(target=loop, daemon=True).start()
 
     @staticmethod
-    def _is_running() -> bool:
-        try:
-            return app_running()
-        except Exception:
-            return False
+    def _what(found):
+        """What the "running" page shows of look()'s answer (a new answer redraws it only when this differs)."""
+        return found["kind"], found["unsaved"], found["draft"], tuple(found["archives"])
 
-    def _on_running(self, running: bool):
-        if running:
-            self.show("running")
-        else:
+    def _on_look(self, news):
+        mine, found = news
+        if mine != self.watch or self.page != "running":
+            return
+        if found["kind"] == "none":   # closed (saved and closed by hand, closed by OK, or ended): on with the install
             self._progress()
+            return
+        before, self.found = self.found, found
+        if found["kind"] == "unsaved":   # (asked before, but kept open with new changes: asked again once saved)
+            self.asked -= set(found["pids"])
+        if self.waiting and found["kind"] == "clean" and set(found["pids"]) - self.asked:
+            # Saved in Heirloom after „Czekaj” (or nothing to save after OK): closed as its ✕ would.
+            self._ask(found["pids"])
+        if self._what(found) != self._what(before):
+            self.show("running")
+        elif self.r_status_text and (self.waiting or self.closing) and not (self.confirming or self.stuck):
+            self.r_dots = (self.r_dots + 1) % 4
+            self.r_status.configure(text=self.r_status_text + "." * self.r_dots)
 
-    def _close_and_go(self):
-        self.was_running = True
-        self._progress(ask_to_close=True)
+    def _ask(self, pids):
+        """OK (nothing unsaved, or an older Heirloom that asks itself), or saved after „Czekaj”: closed the way its ✕
+        does. An older Heirloom may ask about its changes, so its window comes to the front."""
+        self.asked |= set(pids)
+        front = self.found["kind"] == "unknown"
+
+        def ask():
+            try:
+                ask_to_close(pids)
+                if front:
+                    bring_forward(pids)
+            except Exception:
+                pass
+        threading.Thread(target=ask, daemon=True).start()
+
+    def _ok(self):
+        self.waiting = True
+        self._ask(self.found["pids"])
+        self.show("running")
+
+    def _wait(self):
+        """„Czekaj”: Heirloom to the front, to save there; the watcher goes on by itself."""
+        self.waiting = True
+        pids = self.found["pids"]
+        threading.Thread(target=lambda: self._quietly(bring_forward, pids), daemon=True).start()
+        self.show("running")
+
+    @staticmethod
+    def _quietly(action, *args):
+        try:
+            action(*args)
+        except Exception:
+            pass
+
+    def _confirm(self, on: bool):
+        self.confirming = on
+        self.show("running")
+
+    def _force(self):
+        """„Zamknij bez zapisu”, confirmed: taskkill /F. The watcher sees it gone and the install goes on."""
+        self.confirming, self.closing, self.stuck = False, True, False
+        pids = self.found["pids"]
+
+        def kill():
+            try:
+                gone = force_close(pids)
+            except Exception:
+                gone = False
+            if not gone:
+                self.events.put(("stuck", None))
+        threading.Thread(target=kill, daemon=True).start()
+        self.show("running")
+
+    def _on_stuck(self, _):
+        if self.page == "running":
+            self.closing, self.stuck = False, True
+            self.show("running")
 
     def _page_welcome(self):
         b = self.body
@@ -902,24 +1167,99 @@ class SetupWindow(tk.Tk):
         self.buttons((go, self._go, "danger" if self.uninstalling else "primary"), ("Anuluj", self._close, "secondary"))
 
     def _page_running(self):
-        """APP-STANDARDS section 5: say it plainly, OK closes it (the way its own close button does), Anuluj stops."""
+        """APP-STANDARDS section 5: say it plainly. Nothing unsaved (or an older Heirloom that asks itself): OK closes it
+        the way its own ✕ does. Unsaved work: „Czekaj” / „Zamknij mimo to” (asked once more) / „Anuluj …”."""
+        f = self.found
         verb = ("odinstalować" if self.uninstalling else "zaktualizować" if self.upgrade
                 else "zainstalować ponownie" if self.current == VERSION else "zainstalować")
         then = "" if self.uninstalling else ", a potem uruchomiony ponownie"
+        cancel = ("Anuluj odinstalowanie" if self.uninstalling else "Anuluj aktualizację" if self.upgrade
+                  else "Anuluj instalację")
+        where = ("w otwartym archiwum" if not f["archives"] else f"w archiwum „{f['archives'][0]}”"
+                 if len(f["archives"]) == 1 else "w archiwach " + ", ".join(f"„{a}”" for a in f["archives"]))
+        draft = "zmiany w otwartej sekcji, niezatwierdzone przyciskiem „Gotowe”"
+        hint_stuck = "Gdyby Heirloom nie odpowiadał, „Zamknij mimo to” zamknie go od razu."
+        if f["kind"] == "unsaved":
+            n = f["unsaved"]
+            changes = count_pl(n, "niezapisana zmiana", "niezapisane zmiany", "niezapisanych zmian")
+            title = "Heirloom ma niezapisane zmiany"
+            if n:
+                said = (f"{where[0].upper() + where[1:]} {'są' if plural(n) == 1 else 'jest'} {changes}"
+                        + (f", a do tego {draft}." if f["draft"] else "."))
+                lose = (f"{'Przepadną' if f['draft'] or plural(n) == 1 else 'Przepadnie'} {changes} {where}"
+                        + (f" i {draft}." if f["draft"] else "."))
+            else:
+                said = f"{where[0].upper() + where[1:]} są {draft}."
+                lose = f"Przepadną {draft}."
+            todo = ("" if self.waiting else "Żeby ich nie stracić, kliknij „Czekaj”, przejdź do Heirloom i "
+                    + ("zatwierdź sekcję, a potem " if f["draft"] else "") + "zapisz zmiany. Instalator poczeka, "
+                    "zamknie Heirloom i sam ruszy dalej.")
+            waiting = "Czekam, aż zapiszesz zmiany albo zamkniesz Heirloom"
+            hint = "Gdy w Heirloom nic nie będzie czekało na zapis, instalator sam go zamknie i ruszy dalej."
+            ask = "Zamknąć Heirloom bez zapisu?"
+        elif f["kind"] == "unknown":
+            title = "Heirloom jest uruchomiony"
+            said = f"Zostanie zamknięty, żeby go {verb}{then}."
+            todo = ("" if self.waiting else "Ta wersja Heirloom nie mówi instalatorowi, czy ma niezapisane zmiany — "
+                    "jeśli ma, po „OK” zapyta o nie w swoim oknie.")
+            waiting = "Czekam, aż Heirloom się zamknie"
+            hint = "Jeśli pyta o niezapisane zmiany, odpowiedz w jego oknie. " + hint_stuck
+            ask, lose = "Zamknąć Heirloom od razu?", "Jeśli ma niezapisane zmiany, przepadną."
+        else:
+            title = "Heirloom jest uruchomiony"
+            said, todo = f"Zostanie zamknięty, żeby go {verb}{then}.", "Nie ma niezapisanych zmian, więc nic nie przepadnie."
+            waiting, hint = "Zamykam Heirloom", hint_stuck
+            ask, lose = "Zamknąć Heirloom od razu?", "Nie ma niezapisanych zmian, więc nic nie przepadnie."
         card = tk.Frame(self.body, bg=SURFACE, highlightthickness=self.px(1), highlightbackground=BORDER,
                         padx=self.px(20), pady=self.px(20))
         card.pack(fill="x", pady=(self.px(10), 0))
         self.badge(card, WARN, WARN_SOFT, "!").pack(side="left", anchor="n")
         words = tk.Frame(card, bg=SURFACE)
         words.pack(side="left", fill="x", expand=True, padx=(self.px(16), 0))
-        self.label(words, "Heirloom jest uruchomiony", "serif", 19).pack(anchor="w")
-        self.label(words, f"Zostanie zamknięty, żeby go {verb}{then}. Jeśli masz niezapisane zmiany, Heirloom najpierw "
-                          "zapyta, czy je zapisać.", fg=TEXT2, wraplength=self.wrap(100)).pack(anchor="w",
-                                                                                              pady=(self.px(6), 0))
-        self.buttons(("OK", self._close_and_go, "primary"), ("Anuluj", self._close, "secondary"))
+        self.label(words, title, "serif", 19).pack(anchor="w")
+        self.label(words, said, wraplength=self.wrap(100)).pack(anchor="w", pady=(self.px(8), 0))
+        if todo:
+            self.label(words, todo, fg=TEXT2, wraplength=self.wrap(100)).pack(anchor="w", pady=(self.px(6), 0))
+        self.r_dots, self.r_status_text = 0, ""
+        self.r_status = self.label(self.body, "", "semi", 13, ACCENT, wraplength=self.wrap())
+        r_hint = self.label(self.body, "", size=12, fg=TEXT3, wraplength=self.wrap())
+        if self.confirming:
+            box = tk.Frame(self.body, bg=ERR_SOFT, padx=self.px(14), pady=self.px(10))
+            box.pack(fill="x", pady=(self.px(14), 0))
+            self.label(box, ask, "semi", 13, ERR, wraplength=self.wrap(28)).pack(anchor="w")
+            self.label(box, lose, size=13, fg=TEXT, wraplength=self.wrap(28)).pack(anchor="w", pady=(self.px(2), 0))
+            self.buttons(("Zamknij bez zapisu" if f["kind"] == "unsaved" else "Zamknij od razu", self._force, "danger"),
+                         ("Wróć", lambda: self._confirm(False), "secondary"))
+            self.primary = None   # (Enter never closes it by force: that takes a click)
+        elif self.closing or self.stuck:
+            self.r_status_text = "Zamykam Heirloom" if self.closing else "Nie udało się zamknąć Heirloom"
+            self.r_status.configure(text=self.r_status_text, fg=ACCENT if self.closing else ERR)
+            if self.stuck:
+                r_hint.configure(text="Zamknij go w Menedżerze zadań — instalator ruszy wtedy sam.")
+            self.buttons(("Czekam…", None, "primary"), (cancel, self._close, "secondary"))
+            self.primary.enable(False)
+            if self.closing:
+                self.secondary.enable(False)
+        elif self.waiting:
+            closing = f["kind"] == "clean" and set(f["pids"]) <= self.asked
+            self.r_status_text = "Zamykam Heirloom" if closing else waiting
+            self.r_status.configure(text=self.r_status_text)
+            r_hint.configure(text=hint_stuck if closing else hint)
+            self.buttons(("Czekam…", None, "primary"), ("Zamknij mimo to", lambda: self._confirm(True), "danger"),
+                         (cancel, self._close, "secondary"))
+            self.primary.enable(False)
+        elif f["kind"] == "unsaved":
+            self.buttons(("Czekaj", self._wait, "primary"), ("Zamknij mimo to", lambda: self._confirm(True), "danger"),
+                         (cancel, self._close, "secondary"))
+        else:
+            self.buttons(("OK", self._ok, "primary"), (cancel, self._close, "secondary"))
+        if self.r_status_text:
+            self.r_status.pack(anchor="w", pady=(self.px(18), 0))
+        if r_hint["text"]:
+            r_hint.pack(anchor="w", pady=(self.px(4), 0))
+        self._watch()   # (whatever is shown: Heirloom gone = on with the install)
 
-    def _progress(self, ask_to_close: bool = False):
-        self.ask_to_close = ask_to_close
+    def _progress(self):
         self.show("progress")
 
     def _page_progress(self):
@@ -963,8 +1303,7 @@ class SetupWindow(tk.Tk):
         self.busy = True
         # Not a daemon: if the window goes away mid-install (a Tk error, Windows closing it), the process still waits
         # for the install to finish - or to put the old version back - instead of dying half-way.
-        threading.Thread(target=work, args=(self.mode, self._post, self.remove_own_data.get(),
-                                            self.ask_to_close)).start()
+        threading.Thread(target=work, args=(self.mode, self._post, self.remove_own_data.get())).start()
 
     def _post(self, kind, value):   # (worker thread: only the queue)
         self.events.put((kind, value))
@@ -1078,40 +1417,36 @@ class SetupWindow(tk.Tk):
         """Stays on screen, with the details open, until „Spróbuj ponownie” or „Zamknij”."""
         kind, error, undone = failure
         self.busy = False
+        if kind == "running":   # (nothing was changed) the "running" page again, with what Heirloom says now
+            self._go()
+            return
         self.shown = self.end = self.target   # (the bar stays where the work stopped)
         self.p_footnote.configure(text="")
-        if kind == "running":
-            self.bar_colour = WARN
-            self.p_head.configure(text="Heirloom wciąż jest otwarty")
-            self.p_status.configure(text="Nic nie zostało zmienione.", fg=WARN)
-            self.p_file.configure(text="Jeśli Heirloom pyta o niezapisane zmiany, odpowiedz w jego oknie albo zamknij "
-                                       "go sam, a potem kliknij „Spróbuj ponownie”.", fg=TEXT)
-        else:
-            self.bar_colour = ERR
-            self.p_head.configure(text="Odinstalowanie nie powiodło się" if self.uninstalling else
-                                  "Aktualizacja nie powiodła się" if self.upgrade else
-                                  "Instalacja nie powiodła się")
-            self.p_status.configure(text="Coś poszło nie tak:", fg=ERR)
-            self.p_file.configure(text=error, fg=TEXT)
-            # The old version is whole (put back, or never touched): if this install closed it (an update, or OK on
-            # „Heirloom jest uruchomiony”), it starts again when the window closes - never left off.
-            self.start_old = (not self.uninstalling and undone in ("restored", None)
-                              and (self.mode == "update" or self.was_running)
-                              and INSTALL_DIR is not None and (INSTALL_DIR / EXE_NAME).exists())
-            if undone == "restored":
-                self.p_note.configure(text=f"Poprzednia wersja{f' ({self.current})' if self.current else ''} jest z "
-                                           "powrotem na miejscu" + (" i uruchomi się po zamknięciu tego okna."
-                                                                    if self.start_old else "."))
-            elif undone is None and not self.uninstalling:
-                self.p_note.configure(text="Nic nie zostało zmienione" + (" — Heirloom uruchomi się po zamknięciu "
-                                                                          "tego okna." if self.start_old else "."))
-            elif undone == "removed":
-                self.p_note.configure(text="Nic nie zostało zainstalowane.")
-            elif undone == "partial":
-                self.p_note.configure(text="Nie wszystko udało się przywrócić — szczegóły poniżej. "
-                                           "„Spróbuj ponownie” zainstaluje program jeszcze raz.")
-            if self.p_note["text"]:
-                self.p_note.pack(fill="x", pady=(self.px(6), 0), before=self.p_toggle)
+        self.bar_colour = ERR
+        self.p_head.configure(text="Odinstalowanie nie powiodło się" if self.uninstalling else
+                              "Aktualizacja nie powiodła się" if self.upgrade else
+                              "Instalacja nie powiodła się")
+        self.p_status.configure(text="Coś poszło nie tak:", fg=ERR)
+        self.p_file.configure(text=error, fg=TEXT)
+        # The old version is whole (put back, or never touched): if this install closed it (an update, or OK on
+        # „Heirloom jest uruchomiony”), it starts again when the window closes - never left off.
+        self.start_old = (not self.uninstalling and undone in ("restored", None)
+                          and (self.mode == "update" or self.was_running)
+                          and INSTALL_DIR is not None and (INSTALL_DIR / EXE_NAME).exists())
+        if undone == "restored":
+            self.p_note.configure(text=f"Poprzednia wersja{f' ({self.current})' if self.current else ''} jest z "
+                                       "powrotem na miejscu" + (" i uruchomi się po zamknięciu tego okna."
+                                                                if self.start_old else "."))
+        elif undone is None and not self.uninstalling:
+            self.p_note.configure(text="Nic nie zostało zmienione" + (" — Heirloom uruchomi się po zamknięciu "
+                                                                      "tego okna." if self.start_old else "."))
+        elif undone == "removed":
+            self.p_note.configure(text="Nic nie zostało zainstalowane.")
+        elif undone == "partial":
+            self.p_note.configure(text="Nie wszystko udało się przywrócić — szczegóły poniżej. "
+                                       "„Spróbuj ponownie” zainstaluje program jeszcze raz.")
+        if self.p_note["text"]:
+            self.p_note.pack(fill="x", pady=(self.px(6), 0), before=self.p_toggle)
         self._draw_bar(force=True)
         self.p_details.configure(height=5)   # (the error above takes the room of the other lines)
         self._details(True)

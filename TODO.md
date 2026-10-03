@@ -407,10 +407,18 @@ This is the roadmap, with a checkbox per task.
       Heirloom numbering the files itself, several packages in one import, `.zip` packages, photos without an AI
       answer. Update them together with those changes (and the format version if it changes), then run the AI-trial
       packages again
-- [ ] **Rodzina: siblings always shown** (2026-09-29): now they're folded into „+N rodzeństwa” and need a click.
+- [x] **Rodzina: siblings always shown** (2026-09-29; done 2026-10-03, 0.4.1): now they're folded into „+N rodzeństwa” and need a click.
       The person in the centre always shows the closest family: parents, siblings (without the siblings'
       children), partner(s) and children — so when a branch ends with no children, you go on through a sibling
-      straight away. Check how it looks with 10+ siblings
+      straight away. Check how it looks with 10+ siblings. Now: always cards, in birth order, older ones left of the
+      person, younger ones right of the partners; half-siblings at the outer end on the shared parent's side, their
+      line from that parent, labelled „brat przyrodni” / „siostra przyrodnia”; from 9 siblings on narrower cards
+      (150 px, no photo). Checked with 14 siblings and two partners whose parents are known: a partner's parents'
+      line no longer runs over the siblings (CHANGES_PLAN §6). The rest of the Rodzina redesign (CHANGES_PLAN §7)
+      is still to do
+- [x] **Tree: the zoom buttons in one row** (done 2026-10-03, 0.4.1): in Rodzina, Przodkowie and Potomkowie the zoom
+      was a column in the bottom-left corner that stuck up over the cards; now it is a row at the bottom right, as
+      high as the line legend, the same as in Całe drzewo (which also gets „Dopasuj do ekranu”)
 - [x] **Your idea: how the archive stores its data** — decided 2026-09-29: it stays one file. Now: one `rodzina.ged` (GEDCOM 7, all
       people, families, sources, texts) + `media/` (photos, PDFs) + `zrodla-ai/` (the AI answers as they came) +
       `.heirloom/` (settings, change history, backup copies); „Zapisz import” writes the batch into `rodzina.ged` at

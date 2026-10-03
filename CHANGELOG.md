@@ -3,6 +3,32 @@
 Format: `X.Y.Z — YYYY-MM-DD HH:MM: description`. Newest on top.
 X = major change, Y = feature / bigger change, Z = small change.
 
+## 0.4.1 — 2026-10-03 19:57: The installer with a running Heirloom, siblings always shown
+- **Tree:**
+  - Rodzina always shows the brothers and sisters as cards, in birth order: older ones left of the person, younger
+    ones right of the partners; half-siblings at the outer end on the shared parent's side, with their line from
+    that parent and „brat przyrodni” / „siostra przyrodnia”; from 9 siblings on the cards are narrower. „+N
+    rodzeństwa” and „Przywróć automatyczny układ” are gone. A second partner's parents' line no longer runs over
+    the siblings, with three or more partners their parents' lines no longer share a stretch, and a partner's
+    „Dodaj rodziców” moves aside instead of covering the person's own parents;
+  - the zoom buttons in Rodzina, Przodkowie and Potomkowie are a row at the bottom right, as high as the line legend
+    and the same as in Całe drzewo (which gets „Dopasuj do ekranu” too); the legend drops whole items when the window
+    is narrow.
+- **Fix: Heirloom froze when the installer was run by hand while it was open (0.4.0).** The installer closed it with
+  `taskkill` without /F, which sends „close” to every window of the program, also to the invisible one its event
+  loop runs through; that window was destroyed, so the close question could be answered but the window never closed
+  (nor with ✕), and the installer gave up after 15 s. Now:
+  - Heirloom keeps a small file for the installer (`%LOCALAPPDATA%\Heirloom\running\<pid>.json`) saying whether
+    it has unsaved changes or an open section's draft, removed when it exits (one left by a crash is recognised);
+  - the installer checks it: with nothing unsaved, OK closes Heirloom the way its ✕ does; with unsaved work it says
+    so („W archiwum „…” są 3 niezapisane zmiany”) and offers „Czekaj” (Heirloom comes to the front; once the changes
+    are saved or Heirloom is closed, the installer closes it and goes on by itself), „Zamknij mimo to” (asked once
+    more, then closed by force) and „Anuluj instalację”; an older Heirloom that says nothing is asked to close and
+    asks about its changes itself;
+  - the installer never sends „close” to that invisible window, and Heirloom now ignores it there anyway;
+  - no program file is moved or replaced while heirloom.exe runs (checked once more right before copying); an update
+    from inside the app that finds Heirloom still open after 15 s shows the same page instead of failing.
+
 ## 0.4.0 — 2026-10-03 15:52: Fixes from the first test, update checks, a public repository
 - **Tree:**
   - „Koloruj wg” works in every view and every mode, and a change shows at once (also in Całe drzewo, which

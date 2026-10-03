@@ -1,4 +1,4 @@
-import { Crosshair, GitCommitVertical, IdCard, LocateFixed, Maximize, Minus, Palette, Plus, RotateCcw } from "lucide-react";
+import { Crosshair, GitCommitVertical, IdCard, LocateFixed, Maximize, Minus, Palette, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { call } from "../../api/transport";
 import type { ArchiveStatus } from "../../api/types";
@@ -43,7 +43,6 @@ export function Tree({ hidden }: { hidden: boolean }) {
   const [restore, setRestore] = useState<{ view: View; person: string; cam: TreeCamera } | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
   const [hovered, setHovered] = useState<string | null>(null);
-  const [siblingsOpen, setSiblingsOpen] = useState(false);
   const display = (archive?.display ?? {}) as Record<string, unknown>;
   const [colorMode, setColorMode] = useState<ColorMode>(((display.treeColor as ColorMode) ?? "branch"));
   const [lineOn, setLineOn] = useState(true);
@@ -62,7 +61,6 @@ export function Tree({ hidden }: { hidden: boolean }) {
     if (route.person && route.person !== focus) {
       setFocus(route.person);
       setSelected(route.sel ?? route.person);
-      setSiblingsOpen(false);
     } else if (route.sel) setSelected(route.sel);
     if (route.cam && route.person) setRestore({ view: route.view, person: route.person, cam: route.cam });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -135,8 +133,8 @@ export function Tree({ hidden }: { hidden: boolean }) {
     if (!graph || !focus || !graph.people[focus]) return null;
     if (view === "ancestors") return layoutAncestors(graph, focus, 3, rounded);
     if (view === "descendants") return layoutDescendants(graph, focus, 2, rounded);
-    return layoutFamily(graph, focus, { siblingsOpen, editing: mode === "edit", rounded });
-  }, [graph, focus, view, siblingsOpen, mode, rounded]);
+    return layoutFamily(graph, focus, { editing: mode === "edit", rounded });
+  }, [graph, focus, view, mode, rounded]);
 
   // Colours by the chosen mode (spec §3.2 „Koloruj wg”); „strona” is relative to the person in the centre.
   const sides = useMemo(
@@ -195,7 +193,6 @@ export function Tree({ hidden }: { hidden: boolean }) {
   const refocus = useCallback(
     (id: string, replace = false) => {
       setSelected(id);
-      setSiblingsOpen(false);
       setRestore(null);
       if (id === focus) return;
       const next: TreeRoute = { name: "tree", view, person: id };
@@ -414,9 +411,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
             onHover={setHovered}
             onPill={refocus}
             onBox={(action, of) => {
-              if (action === "siblings-open") setSiblingsOpen(true);
-              else if (action === "siblings-close") setSiblingsOpen(false);
-              else if (action === "add-parents" && of) requireEdit(() => go({ name: "edit", id: null, relation: { kind: "parent", of } }));
+              if (action === "add-parents" && of) requireEdit(() => go({ name: "edit", id: null, relation: { kind: "parent", of } }));
             }}
             onZoom={setZoom}
             restore={restore && restore.view === view && restore.person === focus ? restore.cam : null}
@@ -488,23 +483,17 @@ export function Tree({ hidden }: { hidden: boolean }) {
               ]}
             />
           )}
-          <span className="grow" />
-          {view === "family" && siblingsOpen && (
-            <button className="btn ghost sm" onClick={() => setSiblingsOpen(false)}>
-              <RotateCcw size={14} />
-              Przywróć automatyczny układ
-            </button>
-          )}
         </div>
         {view !== "overview" && scene && (
           <>
-            <div className="zoom-stack">
-              <button title="Przybliż" onClick={() => canvas.current?.zoomBy(1.25)}>
-                <Plus size={16} />
-              </button>
-              <span className="zoom-readout">{Math.round(zoom * 100)}%</span>
+            <Legend />
+            <span className="zoom-h tree-zoom">
               <button title="Oddal" onClick={() => canvas.current?.zoomBy(0.8)}>
-                <Minus size={16} />
+                <Minus size={15} />
+              </button>
+              <span>{Math.round(zoom * 100)}%</span>
+              <button title="Przybliż" onClick={() => canvas.current?.zoomBy(1.25)}>
+                <Plus size={15} />
               </button>
               <button title="Dopasuj do ekranu" onClick={() => canvas.current?.fit()}>
                 <Maximize size={15} />
@@ -512,8 +501,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
               <button title="Wyśrodkuj na wybranej osobie" style={{ color: "var(--accent-text)" }} onClick={() => canvas.current?.centerOn(selected ?? focus ?? "")}>
                 <LocateFixed size={15} />
               </button>
-            </div>
-            <Legend />
+            </span>
           </>
         )}
         {colorMode === "side" && (view === "overview" ? overviewData : scene) && <SideKey view={view} />}
