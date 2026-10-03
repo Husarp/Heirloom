@@ -136,6 +136,18 @@ pub fn graph(d: &Derived, id: &str, up: usize, down: usize, expand: &[String]) -
     Ok(json!({ "focus": id, "up": up, "down": down, "people": people, "unions": unions }))
 }
 
+/// [father, mother] as indices, either missing: the first man and the first woman among the parents, a parent of
+/// unknown sex filling an empty place (the order `parentsOrdered` in the UI uses).
+fn father_and_mother(d: &Derived, i: usize) -> [Option<usize>; 2] {
+    let parents = &d.info[i].parents;
+    let sex = |p: usize| d.view.model.persons[p].sex;
+    let father = parents.iter().copied().find(|&p| sex(p) == Sex::Male);
+    let mother = parents.iter().copied().find(|&p| sex(p) == Sex::Female);
+    let mut rest = parents.iter().copied().filter(|&p| Some(p) != father && Some(p) != mother);
+    let father = father.or_else(|| rest.next());
+    [father, mother.or_else(|| rest.next())]
+}
+
 /// "Całe drzewo": everyone in generation bands, grouped into surname clusters (spec §3.11, §4.4). Positions are
 /// world coordinates of card cells (204 × 72 cards on a 224 × 92 grid); the UI draws dots, blocks or cards
 /// depending on the zoom.
@@ -221,7 +233,9 @@ pub fn overview(d: &Derived, focus: Option<&str>) -> Value {
         }
     }
 
-    // Flat arrays keep 10 000 people small: [x, y, branch, generation] per person.
+    // Flat arrays keep 10 000 people small: [id, x, y, branch, given, surname, birth, death, birth uncertain, death
+    // uncertain, living, generation, surname branch, [father, mother] as indices] per person. The parents serve
+    // „Koloruj wg: strona” until the overview has real family links.
     let people: Vec<Value> = (0..n)
         .map(|i| {
             let info = &d.info[i];
@@ -238,6 +252,8 @@ pub fn overview(d: &Derived, focus: Option<&str>) -> Value {
                 info.death.as_ref().is_some_and(|b| b.uncertain),
                 info.living,
                 info.generation,
+                info.surname_branch,
+                father_and_mother(d, i),
             ])
         })
         .collect();
@@ -276,6 +292,14 @@ mod tests {
         let overview = overview(&d, Some(d.xref(someone)));
         assert_eq!(overview["people"].as_array().unwrap().len(), d.info.len());
         assert!(overview["line"].as_array().unwrap().len() >= 2);
+        let row = &overview["people"][someone];
+        assert_eq!(row[12], d.info[someone].surname_branch);
+        let parents: Vec<usize> = row[13].as_array().unwrap().iter().filter_map(|v| v.as_u64().map(|x| x as usize)).collect();
+        assert_eq!(parents.len(), d.info[someone].parents.len().min(2));
+        assert!(parents.iter().all(|p| d.info[someone].parents.contains(p)));
+        if let Some(father) = row[13][0].as_u64() {
+            assert_ne!(d.view.model.persons[father as usize].sex, Sex::Female, "the father comes first");
+        }
         // No two people share a cell.
         let mut cells = HashSet::new();
         for p in overview["people"].as_array().unwrap() {

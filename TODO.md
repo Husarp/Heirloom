@@ -331,8 +331,12 @@ This is the roadmap, with a checkbox per task.
 - [ ] **Branch colours: a few ready palettes** (2026-09-29): the present twelve colours are rather dark and muted;
       add e.g. a lighter and a brighter set to choose from, next to choosing each branch's colour („Kolory gałęzi”,
       above). Each palette checked in the light and the dark theme, so names on the coloured stripes stay readable
-- [ ] **Tree: „Koloruj wg” doesn't work** (2026-09-29): in Całe drzewo „Nazwisko” and „Strona ojca–matki” aren't
-      handled at all (they show the branch colours); check every view and every mode, and that a change shows at once
+- [x] **Tree: „Koloruj wg” doesn't work** (2026-09-29; done 2026-10-03): in Całe drzewo „Nazwisko” and „Strona ojca–matki” aren't
+      handled at all (they show the branch colours); check every view and every mode, and that a change shows at once.
+      Now: „nazwisko” uses the surname borne now (`surnameBranch` from the backend, joins followed), „strona” is
+      relative to the person in the centre (in Całe drzewo: the clicked one) with a key under the tree, and Całe
+      drzewo re-tints at once instead of waiting for a rebuild. „strona” there uses a small [father, mother] array
+      until the overview gets real family links
 - [ ] **Rethink the tree views — a design task** (2026-09-29; your notes, to design and agree before building):
   - **„Ród” — a whole surname line, as a new view of its own** (agreed 2026-09-29): from the oldest known ancestor with the surname down through all
     generations, everyone who bore it — to see how the line branched and where it nearly died out (e.g. mostly

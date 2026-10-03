@@ -107,6 +107,8 @@ export interface PersonSummary {
   living: boolean;
   /** 1–12, the colour of the person's birth family (`--b1` …). */
   branch: number;
+  /** The colour of the surname borne now: a wife who took her husband's name has his family's colour. */
+  surnameBranch: number;
   branchName: string;
   generation: number | null;
   initials: string;

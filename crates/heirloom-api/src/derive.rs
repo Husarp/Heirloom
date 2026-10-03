@@ -74,6 +74,9 @@ pub struct Info {
     pub group: Option<usize>,
     /// 1–12 (`--b1` …).
     pub branch: u8,
+    /// The colour of the surname borne now („Koloruj wg: nazwisko”): a wife who took her husband's name gets his
+    /// family's colour. The same as `branch` when the surname didn't change.
+    pub surname_branch: u8,
     pub generation: Option<u32>,
     /// The profile photo: (media id, file path relative to the archive).
     pub photo: Option<(String, String)>,
@@ -187,6 +190,7 @@ impl Derived {
             "deathPlace": info.death_place,
             "living": info.living,
             "branch": info.branch,
+            "surnameBranch": info.surname_branch,
             "branchName": self.branch_name(i),
             "generation": info.generation,
             "initials": info.initials,
@@ -332,6 +336,8 @@ pub fn build_with(doc: &Document, display: &Display) -> Derived {
             search.push_str(&fold(&format!("{} {} {}", nm.given, nm.surname, nm.nickname.as_deref().unwrap_or(""))));
         }
         let group = person_group[i];
+        // The group of the surname borne now (the married one when recorded), with joins followed.
+        let current = Some(p.surname()).filter(|s| !s.is_empty()).and_then(|s| group_index.get(&resolve(s)).copied()).or(group);
         info.push(Info {
             given: p.given().to_string(),
             surname: p.surname().to_string(),
@@ -343,6 +349,7 @@ pub fn build_with(doc: &Document, display: &Display) -> Derived {
             death_place: death_fact.and_then(|f| f.place.clone()),
             living: d.living,
             branch: group.map_or(12, |g| groups[g].branch),
+            surname_branch: current.map_or(12, |g| groups[g].branch),
             group,
             generation: generations[i],
             photo,
@@ -422,6 +429,10 @@ mod tests {
 0 @F2@ FAM\n1 HUSB @I3@\n1 WIFE @I4@\n1 CHIL @I5@\n\
 0 @O1@ OBJE\n1 FILE media/j.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n0 TRLR\n";
 
+    fn mazur_of(d: &Derived) -> usize {
+        d.group_index[&polish::surname_key("Mazur")]
+    }
+
     fn derived() -> Derived {
         build(&Document::from_bytes(FILE.as_bytes()).0)
     }
@@ -444,6 +455,10 @@ mod tests {
         assert!(d.groups[kowalscy].married.contains(&marianna), "she is a Kowalska by marriage");
         let helena = d.index("@I5@").unwrap();
         assert_eq!(d.info[helena].branch, 1);
+        // „Koloruj wg: nazwisko”: the surname borne now.
+        assert_eq!(d.info[marianna].surname_branch, 1, "Marianna Kowalska takes her husband's colour");
+        assert_eq!(d.info[helena].surname_branch, 1);
+        assert_eq!(d.summary(marianna)["surnameBranch"], 1);
     }
 
     #[test]
@@ -472,6 +487,11 @@ mod tests {
         let mazur = d.group_index[&polish::surname_key("Mazur")];
         assert!(d.groups[mazur].born.contains(&d.index("@I4@").unwrap()));
         assert!(!d.group_index.contains_key(&polish::surname_key("Nowak")));
+        // A married surname joined to another group takes that group's colour.
+        let settings = json!({ "surnameJoins": { polish::surname_key("Kowalski"): polish::surname_key("Mazur") } });
+        let d = build_with(&Document::from_bytes(FILE.as_bytes()).0, &Display::from_settings(settings.as_object().unwrap()));
+        let marianna = d.index("@I4@").unwrap();
+        assert_eq!(d.info[marianna].surname_branch, d.groups[mazur_of(&d)].branch);
         assert!(d.julian_dates, "Julian dates are shown unless switched off");
     }
 }
