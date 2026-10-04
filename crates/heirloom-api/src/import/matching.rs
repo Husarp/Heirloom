@@ -29,9 +29,9 @@ pub fn status_for(best: Option<&Candidate>) -> &'static str {
 }
 
 /// What the batch says about one incoming person.
-struct Incoming {
-    given: String,
-    surnames: Vec<String>,
+pub(crate) struct Incoming {
+    pub(crate) given: String,
+    pub(crate) surnames: Vec<String>,
     sex: Option<Sex>,
     birth_year: Option<i32>,
     birth_place: Option<String>,
@@ -40,7 +40,7 @@ struct Incoming {
     spouses: Vec<String>,
 }
 
-fn first_word(s: &str) -> String {
+pub(crate) fn first_word(s: &str) -> String {
     fold(s.split_whitespace().next().unwrap_or(""))
 }
 
@@ -88,7 +88,24 @@ fn incoming(batch: &Part, person: &Person) -> Incoming {
     Incoming { given: first_word(&given), surnames, sex: sex_of(person.sex.as_deref()), birth_year, birth_place, father, mother, spouses }
 }
 
-fn levenshtein(a: &str, b: &str) -> usize {
+/// The same signals from a person already in a `Derived` (archives opened together compare their people this way).
+/// `surnames`: the person's keys from [`surname_keys`].
+pub(crate) fn incoming_from(d: &Derived, i: usize, surnames: Vec<String>) -> Incoming {
+    let (p, info) = (&d.view.model.persons[i], &d.info[i]);
+    let parent = |female: bool| info.parents.iter().find(|&&x| (d.view.model.persons[x].sex == Sex::Female) == female).map(|&x| first_word(&d.info[x].given));
+    Incoming {
+        given: first_word(&info.given),
+        surnames,
+        sex: sex_of(Some(p.sex.code())),
+        birth_year: info.birth.as_ref().and_then(|b| b.value.map(|v| v.start.year)),
+        birth_place: info.birth_place.as_ref().map(|b| fold(b.split(',').next().unwrap_or(b).trim())),
+        father: parent(false),
+        mother: parent(true),
+        spouses: info.partners.iter().map(|&x| first_word(&d.info[x].given)).filter(|g| !g.is_empty()).collect(),
+    }
+}
+
+pub(crate) fn levenshtein(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
     let mut prev: Vec<usize> = (0..=b.len()).collect();
@@ -105,7 +122,12 @@ fn levenshtein(a: &str, b: &str) -> usize {
 /// Every archive person's surname keys (all forms of all names), worked out once for a whole batch: for each incoming
 /// person again, they took most of the time of a load into 10,000 people.
 pub fn surname_keys(d: &Derived) -> Vec<Vec<String>> {
-    d.view.model.persons.iter().map(|p| p.names.iter().map(|n| polish::surname_key(&n.surname)).filter(|k| !k.is_empty()).collect()).collect()
+    (0..d.view.model.persons.len()).map(|i| surname_keys_of(d, i)).collect()
+}
+
+/// One person's surname keys (as [`surname_keys`] gives them for everyone).
+pub(crate) fn surname_keys_of(d: &Derived, i: usize) -> Vec<String> {
+    d.view.model.persons[i].names.iter().map(|n| polish::surname_key(&n.surname)).filter(|k| !k.is_empty()).collect()
 }
 
 /// The best existing people for an incoming one, highest score first (at most 3). `keys` from [`surname_keys`].
@@ -120,100 +142,102 @@ pub fn candidates(d: &Derived, keys: &[Vec<String>], batch: &Part, person: &Pers
         .into_iter()
         .filter(|k| inc.surnames.iter().any(|s| s.chars().count() >= 4 && s.chars().count().abs_diff(k.chars().count()) <= 2 && levenshtein(s, k) <= 2))
         .collect();
-    let mut out = Vec::new();
-    for (i, keys) in keys.iter().enumerate().take(d.view.model.persons.len()) {
-        let (existing, info) = (&d.view.model.persons[i], &d.info[i]);
-        let mut score: f64 = 0.0;
-        let mut reasons = Vec::new();
-        // Surname: any form of any of the person's names.
-        if inc.surnames.iter().any(|s| keys.contains(s)) {
-            score += 2.0;
-            reasons.push("nazwisko zgodne".to_string());
-        } else if keys.iter().any(|k| similar.contains(k)) {
-            score += 1.0;
-            reasons.push("nazwisko podobne".to_string());
-        } else {
-            continue;
-        }
-        // Sex conflict: a veto.
-        if let (Some(a), b) = (inc.sex, existing.sex) {
-            if matches!(b, Sex::Male | Sex::Female) && a != b {
-                continue;
-            }
-        }
-        let given = first_word(&info.given);
-        if !inc.given.is_empty() && !given.is_empty() {
-            if inc.given == given {
-                score += 3.0;
-                reasons.push("imię zgodne".to_string());
-            } else if inc.given.starts_with(&given) || given.starts_with(&inc.given) || levenshtein(&inc.given, &given) <= 1 {
-                score += 1.5;
-                reasons.push("imię podobne".to_string());
-            } else {
-                score -= 3.0;
-                reasons.push("inne imię".to_string());
-            }
-        }
-        let year = info.birth.as_ref().and_then(|b| b.value.map(|v| v.start.year));
-        if let (Some(a), Some(b)) = (inc.birth_year, year) {
-            let diff = (a - b).abs();
-            if diff > 10 {
-                continue;
-            }
-            let (points, reason) = match diff {
-                0 => (2.0, "ten sam rok urodzenia".to_string()),
-                1..=2 => (1.0, format!("rok urodzenia ±{diff}")),
-                3..=5 => (0.0, format!("rok urodzenia ±{diff}")),
-                _ => (-2.0, format!("rok urodzenia różni się o {diff} lat")),
-            };
-            score += points;
-            reasons.push(reason);
-        }
-        if let (Some(a), Some(b)) = (&inc.birth_place, &info.birth_place) {
-            if *a == fold(b.split(',').next().unwrap_or(b).trim()) {
-                score += 1.5;
-                reasons.push("to samo miejsce urodzenia".to_string());
-            }
-        }
-        let parent_given = |female: bool| {
-            info.parents.iter().find(|&&p| (d.view.model.persons[p].sex == Sex::Female) == female).map(|&p| first_word(&d.info[p].given))
-        };
-        if let (Some(a), Some(b)) = (&inc.father, parent_given(false)) {
-            if *a == b {
-                score += 2.0;
-                reasons.push("imię ojca zgodne".to_string());
-            } else {
-                score -= 2.0;
-                reasons.push("inne imię ojca".to_string());
-            }
-        }
-        if let (Some(a), Some(b)) = (&inc.mother, parent_given(true)) {
-            if *a == b {
-                score += 2.5;
-                reasons.push("imię matki zgodne".to_string());
-            } else {
-                score -= 2.0;
-                reasons.push("inne imię matki".to_string());
-            }
-        }
-        if !inc.spouses.is_empty() && !info.partners.is_empty() {
-            let theirs: Vec<String> = info.partners.iter().map(|&p| first_word(&d.info[p].given)).collect();
-            if inc.spouses.iter().any(|s| theirs.contains(s)) {
-                score += 2.5;
-                reasons.push("małżonek zgodny".to_string());
-            } else {
-                score -= 1.0;
-                reasons.push("inny małżonek".to_string());
-            }
-        }
-        if score >= 2.0 {
-            let percent = ((score / 12.0) * 100.0).round().clamp(1.0, 99.0) as u32;
-            out.push(Candidate { xref: d.xref(i).to_string(), score, percent, reasons });
-        }
-    }
+    let mut out: Vec<Candidate> = keys.iter().enumerate().take(d.view.model.persons.len()).filter_map(|(i, keys)| score(d, keys, i, &inc, &similar)).collect();
     out.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     out.truncate(3);
     out
+}
+
+/// One archive person against an incoming one: the points and why, or None when vetoed or too far apart (no shared or
+/// similar surname, other sex, born more than 10 years apart, under 2 points). `similar`: the archive's surname keys
+/// close to the incoming person's.
+pub(crate) fn score(d: &Derived, keys: &[String], i: usize, inc: &Incoming, similar: &HashSet<&String>) -> Option<Candidate> {
+    let (existing, info) = (&d.view.model.persons[i], &d.info[i]);
+    let mut score: f64 = 0.0;
+    let mut reasons = Vec::new();
+    // Surname: any form of any of the person's names.
+    if inc.surnames.iter().any(|s| keys.contains(s)) {
+        score += 2.0;
+        reasons.push("nazwisko zgodne".to_string());
+    } else if keys.iter().any(|k| similar.contains(k)) {
+        score += 1.0;
+        reasons.push("nazwisko podobne".to_string());
+    } else {
+        return None;
+    }
+    // Sex conflict: a veto.
+    if let (Some(a), b) = (inc.sex, existing.sex) {
+        if matches!(b, Sex::Male | Sex::Female) && a != b {
+            return None;
+        }
+    }
+    let given = first_word(&info.given);
+    if !inc.given.is_empty() && !given.is_empty() {
+        if inc.given == given {
+            score += 3.0;
+            reasons.push("imię zgodne".to_string());
+        } else if inc.given.starts_with(&given) || given.starts_with(&inc.given) || levenshtein(&inc.given, &given) <= 1 {
+            score += 1.5;
+            reasons.push("imię podobne".to_string());
+        } else {
+            score -= 3.0;
+            reasons.push("inne imię".to_string());
+        }
+    }
+    let year = info.birth.as_ref().and_then(|b| b.value.map(|v| v.start.year));
+    if let (Some(a), Some(b)) = (inc.birth_year, year) {
+        let diff = (a - b).abs();
+        if diff > 10 {
+            return None;
+        }
+        let (points, reason) = match diff {
+            0 => (2.0, "ten sam rok urodzenia".to_string()),
+            1..=2 => (1.0, format!("rok urodzenia ±{diff}")),
+            3..=5 => (0.0, format!("rok urodzenia ±{diff}")),
+            _ => (-2.0, format!("rok urodzenia różni się o {diff} lat")),
+        };
+        score += points;
+        reasons.push(reason);
+    }
+    if let (Some(a), Some(b)) = (&inc.birth_place, &info.birth_place) {
+        if *a == fold(b.split(',').next().unwrap_or(b).trim()) {
+            score += 1.5;
+            reasons.push("to samo miejsce urodzenia".to_string());
+        }
+    }
+    let parent_given = |female: bool| {
+        info.parents.iter().find(|&&p| (d.view.model.persons[p].sex == Sex::Female) == female).map(|&p| first_word(&d.info[p].given))
+    };
+    if let (Some(a), Some(b)) = (&inc.father, parent_given(false)) {
+        if *a == b {
+            score += 2.0;
+            reasons.push("imię ojca zgodne".to_string());
+        } else {
+            score -= 2.0;
+            reasons.push("inne imię ojca".to_string());
+        }
+    }
+    if let (Some(a), Some(b)) = (&inc.mother, parent_given(true)) {
+        if *a == b {
+            score += 2.5;
+            reasons.push("imię matki zgodne".to_string());
+        } else {
+            score -= 2.0;
+            reasons.push("inne imię matki".to_string());
+        }
+    }
+    if !inc.spouses.is_empty() && !info.partners.is_empty() {
+        let theirs: Vec<String> = info.partners.iter().map(|&p| first_word(&d.info[p].given)).collect();
+        if inc.spouses.iter().any(|s| theirs.contains(s)) {
+            score += 2.5;
+            reasons.push("małżonek zgodny".to_string());
+        } else {
+            score -= 1.0;
+            reasons.push("inny małżonek".to_string());
+        }
+    }
+    let percent = ((score / 12.0) * 100.0).round().clamp(1.0, 99.0) as u32;
+    (score >= 2.0).then(|| Candidate { xref: d.xref(i).to_string(), score, percent, reasons })
 }
 
 /// A clear match lends weight to its family: the parents, partners and children the batch gives someone who clearly

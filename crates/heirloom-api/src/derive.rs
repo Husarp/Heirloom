@@ -112,6 +112,10 @@ pub struct Derived {
     pub max_generation: u32,
     /// Julian dates of double-dated records are shown next to the Gregorian ones.
     pub julian_dates: bool,
+    /// Archives opened together („Otwórz razem…”): per person the archives the person comes from, as indices into
+    /// `archive_keys`. Empty for an archive opened on its own (filled after building, by `combined`).
+    pub origins: Vec<Vec<u8>>,
+    pub archive_keys: Vec<String>,
 }
 
 /// Display choices stored with the archive (Ustawienia › Osoby i daty; „Dołącz” on the Nazwiska screen).
@@ -160,6 +164,12 @@ impl Derived {
         &self.view.model.persons[i].xref
     }
 
+    /// The keys of the archives a person comes from, in archives opened together; None for a single archive.
+    pub fn from(&self, i: usize) -> Option<Vec<&str>> {
+        let origins = self.origins.get(i)?;
+        Some(origins.iter().filter_map(|&k| self.archive_keys.get(k as usize).map(String::as_str)).collect())
+    }
+
     /// The texts linked from a person, in order.
     pub fn person_texts_of(&self, xref: &str) -> Vec<&heirloom_core::gedcom::view::Text> {
         match self.index(xref) {
@@ -176,7 +186,7 @@ impl Derived {
     /// The fields every list and card needs (`PersonSummary` in `src/api/types.ts`).
     pub fn summary(&self, i: usize) -> Value {
         let (p, d, info) = self.person(i);
-        json!({
+        let mut v = json!({
             "id": p.xref,
             "name": info.name,
             "given": info.given,
@@ -198,7 +208,11 @@ impl Derived {
             "photoCount": info.photo_count,
             "changed": d.changed,
             "created": d.created,
-        })
+        });
+        if let Some(from) = self.from(i) {
+            v["from"] = json!(from);
+        }
+        v
     }
 }
 
@@ -362,7 +376,7 @@ pub fn build_with(doc: &Document, display: &Display) -> Derived {
             name: if name.is_empty() { "(bez imienia)".to_string() } else { name },
         });
     }
-    Derived { view, info, groups, group_index, max_generation, julian_dates: display.julian }
+    Derived { view, info, groups, group_index, max_generation, julian_dates: display.julian, origins: Vec::new(), archive_keys: Vec::new() }
 }
 
 /// Generation numbers: partners share a generation, children are one below their parents. Each connected family

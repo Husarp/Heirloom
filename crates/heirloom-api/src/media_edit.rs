@@ -44,6 +44,29 @@ pub fn resolve(root: &Path, file: &str) -> PathBuf {
     if path.is_absolute() { path.to_path_buf() } else { root.join(file.replace('/', std::path::MAIN_SEPARATOR_STR)) }
 }
 
+/// Where the files of the open data are: one archive's folder, or in archives opened together each archive's folder
+/// by its key (their files are written `~b/media/x.jpg` there).
+pub enum FileRoots {
+    One(PathBuf),
+    Many(Vec<(String, PathBuf)>),
+}
+
+impl FileRoots {
+    pub fn resolve(&self, file: &str) -> PathBuf {
+        match self {
+            FileRoots::One(root) => resolve(root, file),
+            FileRoots::Many(roots) => {
+                let keyed = file.strip_prefix('~').and_then(|rest| rest.split_once('/'));
+                match keyed.and_then(|(key, rest)| Some((roots.iter().find(|(k, _)| k == key)?, rest))) {
+                    Some(((_, root), rest)) => resolve(root, rest),
+                    // An absolute path, kept as it was written.
+                    None => PathBuf::from(file),
+                }
+            }
+        }
+    }
+}
+
 fn is_image(name: &str) -> bool {
     media_type(name).starts_with("image/")
 }

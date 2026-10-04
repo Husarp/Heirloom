@@ -26,7 +26,7 @@ fn links(body: &str) -> Vec<(usize, usize, String, String)> {
     out
 }
 
-fn rewrite(body: &str, map: impl Fn(&str) -> Option<String>) -> String {
+pub(crate) fn rewrite(body: &str, map: impl Fn(&str) -> Option<String>) -> String {
     let mut out = String::with_capacity(body.len());
     let mut last = 0;
     for (start, end, text, id) in links(body) {

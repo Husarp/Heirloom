@@ -1,7 +1,7 @@
 //! Data for Start, Nazwiska, Miejsca, Historie, Media, Źródła and the first-open screen (spec §4.18–§4.33).
 
 use crate::derive::{DateInfo, Derived};
-use crate::media_edit::resolve;
+use crate::media_edit::FileRoots;
 use crate::people::{self, domain, years_range};
 use crate::ApiError;
 use heirloom_core::fold::fold;
@@ -13,7 +13,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 fn person_ref(d: &Derived, i: usize) -> Value {
-    json!({ "id": d.xref(i), "name": d.info[i].name, "initials": d.info[i].initials, "branch": d.info[i].branch, "photo": d.info[i].photo.as_ref().map(|p| &p.1) })
+    let mut v = json!({ "id": d.xref(i), "name": d.info[i].name, "initials": d.info[i].initials, "branch": d.info[i].branch, "photo": d.info[i].photo.as_ref().map(|p| &p.1) });
+    if let Some(from) = d.from(i) {
+        v["from"] = json!(from);
+    }
+    v
 }
 
 fn levenshtein(a: &str, b: &str) -> usize {
@@ -137,7 +141,7 @@ fn owner_of_record(d: &Derived, record: &str) -> Option<usize> {
 /// "Pierwsze otwarcie" (spec §4.18): what was found, what's missing, suggested start people.
 pub fn first_open(d: &Derived, root: &Path) -> Value {
     let photos = d.view.media.values().filter(|m| m.kind == MediaKind::Photo).count();
-    let missing = missing_files(d, root).len();
+    let missing = missing_files(d, &FileRoots::One(root.to_path_buf())).len();
     let other_fields: usize = d.view.people.iter().map(|p| p.other.len()).sum();
     // Suggestions: most connections, the youngest generation, the oldest with dates.
     let mut suggestions = Vec::new();
@@ -449,11 +453,11 @@ pub fn story(d: &Derived, id: &str) -> Result<Value, ApiError> {
 
 // ---------- Media ----------
 
-pub fn missing_files(d: &Derived, root: &Path) -> Vec<String> {
+pub fn missing_files(d: &Derived, roots: &FileRoots) -> Vec<String> {
     d.view
         .media_order
         .iter()
-        .filter(|id| d.view.media.get(*id).and_then(|m| m.file.as_ref()).is_some_and(|f| !resolve(root, f).is_file()))
+        .filter(|id| d.view.media.get(*id).and_then(|m| m.file.as_ref()).is_some_and(|f| !roots.resolve(f).is_file()))
         .cloned()
         .collect()
 }
@@ -468,10 +472,10 @@ fn media_people(d: &Derived) -> HashMap<&str, Vec<usize>> {
     map
 }
 
-fn media_json(d: &Derived, id: &str, root: &Path, people_of: &HashMap<&str, Vec<usize>>) -> Option<Value> {
+fn media_json(d: &Derived, id: &str, roots: &FileRoots, people_of: &HashMap<&str, Vec<usize>>) -> Option<Value> {
     let m = d.view.media.get(id)?;
     let date = m.date_text.as_deref().and_then(heirloom_core::gedcom::date::parse);
-    let path = m.file.as_ref().map(|f| resolve(root, f));
+    let path = m.file.as_ref().map(|f| roots.resolve(f));
     let meta = path.as_ref().and_then(|p| std::fs::metadata(p).ok());
     let people: Vec<Value> = people_of.get(id).map(|list| list.iter().map(|&i| person_ref(d, i)).collect()).unwrap_or_default();
     let profile_of: Vec<&str> = people_of.get(id).map(|list| list.iter().filter(|&&i| d.info[i].photo.as_ref().is_some_and(|p| p.0 == id)).map(|&i| d.xref(i)).collect()).unwrap_or_default();
@@ -500,20 +504,20 @@ fn media_json(d: &Derived, id: &str, root: &Path, people_of: &HashMap<&str, Vec<
     }))
 }
 
-pub fn media_list(d: &Derived, root: &Path) -> Value {
+pub fn media_list(d: &Derived, roots: &FileRoots) -> Value {
     let people_of = media_people(d);
-    let items: Vec<Value> = d.view.media_order.iter().filter_map(|id| media_json(d, id, root, &people_of)).collect();
+    let items: Vec<Value> = d.view.media_order.iter().filter_map(|id| media_json(d, id, roots, &people_of)).collect();
     json!({ "items": items })
 }
 
-pub fn media_get(d: &Derived, id: &str, root: &Path) -> Result<Value, ApiError> {
+pub fn media_get(d: &Derived, id: &str, roots: &FileRoots) -> Result<Value, ApiError> {
     let people_of = media_people(d);
-    media_json(d, id, root, &people_of).ok_or_else(|| ApiError::new("not_found", "Nie ma takiego pliku w archiwum."))
+    media_json(d, id, roots, &people_of).ok_or_else(|| ApiError::new("not_found", "Nie ma takiego pliku w archiwum."))
 }
 
 /// "Brakujące pliki": looks for missing files by name in a folder (and its subfolders).
-pub fn find_missing(d: &Derived, root: &Path, folder: &Path) -> Value {
-    let missing = missing_files(d, root);
+pub fn find_missing(d: &Derived, roots: &FileRoots, folder: &Path) -> Value {
+    let missing = missing_files(d, roots);
     let wanted: HashMap<String, Vec<&String>> = missing.iter().fold(HashMap::new(), |mut acc, id| {
         if let Some(name) = d.view.media.get(id).and_then(|m| m.file.as_ref()).and_then(|f| f.rsplit(['/', '\\']).next()) {
             acc.entry(name.to_lowercase()).or_default().push(id);
@@ -552,8 +556,8 @@ pub fn find_missing(d: &Derived, root: &Path, folder: &Path) -> Value {
     json!({ "rows": rows, "folder": folder.display().to_string() })
 }
 
-pub fn missing_list(d: &Derived, root: &Path) -> Value {
-    let rows: Vec<Value> = missing_files(d, root)
+pub fn missing_list(d: &Derived, roots: &FileRoots) -> Value {
+    let rows: Vec<Value> = missing_files(d, roots)
         .iter()
         .filter_map(|id| {
             let m = d.view.media.get(id)?;
@@ -731,9 +735,9 @@ mod tests {
         let p = places(&d);
         let first = p["places"][0]["path"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect::<Vec<_>>();
         assert!(place(&d, &first).unwrap()["events"].as_u64().unwrap() > 0);
-        let m = media_list(&d, &root);
+        let m = media_list(&d, &FileRoots::One(root.clone()));
         assert_eq!(m["items"].as_array().unwrap().len(), 3);
-        assert!(missing_files(&d, &root).is_empty());
+        assert!(missing_files(&d, &FileRoots::One(root.clone())).is_empty());
         let src = sources(&d);
         let first_source = src["items"][0]["id"].as_str().unwrap();
         assert!(source(&d, first_source).unwrap()["facts"].as_array().unwrap().len() > 0);

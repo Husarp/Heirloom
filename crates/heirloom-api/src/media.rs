@@ -8,7 +8,8 @@
 //! - `import/<size>/<n>`: the n-th file of the import being reviewed (size 0 = the file itself), so files can be
 //!   previewed before they are copied into the archive. Only the files the user gave the import are served.
 //!
-//! `<path>` is relative to the archive folder, with each segment percent-encoded.
+//! `<path>` is relative to the archive folder, with each segment percent-encoded. In a set of archives opened together
+//! („Otwórz razem…”) every path starts with `~<key>/`, the archive's key in the set: `thumb/256/~b/media/x.jpg`.
 
 use image::{DynamicImage, ImageDecoder, ImageReader};
 use std::path::{Component, Path, PathBuf};
@@ -19,18 +20,26 @@ pub struct Roots {
     pub archive: PathBuf,
     /// Where thumbnails are kept; none = made every time.
     pub thumbs: Option<PathBuf>,
+    /// The archive's key in a set of archives opened together; none for an archive opened on its own.
+    pub key: Option<String>,
 }
 
-/// The folders of the open archive, shared between the command handler and the file server.
+/// The folders of the open archive (or of every archive of an open set), shared between the command handler and the
+/// file server.
 #[derive(Debug, Clone, Default)]
-pub struct MediaRoots(Arc<RwLock<Option<Roots>>>, Arc<RwLock<Vec<PathBuf>>>);
+pub struct MediaRoots(Arc<RwLock<Vec<Roots>>>, Arc<RwLock<Vec<PathBuf>>>);
 
 impl MediaRoots {
     pub fn set(&self, roots: Option<Roots>) {
+        self.set_many(roots.into_iter().collect());
+    }
+
+    /// The archives of a set, each with its key.
+    pub fn set_many(&self, roots: Vec<Roots>) {
         *self.0.write().unwrap_or_else(|e| e.into_inner()) = roots;
     }
 
-    fn get(&self) -> Option<Roots> {
+    fn get(&self) -> Vec<Roots> {
         self.0.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
@@ -56,7 +65,8 @@ const VIEW_SIZE: u32 = 2560;
 
 /// Answers one request path (without the leading `/`).
 pub fn serve(roots: &MediaRoots, url_path: &str) -> Served {
-    let Some(shared) = roots.get() else { return Served::NotFound };
+    let all = roots.get();
+    let Some(shared) = all.first().cloned() else { return Served::NotFound };
     let url_path = url_path.split(['?', '#']).next().unwrap_or("");
     if let Some(rest) = url_path.strip_prefix("import/") {
         let (size, n) = rest.split_once('/').unwrap_or(("", ""));
@@ -67,15 +77,25 @@ pub fn serve(roots: &MediaRoots, url_path: &str) -> Served {
             _ => Served::BadRequest,
         };
     }
-    let roots = shared;
     let (kind, rest) = url_path.split_once('/').unwrap_or((url_path, ""));
+    // Which archive: the only one, or in a set the one named by the path's first segment (`~b`).
+    let pick = |rest: &str| -> Option<(Roots, PathBuf)> {
+        if all.len() == 1 && shared.key.is_none() {
+            return Some((shared.clone(), resolve(&shared.archive, rest)?));
+        }
+        let (first, rest) = rest.trim_start_matches('/').split_once('/')?;
+        let key = first.strip_prefix('~')?;
+        let roots = all.iter().find(|r| r.key.as_deref() == Some(key))?.clone();
+        let path = resolve(&roots.archive, rest)?;
+        Some((roots, path))
+    };
     let result = match kind {
-        "file" => resolve(&roots.archive, rest).map(|p| read_file(&p)),
-        "view" => resolve(&roots.archive, rest).map(|p| view(&p)),
+        "file" => pick(rest).map(|(_, p)| read_file(&p)),
+        "view" => pick(rest).map(|(_, p)| view(&p)),
         "thumb" => {
             let (size, rest) = rest.split_once('/').unwrap_or(("", ""));
             match size.parse::<u32>() {
-                Ok(size) if THUMB_SIZES.contains(&size) => resolve(&roots.archive, rest).map(|p| thumb(&roots, &p, size)),
+                Ok(size) if THUMB_SIZES.contains(&size) => pick(rest).map(|(roots, p)| thumb(&roots, &p, size)),
                 _ => return Served::BadRequest,
             }
         }
@@ -221,7 +241,7 @@ mod tests {
 
     fn roots(dir: &Path) -> MediaRoots {
         let roots = MediaRoots::default();
-        roots.set(Some(Roots { archive: dir.join("a"), thumbs: Some(dir.join("thumbs")) }));
+        roots.set(Some(Roots { archive: dir.join("a"), thumbs: Some(dir.join("thumbs")), key: None }));
         roots
     }
 
@@ -241,6 +261,26 @@ mod tests {
         assert_eq!(serve(&roots, "file/C:%5Csecret.txt"), Served::BadRequest);
         assert_eq!(serve(&roots, "file/media/brak.jpg"), Served::NotFound);
         assert_eq!(serve(&roots, "thumb/77/media/x.png"), Served::BadRequest);
+    }
+
+    #[test]
+    fn a_set_serves_each_archive_by_its_key() {
+        let dir = tempfile::tempdir().unwrap();
+        for (folder, text) in [("a", "z a"), ("b", "z b")] {
+            std::fs::create_dir_all(dir.path().join(folder).join("media")).unwrap();
+            std::fs::write(dir.path().join(folder).join("media/x.txt"), text).unwrap();
+        }
+        std::fs::write(dir.path().join("secret.txt"), "nie").unwrap();
+        image::RgbImage::from_pixel(300, 300, image::Rgb([1, 2, 3])).save(dir.path().join("b/media/p.png")).unwrap();
+        let roots = MediaRoots::default();
+        roots.set_many(["a", "b"].iter().map(|k| Roots { archive: dir.path().join(k), thumbs: Some(dir.path().join("thumbs").join(k)), key: Some(k.to_string()) }).collect());
+        assert_eq!(serve(&roots, "file/~b/media/x.txt"), Served::Ok { body: b"z b".to_vec(), mime: "text/plain; charset=utf-8" });
+        assert_eq!(serve(&roots, "file/~a/media/x.txt"), Served::Ok { body: b"z a".to_vec(), mime: "text/plain; charset=utf-8" });
+        assert!(matches!(serve(&roots, "thumb/256/~b/media/p.png"), Served::Ok { mime: "image/jpeg", .. }));
+        assert!(dir.path().join("thumbs/b").is_dir(), "each archive keeps its own thumbnails");
+        for path in ["file/~b/../secret.txt", "file/~b/..%2F..%2Fsecret.txt", "file/~z/media/x.txt", "file/media/x.txt", "file/~b", "thumb/256/media/p.png"] {
+            assert_eq!(serve(&roots, path), Served::BadRequest, "{path}");
+        }
     }
 
     #[cfg(windows)]

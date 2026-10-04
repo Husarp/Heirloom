@@ -1,13 +1,14 @@
-import { FileText, FileWarning, FolderOpen, FolderPlus, FolderX, X } from "lucide-react";
+import { AppWindow, FileText, FileWarning, FolderOpen, FolderPlus, FolderX, Layers, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { call } from "../../api/transport";
 import type { RecentArchive } from "../../api/types";
-import { useStore } from "../../app/store";
+import { isSetPath, useStore } from "../../app/store";
 import { rowButton } from "../../components/bits";
 import { Dialog } from "../../components/Dialog";
-import { people as peopleCount, shortWhen } from "../../lib/format";
+import { count, people as peopleCount, shortWhen } from "../../lib/format";
 import { pickFolder, pickGedcom } from "../../lib/native";
 import { UpdateBanner } from "../../shell/UpdateBanner";
+import { OpenTogether } from "./OpenTogether";
 import "./archive.css";
 
 /** Wybór archiwum (spec §4.15, design 17c), with „Utwórz archiwum z plików” as the main first-launch action
@@ -18,7 +19,9 @@ export function ArchivePicker() {
   const openArchive = useStore((s) => s.openArchive);
   const openError = useStore((s) => s.openError);
   const refreshApp = useStore((s) => s.refreshApp);
+  const openElsewhere = useStore((s) => s.openElsewhere);
   const [creating, setCreating] = useState(false);
+  const [together, setTogether] = useState(false);
   const [errorShown, setErrorShown] = useState(false);
   const recent = app?.recent ?? [];
 
@@ -59,7 +62,14 @@ export function ArchivePicker() {
                 Ostatnio otwierane
               </div>
               {recent.map((r) => (
-                <RecentRow key={r.path} entry={r} current={archive?.root === r.path || archive?.dataPath === r.path} onOpen={() => openArchive(r.path)} onForget={() => forget(r.path)} />
+                <RecentRow
+                  key={r.path}
+                  entry={r}
+                  current={archive?.root === r.path || archive?.dataPath === r.path}
+                  onOpen={() => openArchive(r.path)}
+                  onWindow={() => openElsewhere(r.path)}
+                  onForget={() => forget(r.path)}
+                />
               ))}
             </div>
           ) : (
@@ -73,6 +83,7 @@ export function ArchivePicker() {
           <ActionCard main icon={<FolderPlus size={17} />} title="Utwórz archiwum z plików" text="wybierz folder, potem wczytaj odpowiedzi AI, zdjęcia i skany" onClick={() => setCreating(true)} />
           <ActionCard icon={<FolderOpen size={17} />} title="Otwórz folder…" text="z plikiem .ged i folderem media/" onClick={openFolder} />
           <ActionCard icon={<FileText size={17} />} title="Otwórz plik GEDCOM…" text=".ged · także z innych programów" onClick={openFile} />
+          <ActionCard icon={<Layers size={17} />} title="Otwórz razem…" text="kilka archiwów jako jedno drzewo; pliki zostają osobno" onClick={() => setTogether(true)} />
           <p style={{ fontSize: 12, lineHeight: 1.55, color: "var(--text3)", marginTop: 6 }}>
             Twoje dane zostają w wybranym folderze: plik GEDCOM i folder media/. Heirloom działa bez internetu i nie wysyła
             niczego z archiwum. Z GitHubem łączy się tylko, gdy w Ustawieniach poprosisz o sprawdzenie aktualizacji.
@@ -80,21 +91,26 @@ export function ArchivePicker() {
         </div>
       </div>
       {creating && <CreateDialog onClose={() => setCreating(false)} />}
+      {together && <OpenTogether onClose={() => setTogether(false)} />}
       {errorShown && openError && <OpenErrorDialog message={openError.message} code={openError.code} onClose={() => setErrorShown(false)} onPick={openFolder} />}
     </div>
   );
 }
 
-function RecentRow({ entry, current, onOpen, onForget }: { entry: RecentArchive; current: boolean; onOpen: () => void; onForget: () => void }) {
+function RecentRow({ entry, current, onOpen, onWindow, onForget }: { entry: RecentArchive; current: boolean; onOpen: () => void; onWindow: () => void; onForget: () => void }) {
   const isFile = entry.path.toLowerCase().endsWith(".ged");
+  const isSet = entry.kind === "set" || isSetPath(entry.path);
   return (
     <div className={`list-row clickable recent${current ? " selected" : ""}`} {...rowButton(onOpen)} style={{ minHeight: 68, padding: "10px 16px", gap: 14 }}>
       <span className="icon-tile neutral" style={{ width: 40, height: 40 }}>
-        {isFile ? <FileText size={18} /> : <FolderOpen size={18} />}
+        {isSet ? <Layers size={18} /> : isFile ? <FileText size={18} /> : <FolderOpen size={18} />}
       </span>
       <span className="col grow" style={{ minWidth: 0 }}>
-        <span className="serif" style={{ fontSize: 17, fontWeight: 600 }}>
-          {entry.name}
+        <span className="row" style={{ gap: 8 }}>
+          <span className="serif ellipsis" style={{ fontSize: 17, fontWeight: 600 }}>
+            {entry.name}
+          </span>
+          {isSet && <span className="badge accent">zestaw{entry.archives ? ` · ${count(entry.archives, "archiwum", "archiwa", "archiwów")}` : ""}</span>}
         </span>
         <span className="mono ellipsis" style={{ fontSize: 12, color: "var(--text3)" }}>
           {entry.path}
@@ -104,6 +120,17 @@ function RecentRow({ entry, current, onOpen, onForget }: { entry: RecentArchive;
         <span>{entry.people ? peopleCount(entry.people) : "—"}</span>
         <span style={{ color: "var(--text3)" }}>otwarte {shortWhen(entry.openedAt)}</span>
       </span>
+      <button
+        className="icon-btn forget"
+        title="Otwórz w nowym oknie"
+        aria-label="Otwórz w nowym oknie"
+        onClick={(e) => {
+          e.stopPropagation();
+          onWindow();
+        }}
+      >
+        <AppWindow size={15} />
+      </button>
       <button
         className="icon-btn forget"
         title="Usuń z listy (archiwum zostaje na dysku)"
@@ -209,7 +236,9 @@ function OpenErrorDialog({ message, code, onClose, onPick }: { message: string; 
           ? "To nie jest archiwum GEDCOM"
           : code === "several_data_files"
             ? "W folderze jest kilka plików GEDCOM"
-            : "Nie udało się otworzyć archiwum";
+            : code.startsWith("set_") || code === "not_a_set"
+              ? "Nie udało się otworzyć zestawu"
+              : "Nie udało się otworzyć archiwum";
   return (
     <Dialog width={480} onClose={onClose}>
       <div className="dialog-body">

@@ -49,6 +49,16 @@ pub struct RecentArchive {
     /// RFC 3339.
     pub opened_at: String,
     pub people: usize,
+    /// `archive`, or `set` for a `.heirloom-zestaw` file („Otwórz razem…”). Older files have no key: archives.
+    #[serde(default = "archive_kind")]
+    pub kind: String,
+    /// How many archives a set joins („zestaw · 2 archiwa”).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archives: Option<usize>,
+}
+
+fn archive_kind() -> String {
+    "archive".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -96,9 +106,25 @@ impl AppConfig {
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
         let json = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
-        let tmp = dir.join(format!("{FILE}.tmp"));
+        // A temporary name of this process's own: two windows saving at once must not write into one file.
+        let tmp = dir.join(format!("{FILE}.tmp-{}", std::process::id()));
         std::fs::write(&tmp, json)?;
-        std::fs::rename(tmp, dir.join(FILE))
+        std::fs::rename(&tmp, dir.join(FILE)).inspect_err(|_| {
+            let _ = std::fs::remove_file(&tmp);
+        })
+    }
+
+    /// Loads the file as it is now, applies one change and writes it back. Every window (each its own process) changes
+    /// only what it means to change, on top of what another window wrote meanwhile, instead of writing back the whole
+    /// file it read at start. A failed write still gives the changed settings: they are only conveniences. When the
+    /// file can't be read just then (missing, damaged, held by another program), `current` (this window's copy) is
+    /// changed instead, so a moment's failure doesn't empty the recent list.
+    pub fn update(dir: &Path, current: &AppConfig, change: impl FnOnce(&mut AppConfig)) -> AppConfig {
+        let on_disk = std::fs::read(dir.join(FILE)).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok());
+        let mut config = on_disk.unwrap_or_else(|| current.clone());
+        change(&mut config);
+        let _ = config.save(dir);
+        config
     }
 
     /// Moves (or adds) an archive to the top of the recent list.
@@ -145,7 +171,7 @@ mod tests {
     #[test]
     fn recent_list_moves_reopened_archives_to_the_top() {
         let mut config = AppConfig::default();
-        let entry = |path: &str| RecentArchive { path: path.into(), name: path.into(), opened_at: String::new(), people: 0 };
+        let entry = |path: &str| RecentArchive { path: path.into(), name: path.into(), opened_at: String::new(), people: 0, kind: archive_kind(), archives: None };
         config.remember(entry("D:\\A"));
         config.remember(entry("D:\\B"));
         config.remember(entry("d:\\a"));
@@ -175,6 +201,28 @@ mod tests {
         let config = AppConfig::load(dir.path());
         assert_eq!((config.appearance.theme.as_str(), config.appearance.start_in.as_str()), ("dark", "start"));
         assert!(config.places.is_empty());
+    }
+
+    #[test]
+    fn two_windows_keep_each_others_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = |path: &str| RecentArchive { path: path.into(), name: path.into(), opened_at: String::new(), people: 0, kind: archive_kind(), archives: None };
+        // Both windows read the file at start; each then changes only its own part.
+        let first = AppConfig::update(dir.path(), &AppConfig::default(), |c| c.remember(entry("D:\\A")));
+        let second = AppConfig::update(dir.path(), &first, |c| c.remember(entry("D:\\B")));
+        assert_eq!(first.recent.len(), 1);
+        assert_eq!(second.recent.iter().map(|r| r.path.as_str()).collect::<Vec<_>>(), ["D:\\B", "D:\\A"]);
+        let after = AppConfig::update(dir.path(), &first, |c| c.forget("D:\\A"));
+        assert_eq!(after.recent.len(), 1);
+        // A file that can't be read just then: this window's copy is kept, not emptied.
+        std::fs::write(dir.path().join(FILE), b"{ zepsu").unwrap();
+        let kept = AppConfig::update(dir.path(), &after, |c| c.remember(entry("D:\\D")));
+        assert_eq!(kept.recent.len(), 2);
+        assert_eq!(AppConfig::load(dir.path()).recent.len(), 2);
+        // A file from before 0.5.0: its entries are archives.
+        std::fs::write(dir.path().join(FILE), br#"{"recent": [{"path": "D:\\C", "name": "C", "openedAt": "", "people": 3}]}"#).unwrap();
+        let old = AppConfig::load(dir.path());
+        assert_eq!((old.recent[0].kind.as_str(), old.recent[0].archives), ("archive", None));
     }
 
     #[test]

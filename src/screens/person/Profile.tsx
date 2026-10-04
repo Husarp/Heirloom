@@ -3,11 +3,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { call } from "../../api/transport";
 import { useStore } from "../../app/store";
 import { useApi } from "../../app/useApi";
-import { BranchShape, EmptyState, Lifespan, Thumb } from "../../components/bits";
+import { ArchiveBadge, BranchShape, EmptyState, Lifespan, Thumb } from "../../components/bits";
 import { count } from "../../lib/format";
 import { pickFiles } from "../../lib/native";
 import { afterChange } from "../../app/store";
 import { runEdit } from "../media/shared";
+import { CombinedCard, EditInArchive, LinkWithOther } from "./CombinedParts";
 import { PersonalEditor } from "./PersonalSection";
 import { useSection } from "./sectionEdit";
 import {
@@ -149,6 +150,7 @@ export function Profile({ id, section, open }: { id: string; section?: string; o
           ))}
         </nav>
         <article className="profile-article">
+          <CombinedCard data={data} />
           <BrokenLinksNotice data={data} />
           <SummarySection data={data} />
           <FamilySection data={data} />
@@ -178,6 +180,7 @@ function Hero({ data }: { data: ProfileData }) {
   const notify = useStore((s) => s.notify);
   const p = data.person;
   const editing = mode === "edit";
+  const combined = data.combined;
   const personal = useSection(`${p.id}:personal`, "Dane osobowe");
   const birthFact = data.facts.find((f) => f.key.startsWith("Urodzon") || f.key.startsWith("Ochrzczon"));
   const deathFact = data.facts.find((f) => f.key.startsWith("Zmarł") || f.key.startsWith("Pochowan"));
@@ -214,10 +217,15 @@ function Hero({ data }: { data: ProfileData }) {
         {data.portrait?.caption && <span className="portrait-caption">{data.portrait.caption}</span>}
       </div>
       <div className="col" style={{ gap: 10, minWidth: 0 }}>
-        {data.generationBranch && (
-          <span className="row" style={{ gap: 8, fontSize: 12, color: "var(--text2)" }}>
-            <BranchShape branch={p.branch} size={8} style={{ borderRadius: "50%", transform: "none" }} />
-            {capitalizeFirst(data.generationBranch)}
+        {(data.generationBranch || combined) && (
+          <span className="row" style={{ gap: 8, fontSize: 12, color: "var(--text2)", flexWrap: "wrap" }}>
+            {data.generationBranch && (
+              <>
+                <BranchShape branch={p.branch} size={8} style={{ borderRadius: "50%", transform: "none" }} />
+                {capitalizeFirst(data.generationBranch)}
+              </>
+            )}
+            <ArchiveBadge from={p.from} />
           </span>
         )}
         <h1 className="hero-name">{p.name}</h1>
@@ -256,10 +264,17 @@ function Hero({ data }: { data: ProfileData }) {
             <Network size={14} />
             Pokaż w drzewie
           </button>
-          <button className="btn ghost" style={{ padding: "0 12px" }} onClick={() => document.getElementById("sec-history")?.scrollIntoView({ behavior: "smooth" })}>
-            <History size={14} />
-            Historia zmian
-          </button>
+          {combined ? (
+            <>
+              <EditInArchive members={combined.members} />
+              <LinkWithOther person={p} />
+            </>
+          ) : (
+            <button className="btn ghost" style={{ padding: "0 12px" }} onClick={() => document.getElementById("sec-history")?.scrollIntoView({ behavior: "smooth" })}>
+              <History size={14} />
+              Historia zmian
+            </button>
+          )}
         </div>
       </div>
     </section>

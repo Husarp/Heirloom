@@ -509,7 +509,7 @@ fn check(s: &mut Session) -> Value {
             owner_of.entry(link.object.as_str()).or_insert(i);
         }
     }
-    for id in crate::lists::missing_files(d, &root) {
+    for id in crate::lists::missing_files(d, &crate::media_edit::FileRoots::One(root.to_path_buf())) {
         let file = d.view.media.get(&id).and_then(|m| m.file.clone()).unwrap_or_default();
         problems.push(problem(d, "missingFile", format!("Nie ma pliku {file}."), owner_of.get(id.as_str()).copied()));
     }

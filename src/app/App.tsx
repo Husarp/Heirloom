@@ -3,13 +3,14 @@ import { useStore } from "./store";
 import { Sidebar } from "../shell/Sidebar";
 import { TopBar } from "../shell/TopBar";
 import { AskDialog, ConflictDialog, ForeignConfirmDialog, WhoEditsDialog } from "../shell/Dialogs";
-import { EditModeBar, ReadOnlyBar } from "../shell/Bars";
+import { CombinedBar, EditModeBar, ReadOnlyBar } from "../shell/Bars";
 import { Toasts } from "../shell/Toasts";
 import { CommandPalette } from "../shell/CommandPalette";
 import { useAppearance } from "./useAppearance";
 import { useShortcuts } from "./useShortcuts";
 import { useCloseGuard } from "./useCloseGuard";
 import { useUpdateChecks } from "./updates";
+import { useSetRefresh } from "./useSetRefresh";
 import { Screen } from "./Screen";
 import { ArchivePicker } from "../screens/archive/ArchivePicker";
 import { LoadingArchive } from "../screens/archive/LoadingArchive";
@@ -20,6 +21,7 @@ export function App() {
   const boot = useStore((s) => s.boot);
   const mode = useStore((s) => s.mode);
   const readOnly = useStore((s) => s.archive?.readOnly ?? false);
+  const combined = useStore((s) => s.archive?.combined != null);
   const whoEditsOpen = useStore((s) => s.whoEditsOpen);
   const conflictOpen = useStore((s) => s.conflictOpen);
   const foreignConfirmOpen = useStore((s) => s.foreignConfirmOpen);
@@ -28,6 +30,7 @@ export function App() {
   useShortcuts();
   useCloseGuard();
   useUpdateChecks();
+  useSetRefresh();
 
   useEffect(() => {
     boot().catch(() => useStore.setState({ phase: "picker" }));
@@ -43,7 +46,7 @@ export function App() {
           <div className="main">
             <TopBar />
             {mode === "edit" && <EditModeBar />}
-            {readOnly && <ReadOnlyBar />}
+            {combined ? <CombinedBar /> : readOnly && <ReadOnlyBar />}
             <div className="content">
               <Screen />
             </div>

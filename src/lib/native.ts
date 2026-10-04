@@ -63,6 +63,15 @@ export async function revealPath(path: string) {
   }
 }
 
+/** „Otwórz w nowym oknie”: another Heirloom window opening `path` (an archive or a set), at `person` when given.
+ *  False where there are no windows (a browser with heirloom-bridge): the caller opens it in this window instead. */
+export async function openInNewWindow(path: string, person?: string): Promise<boolean> {
+  if (!inTauri) return false;
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("open_window", { path, person: person ?? null });
+  return true;
+}
+
 /** Files dropped onto the window (Tauri gives real paths; a browser doesn't). */
 export async function onFileDrop(handler: (paths: string[]) => void, hover?: (over: boolean) => void): Promise<() => void> {
   if (!inTauri) return () => {};

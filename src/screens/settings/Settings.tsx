@@ -67,13 +67,16 @@ export function Settings({ section }: { section?: string }) {
   }, [ready]);
 
   if (!archive) return <div className="page" />;
+  // Archives opened together are only read: only this computer's settings, not the archives' (design §6.4).
+  const combined = archive.combined != null;
+  const nav = combined ? NAV.filter((item) => item.id === "appearance" || item.id === "about") : NAV;
 
   return (
     <div className="page" ref={scrollRef}>
       <div className="settings">
         <nav className="set-nav">
           <h1>Ustawienia</h1>
-          {NAV.map((item) => (
+          {nav.map((item) => (
             <button key={item.id} className={`set-nav-item${active === item.id ? " active" : ""}`} onClick={() => show(item.id, true)}>
               <item.icon size={16} />
               {item.label}
@@ -82,11 +85,17 @@ export function Settings({ section }: { section?: string }) {
         </nav>
         <div className="set-sections">
           <AppearanceSection />
-          <TreeSection archive={archive} />
-          <NamesSection display={archive.display} />
-          <ArchiveSections archive={archive} />
-          <ImportSection />
-          <EditorsSection archive={archive} />
+          {combined ? (
+            <div className="banner info">Ustawienia drzewa, osób i dat oraz archiwum zmienisz w każdym archiwum osobno — archiwa otwarte razem są tylko do przeglądania.</div>
+          ) : (
+            <>
+              <TreeSection archive={archive} />
+              <NamesSection display={archive.display} />
+              <ArchiveSections archive={archive} />
+              <ImportSection />
+              <EditorsSection archive={archive} />
+            </>
+          )}
           <AboutSection />
         </div>
       </div>

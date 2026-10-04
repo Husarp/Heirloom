@@ -26,7 +26,7 @@ type Kind = "born" | "baptised" | "married" | "died" | "buried" | "lived";
 interface PlaceEvent {
   date: string | null;
   uncertain: boolean;
-  person: { id: string; name: string; initials: string; branch: number; photo: string | null };
+  person: { id: string; name: string; initials: string; branch: number; photo: string | null; from?: string[] };
   relation: string;
   source: string | null;
 }
@@ -433,7 +433,7 @@ function PlacePage({
               <span className={`num ellipsis${e.uncertain ? " uncertain" : ""}`} style={{ color: "var(--text2)" }} title={e.date ?? undefined}>
                 {e.date ?? "?"}
               </span>
-              <Avatar initials={e.person.initials} branch={e.person.branch} photo={e.person.photo} size={28} />
+              <Avatar initials={e.person.initials} branch={e.person.branch} photo={e.person.photo} size={28} from={e.person.from} />
               <span className="ellipsis">
                 <span className="serif" style={{ fontSize: 15, fontWeight: 600 }}>
                   {e.person.name}

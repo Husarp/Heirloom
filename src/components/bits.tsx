@@ -1,11 +1,13 @@
 // Small shared pieces from the design's component inventory (spec §5).
 
 import { Check, ChevronDown } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { mediaUrl } from "../api/transport";
-import type { DateText } from "../api/types";
+import type { CombinedArchive, DateText } from "../api/types";
+import { useStore } from "../app/store";
 
-/** Avatar: a photo, or initials on the branch colour's soft tint (spec §5.6). */
+/** Avatar: a photo, or initials on the branch colour's soft tint (spec §5.6). `from`: in archives opened together,
+ *  the archive's dot in the corner (nothing in a single archive). */
 export function Avatar({
   initials,
   branch,
@@ -14,6 +16,7 @@ export function Avatar({
   dashed,
   tint = 24,
   style,
+  from,
 }: {
   initials: string;
   branch?: number;
@@ -21,6 +24,34 @@ export function Avatar({
   photo?: string | null;
   dashed?: boolean;
   tint?: number;
+  style?: CSSProperties;
+  from?: string[];
+}) {
+  const avatar = <AvatarImage initials={initials} branch={branch} size={size} photo={photo} dashed={dashed} tint={tint} style={style} />;
+  if (!from?.length) return avatar;
+  return (
+    <span className="avatar-wrap">
+      {avatar}
+      <ArchiveDot from={from} size={size >= 64 ? 20 : size >= 40 ? 15 : 12} />
+    </span>
+  );
+}
+
+function AvatarImage({
+  initials,
+  branch,
+  size,
+  photo,
+  dashed,
+  tint,
+  style,
+}: {
+  initials: string;
+  branch?: number;
+  size: number;
+  photo?: string | null;
+  dashed?: boolean;
+  tint: number;
   style?: CSSProperties;
 }) {
   const [failed, setFailed] = useState(false);
@@ -43,6 +74,59 @@ export function Avatar({
       ) : (
         initials
       )}
+    </span>
+  );
+}
+
+/** The branch colour each archive of a set is drawn in (`--arch1` … in tokens.css, the tree's „Koloruj wg:
+ *  archiwum”). */
+export const ARCH_BRANCH = [5, 9, 3, 6, 7, 10];
+
+/** The branch colour number of the archive with this 1-based colour. */
+export function archBranch(colour: number): number {
+  return ARCH_BRANCH[(colour - 1) % ARCH_BRANCH.length];
+}
+
+/** The archives of the set that is open, by key; empty for a single archive. */
+export function useArchives(): Map<string, CombinedArchive> {
+  const archives = useStore((s) => s.archive?.combined?.archives);
+  return useMemo(() => new Map((archives ?? []).map((a) => [a.key, a])), [archives]);
+}
+
+/** „z archiwum Kowalscy”, „w archiwach Kowalscy i Nowakowie”. */
+export function fromText(from: string[], archives: Map<string, CombinedArchive>): string {
+  const names = from.map((k) => archives.get(k)?.name ?? k);
+  if (names.length === 1) return `z archiwum ${names[0]}`;
+  return `w archiwach ${names.slice(0, -1).join(", ")} i ${names[names.length - 1]}`;
+}
+
+/** A round dot in the colour of the archive a person comes from (with its initial when there's room); a person in
+ *  several archives gets their colours side by side. */
+export function ArchiveDot({ from, size = 12, style }: { from: string[] | undefined; size?: number; style?: CSSProperties }) {
+  const archives = useArchives();
+  if (!from?.length || archives.size === 0) return null;
+  const colours = from.map((k) => archives.get(k)?.colour ?? 1);
+  const background =
+    colours.length === 1
+      ? `var(--arch${((colours[0] - 1) % 6) + 1})`
+      : `conic-gradient(${colours.map((c, i) => `var(--arch${((c - 1) % 6) + 1}) ${(i / colours.length) * 360}deg ${((i + 1) / colours.length) * 360}deg`).join(", ")})`;
+  const letter = colours.length === 1 && size >= 15 ? (archives.get(from[0])?.name ?? "").charAt(0).toUpperCase() : "";
+  const ink = [4, 6, 9, 10].includes(archBranch(colours[0])) ? "var(--lod-ink-dk)" : "var(--lod-ink)";
+  return (
+    <span className="arch-dot" title={fromText(from, archives)} style={{ width: size, height: size, background, color: ink, fontSize: Math.round(size * 0.6), ...style }}>
+      {letter}
+    </span>
+  );
+}
+
+/** The archive (or archives) a person comes from, with the names: on the profile and in the tree's panel. */
+export function ArchiveBadge({ from, style }: { from: string[] | undefined; style?: CSSProperties }) {
+  const archives = useArchives();
+  if (!from?.length || archives.size === 0) return null;
+  return (
+    <span className="arch-badge" title={fromText(from, archives)} style={style}>
+      <ArchiveDot from={from} size={12} style={{ boxShadow: "none" }} />
+      <span>{from.map((k) => archives.get(k)?.name ?? k).join(" + ")}</span>
     </span>
   );
 }

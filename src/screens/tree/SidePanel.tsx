@@ -3,7 +3,9 @@ import { mediaUrl } from "../../api/transport";
 import type { PersonSummary } from "../../api/types";
 import { useStore } from "../../app/store";
 import { useApi } from "../../app/useApi";
-import { Avatar } from "../../components/bits";
+import { ArchiveBadge, Avatar } from "../../components/bits";
+import { EditInArchive, memberOf } from "../person/CombinedParts";
+import type { Profile } from "../person/types";
 
 interface PanelData {
   person: PersonSummary;
@@ -25,6 +27,10 @@ export function SidePanel({ id, onClose, onFocus, relativeTitle = "Pokaż w cent
   const requireEdit = useStore((s) => s.requireEdit);
   const editing = mode === "edit";
   const p = data?.person;
+  const combined = useStore((s) => s.archive?.combined != null);
+  // A person in several archives: their records, for „Edytuj w jego archiwum” (one archive's is known from the id).
+  const { data: profile } = useApi<Profile>(combined && (p?.from?.length ?? 0) > 1 ? "person.get" : null, { id });
+  const members = !combined || !p ? [] : (p.from?.length ?? 0) > 1 ? (profile?.combined?.members ?? []) : [memberOf(p)].filter((m) => m != null);
   const add = (kind: "parent" | "partner" | "child" | "sibling") => requireEdit(() => go({ name: "edit", id: null, relation: { kind, of: id } }));
 
   return (
@@ -60,6 +66,7 @@ export function SidePanel({ id, onClose, onFocus, relativeTitle = "Pokaż w cent
                 „{p.nickname}”
               </span>
             )}
+            <ArchiveBadge from={p.from} style={{ alignSelf: "flex-start", marginTop: 6 }} />
             {data.generationBranch && (
               <span style={{ alignSelf: "flex-start", marginTop: 6, padding: "3px 9px", borderRadius: "var(--r-ctl)", background: "var(--surface2)", color: "var(--text2)", fontSize: 12, fontWeight: 600 }}>
                 {data.generationBranch}
@@ -101,7 +108,7 @@ export function SidePanel({ id, onClose, onFocus, relativeTitle = "Pokaż w cent
             <div className="col" style={{ gap: 2, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
               {data.relatives.map((r) => (
                 <button key={`${r.id}-${r.label}`} className="panel-relative" onClick={() => onFocus(r.id)} title={relativeTitle}>
-                  <Avatar initials={r.initials} branch={r.branch} photo={r.photo} size={26} />
+                  <Avatar initials={r.initials} branch={r.branch} photo={r.photo} size={26} from={r.from} />
                   {/* The name keeps its room; the maiden name shrinks first. */}
                   <span className="row grow" style={{ gap: 6, minWidth: 0 }}>
                     <span className="ellipsis" style={{ fontSize: 13, fontWeight: 500, flex: "0 1 auto", minWidth: 60 }}>
@@ -129,6 +136,7 @@ export function SidePanel({ id, onClose, onFocus, relativeTitle = "Pokaż w cent
               </button>
             )}
           </div>
+          {combined && <EditInArchive members={members} />}
           {editing && (
             <div className="col" style={{ gap: 6 }}>
               <span style={{ fontSize: 12, color: "var(--text3)" }}>Dodaj krewnego</span>

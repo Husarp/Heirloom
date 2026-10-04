@@ -2,6 +2,8 @@
 //! `heirloom://` protocol that serves the archive's photos and documents (PLAN.md §5.3). With `--selftest <report>`
 //! the window is hidden, the interface checks itself (scripts/build.ps1 runs it before packaging) and the app quits.
 //! While it runs, `%LOCALAPPDATA%\Heirloom\running\<pid>.json` tells the installer whether closing it would lose work.
+//! `--open <archive or set> [--person <xref>]` opens that (the interface asks with `app.takeStart`); „Otwórz w nowym
+//! oknie” starts another Heirloom that way (`open_window`), each window a process of its own.
 
 use heirloom_api::{Api, ApiError, media, running::RunningFile, update::Updater};
 use serde_json::Value;
@@ -136,6 +138,33 @@ fn selftest_done(test: tauri::State<'_, SelfTest>, ok: bool, text: String) {
     }
 }
 
+/// „Otwórz w nowym oknie”, „Edytuj w jego archiwum”: another Heirloom, opening `path` (at `person`).
+#[tauri::command]
+fn open_window(path: String, person: Option<String>) -> Result<(), ApiError> {
+    let failed = |e: std::io::Error| ApiError::new("io", format!("Nie udało się otworzyć nowego okna: {e}"));
+    let exe = std::env::current_exe().map_err(failed)?;
+    let mut command = std::process::Command::new(exe);
+    command.arg("--open").arg(&path);
+    if let Some(person) = person {
+        command.arg("--person").arg(person);
+    }
+    command.spawn().map(|_| ()).map_err(failed)
+}
+
+/// `--open <path> [--person <xref>]` from the command line.
+fn open_args(args: impl Iterator<Item = String>) -> Option<(String, Option<String>)> {
+    let (mut path, mut person) = (None, None);
+    let mut args = args.skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--open" => path = args.next(),
+            "--person" => person = args.next(),
+            _ => {}
+        }
+    }
+    Some((path?, person))
+}
+
 /// `--selftest <report>` from the command line.
 fn selftest_args() -> Option<(PathBuf, PathBuf)> {
     let mut args = std::env::args().skip(1);
@@ -152,10 +181,13 @@ fn selftest_args() -> Option<(PathBuf, PathBuf)> {
 pub fn run() {
     let selftest = selftest_args();
     // The self-test never touches the real settings, recent archives or thumbnails.
-    let api = match &selftest {
+    let mut api = match &selftest {
         Some((_, dir)) => Api::new(Some(dir.join("ustawienia")), Some(dir.join("cache"))),
         None => Api::with_default_dirs(),
     };
+    if let (Some((path, person)), None) = (open_args(std::env::args()), &selftest) {
+        api.set_start(path, person);
+    }
     let roots = api.media_roots();
     // The self-test never goes online either.
     let updater = Updater::new(if selftest.is_some() { None } else { Some(Updater::default_dir()) });
@@ -199,7 +231,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![call, unsaved_state, selftest_folder, selftest_done])
+        .invoke_handler(tauri::generate_handler![call, unsaved_state, open_window, selftest_folder, selftest_done])
         .build(tauri::generate_context!())
         .expect("error while running Heirloom")
         .run(|app, event| {
@@ -207,4 +239,21 @@ pub fn run() {
                 app.state::<RunningFile>().remove();
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::open_args;
+
+    #[test]
+    fn a_new_window_is_told_what_to_open() {
+        let args = |list: &[&str]| open_args(list.iter().map(|s| s.to_string()));
+        assert_eq!(args(&["heirloom.exe"]), None);
+        assert_eq!(args(&["heirloom.exe", "--open", "D:\\Rodzina\\Kowalscy"]), Some(("D:\\Rodzina\\Kowalscy".into(), None)));
+        assert_eq!(
+            args(&["heirloom.exe", "--person", "@I12@", "--open", "D:\\Rodzina razem.heirloom-zestaw"]),
+            Some(("D:\\Rodzina razem.heirloom-zestaw".into(), Some("@I12@".into())))
+        );
+        assert_eq!(args(&["heirloom.exe", "--open"]), None, "a path is needed");
+    }
 }

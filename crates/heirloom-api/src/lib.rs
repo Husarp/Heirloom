@@ -2,6 +2,7 @@
 //! Every command takes JSON and returns JSON, so the UI's `api.ts` works the same over both.
 
 pub mod activity;
+pub mod combined;
 pub mod config;
 pub mod edit;
 pub mod gedwrite;
@@ -133,6 +134,10 @@ pub struct Api {
     import: Option<import::Draft>,
     /// Where file URLs are served from; shared with the media handler, which runs outside the command lock.
     media: media::MediaRoots,
+    /// Archives opened together („Otwórz razem…”), read-only; never open at the same time as `session`.
+    combined: Option<combined::Combined>,
+    /// What this window was started with (`--open <path> [--person <xref>]`), given to the interface once.
+    start: Option<(String, Option<String>)>,
 }
 
 fn str_arg(args: &Value, key: &str) -> Result<String, ApiError> {
@@ -148,7 +153,7 @@ impl Api {
     /// per-archive caches (thumbnails).
     pub fn new(config_dir: Option<PathBuf>, cache_root: Option<PathBuf>) -> Api {
         let config = config_dir.as_deref().map(AppConfig::load).unwrap_or_default();
-        Api { config_dir, cache_root, config, session: None, import: None, media: media::MediaRoots::default() }
+        Api { config_dir, cache_root, config, session: None, import: None, media: media::MediaRoots::default(), combined: None, start: None }
     }
 
     /// The standard locations: `%APPDATA%\Heirloom` and `%LOCALAPPDATA%\Heirloom\cache`.
@@ -164,40 +169,95 @@ impl Api {
         self.session.as_mut().ok_or_else(ApiError::no_archive)
     }
 
+    /// What the read screens show: the open archive, or the archives opened together.
+    fn view(&mut self) -> Result<&Derived, ApiError> {
+        if self.combined.is_some() {
+            return Ok(self.combined.as_mut().expect("checked").derived());
+        }
+        Ok(self.session()?.derived())
+    }
+
+    /// A person's id from the interface as this view knows them: in archives opened together a linked person's
+    /// other records' ids (from before the link) lead to the person.
+    fn canonical(&self, id: String) -> String {
+        match &self.combined {
+            Some(c) => c.canonical(&id),
+            None => id,
+        }
+    }
+
+    /// `--open <path> [--person <xref>]` from the command line: `app.takeStart` gives it to the interface once.
+    pub fn set_start(&mut self, path: String, person: Option<String>) {
+        self.start = Some((path, person));
+    }
+
+    /// Opens an archive (folder or GEDCOM file) or a set of archives (`.heirloom-zestaw`).
+    pub fn open_path(&mut self, path: &str) -> ApiResult {
+        let method = if combined::is_set_path(path) { "set.open" } else { "archive.open" };
+        self.call(method, json!({ "path": path }))
+    }
+
     /// Runs one command. `args` is a JSON object (or null when the command takes nothing).
     pub fn call(&mut self, method: &str, args: Value) -> ApiResult {
+        // Archives opened together are only for browsing (decision 1a): nothing that could change an archive runs.
+        if self.combined.is_some() && !combined::allowed(method) {
+            return Err(combined::read_only());
+        }
         match method {
             "app.state" => Ok(self.app_state()),
+            "app.takeStart" => Ok(self.start.take().map_or(Value::Null, |(path, person)| json!({ "path": path, "person": person }))),
+            "set.create" => {
+                let archives: Vec<String> = args.get("archives").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
+                let replace = args.get("replace").and_then(Value::as_bool).unwrap_or(false);
+                let set = combined::Combined::create(Path::new(&str_arg(&args, "path")?), &str_arg(&args, "name")?, &archives, replace)?;
+                self.install_set(set)
+            }
+            "set.open" => {
+                let set = combined::Combined::open(Path::new(&str_arg(&args, "path")?))?;
+                self.install_set(set)
+            }
+            m if m.starts_with("set.") => {
+                let c = self.combined.as_mut().ok_or_else(combined::no_set)?;
+                let result = c.call(m, &args);
+                let roots = c.media_roots(self.cache_root.as_deref());
+                self.media.set_many(roots);
+                result
+            }
             "app.setAppearance" => self.set_appearance(&args),
             "app.setPlace" => {
                 // The archive is named by the UI: a place sent late must not land in an archive opened since.
                 let archive_id = str_arg(&args, "archiveId")?;
                 let part = |key: &str| args.get(key).filter(|v| !v.is_null()).cloned();
                 let viewed = args.get("viewed").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect());
-                self.config.set_place(&archive_id, part("route"), part("tree"), viewed, heirloom_core::history::now());
-                self.save_config();
+                let (route, tree) = (part("route"), part("tree"));
+                self.update_config(|c| c.set_place(&archive_id, route, tree, viewed, heirloom_core::history::now()));
                 Ok(Value::Null)
             }
             "app.setUpdates" => {
-                self.config.updates.check = args.get("check").and_then(Value::as_bool).ok_or_else(|| ApiError::bad_args("check"))?;
-                self.save_config();
+                let check = args.get("check").and_then(Value::as_bool).ok_or_else(|| ApiError::bad_args("check"))?;
+                self.update_config(|c| c.updates.check = check);
                 Ok(self.app_state())
             }
             "recent.forget" => {
-                self.config.forget(&str_arg(&args, "path")?);
-                self.save_config();
+                let path = str_arg(&args, "path")?;
+                self.update_config(|c| c.forget(&path));
                 Ok(self.app_state())
             }
             "archive.open" => self.open_archive(&str_arg(&args, "path")?),
             "archive.create" => self.create_archive(&str_arg(&args, "folder")?, &str_arg(&args, "name")?),
             "archive.close" => {
                 self.session = None;
+                self.combined = None;
                 self.import = None;
                 self.media.set(None);
                 Ok(Value::Null)
             }
             "archive.status" => self.archive_status(),
             "archive.save" => self.save(&args),
+            "archive.reload" if self.combined.is_some() => {
+                self.call("set.refresh", Value::Null)?;
+                self.archive_status()
+            }
             "archive.reload" => {
                 let s = self.session()?;
                 s.archive.reload()?;
@@ -227,15 +287,28 @@ impl Api {
             | "archive.saveAsNew" | "settings.export" | "settings.import" | "app.about" => tools::call(self, method, &args),
             "archive.setEditor" => {
                 // Remembered for "Kto edytuje?" next time; the name is added to the archive's list on the first save.
-                self.config.last_editor = Some(str_arg(&args, "name")?);
-                self.save_config();
+                let name = str_arg(&args, "name")?;
+                self.update_config(|c| c.last_editor = Some(name));
                 Ok(Value::Null)
             }
-            "people.list" => Ok(people::list(self.session()?.derived())),
+            "people.list" => Ok(people::list(self.view()?)),
             "people.search" => {
                 let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(20) as usize;
                 let query = str_arg(&args, "q")?;
-                Ok(people::search(self.session()?.derived(), &query, limit))
+                Ok(people::search(self.view()?, &query, limit))
+            }
+            "person.get" if self.combined.is_some() => {
+                let id = self.canonical(str_arg(&args, "id")?);
+                let c = self.combined.as_mut().expect("checked");
+                // No history here: each archive keeps its own.
+                let mut profile = people::profile(c.derived(), &id, &[])?;
+                profile["brokenLinks"] = people::broken_links(c.doc(), &id);
+                profile["combined"] = c.person_info(&id);
+                // The UID as the archive has it (the merged document puts the archive's key in front).
+                if let Some(uid) = profile["uid"].as_str().and_then(|u| u.split_once('~')).map(|(_, u)| u.to_string()) {
+                    profile["uid"] = json!(uid);
+                }
+                Ok(profile)
             }
             "person.get" => {
                 let id = str_arg(&args, "id")?;
@@ -246,12 +319,12 @@ impl Api {
                 Ok(profile)
             }
             "person.panel" => {
-                let id = str_arg(&args, "id")?;
-                people::panel(self.session()?.derived(), &id)
+                let id = self.canonical(str_arg(&args, "id")?);
+                people::panel(self.view()?, &id)
             }
             "person.relations" => {
-                let id = str_arg(&args, "id")?;
-                people::relations(self.session()?.derived(), &id)
+                let id = self.canonical(str_arg(&args, "id")?);
+                people::relations(self.view()?, &id)
             }
             "date.parse" => Ok(date_feedback(&str_arg(&args, "text")?)),
             "person.editData" => {
@@ -259,9 +332,9 @@ impl Api {
                 people::edit_data(self.session()?.derived(), &id)
             }
             "person.hover" => {
-                let id = str_arg(&args, "id")?;
-                let from = opt_str(&args, "from");
-                people::hover(self.session()?.derived(), &id, from.as_deref())
+                let id = self.canonical(str_arg(&args, "id")?);
+                let from = opt_str(&args, "from").map(|f| self.canonical(f));
+                people::hover(self.view()?, &id, from.as_deref())
             }
             "history.feed" => {
                 let filter = opt_str(&args, "filter").unwrap_or_else(|| "all".into());
@@ -280,15 +353,20 @@ impl Api {
                 result
             }
             "tree.graph" => {
-                let id = str_arg(&args, "id")?;
+                let id = self.canonical(str_arg(&args, "id")?);
                 let up = args.get("up").and_then(Value::as_u64).unwrap_or(2) as usize;
                 let down = args.get("down").and_then(Value::as_u64).unwrap_or(2) as usize;
-                let expand: Vec<String> = args.get("expand").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
-                tree::graph(self.session()?.derived(), &id, up.min(12), down.min(12), &expand)
+                let expand: Vec<String> = args.get("expand").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(|x| self.canonical(x.to_string())).collect()).unwrap_or_default();
+                tree::graph(self.view()?, &id, up.min(12), down.min(12), &expand)
             }
             "tree.overview" => {
-                let focus = opt_str(&args, "focus");
-                Ok(tree::overview(self.session()?.derived(), focus.as_deref()))
+                let focus = opt_str(&args, "focus").map(|f| self.canonical(f));
+                Ok(tree::overview(self.view()?, focus.as_deref()))
+            }
+            "start.data" if self.combined.is_some() => {
+                let c = self.combined.as_mut().expect("checked");
+                let title = c.set.name.clone();
+                Ok(lists::start(c.derived(), &[], &title))
             }
             "start.data" => {
                 let s = self.session()?;
@@ -301,36 +379,38 @@ impl Api {
                 let root = s.archive.root().to_path_buf();
                 Ok(lists::first_open(s.derived(), &root))
             }
-            "surnames.list" => Ok(lists::surnames(self.session()?.derived())),
+            "surnames.list" => Ok(lists::surnames(self.view()?)),
             "surname.get" => {
                 let key = str_arg(&args, "key")?;
-                lists::surname(self.session()?.derived(), &key)
+                lists::surname(self.view()?, &key)
             }
-            "places.list" => Ok(lists::places(self.session()?.derived())),
+            "places.list" => Ok(lists::places(self.view()?)),
             "place.get" => {
                 let path: Vec<String> = args.get("path").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
-                lists::place(self.session()?.derived(), &path)
+                lists::place(self.view()?, &path)
             }
-            "stories.list" => Ok(lists::stories(self.session()?.derived())),
+            "stories.list" => Ok(lists::stories(self.view()?)),
             "story.get" => {
                 let id = str_arg(&args, "id")?;
-                lists::story(self.session()?.derived(), &id)
+                lists::story(self.view()?, &id)
             }
             "media.list" | "media.get" | "media.missing" | "media.findMissing" => {
-                let s = self.session()?;
-                let root = s.archive.root().to_path_buf();
-                let d = s.derived();
+                let roots = match &self.combined {
+                    Some(c) => c.file_roots(),
+                    None => media_edit::FileRoots::One(self.session()?.archive.root().to_path_buf()),
+                };
+                let d = self.view()?;
                 match method {
-                    "media.list" => Ok(lists::media_list(d, &root)),
-                    "media.get" => lists::media_get(d, &str_arg(&args, "id")?, &root),
-                    "media.missing" => Ok(lists::missing_list(d, &root)),
-                    _ => Ok(lists::find_missing(d, &root, Path::new(&str_arg(&args, "folder")?))),
+                    "media.list" => Ok(lists::media_list(d, &roots)),
+                    "media.get" => lists::media_get(d, &str_arg(&args, "id")?, &roots),
+                    "media.missing" => Ok(lists::missing_list(d, &roots)),
+                    _ => Ok(lists::find_missing(d, &roots, Path::new(&str_arg(&args, "folder")?))),
                 }
             }
-            "sources.list" => Ok(lists::sources(self.session()?.derived())),
+            "sources.list" => Ok(lists::sources(self.view()?)),
             "source.get" => {
                 let id = str_arg(&args, "id")?;
-                lists::source(self.session()?.derived(), &id)
+                lists::source(self.view()?, &id)
             }
             m if ["person.", "relation.", "family.", "text.", "media.", "source.", "citation.", "place."].iter().any(|p| m.starts_with(p)) => {
                 edit::call(self.session()?, m, &args)
@@ -395,46 +475,57 @@ impl Api {
     }
 
     fn app_state(&self) -> Value {
+        let (archive, id) = match (&self.combined, &self.session) {
+            (Some(c), _) => (Some(c.status()), Some(c.set.id.clone())),
+            (None, Some(s)) => (Some(status_of(s)), Some(s.archive.settings().archive_id.clone())),
+            (None, None) => (None, None),
+        };
         json!({
             "version": env!("CARGO_PKG_VERSION"),
             "recent": self.config.recent,
             "appearance": self.config.appearance,
             "lastEditor": self.config.last_editor,
             "updates": self.config.updates,
-            "archive": self.session.as_ref().map(|s| status_of(s)),
-            // Where the open archive was left on this computer.
-            "place": self.session.as_ref().and_then(|s| self.config.places.get(&s.archive.settings().archive_id)),
+            "archive": archive,
+            // Where the open archive (or set) was left on this computer.
+            "place": id.and_then(|id| self.config.places.get(&id)),
         })
     }
 
     fn set_appearance(&mut self, args: &Value) -> ApiResult {
-        let mut appearance = self.config.appearance.clone();
-        if let Some(theme) = args.get("theme").and_then(Value::as_str) {
-            if !["system", "light", "dark"].contains(&theme) {
-                return Err(ApiError::bad_args("theme"));
+        // Only the choices given change, on top of what another window chose meanwhile.
+        let theme = args.get("theme").and_then(Value::as_str);
+        if theme.is_some_and(|t| !["system", "light", "dark"].contains(&t)) {
+            return Err(ApiError::bad_args("theme"));
+        }
+        let text_size = args.get("textSize").and_then(Value::as_u64);
+        let density = args.get("density").and_then(Value::as_str);
+        if density.is_some_and(|d| !["comfortable", "compact"].contains(&d)) {
+            return Err(ApiError::bad_args("density"));
+        }
+        let animations = args.get("animations").and_then(Value::as_bool);
+        let start_in = args.get("startIn").and_then(Value::as_str);
+        if start_in.is_some_and(|s| !["start", "last"].contains(&s)) {
+            return Err(ApiError::bad_args("startIn"));
+        }
+        self.update_config(|c| {
+            let appearance = &mut c.appearance;
+            if let Some(theme) = theme {
+                appearance.theme = theme.into();
             }
-            appearance.theme = theme.into();
-        }
-        if let Some(size) = args.get("textSize").and_then(Value::as_u64) {
-            appearance.text_size = (size as u32).clamp(100, 150);
-        }
-        if let Some(density) = args.get("density").and_then(Value::as_str) {
-            if !["comfortable", "compact"].contains(&density) {
-                return Err(ApiError::bad_args("density"));
+            if let Some(size) = text_size {
+                appearance.text_size = (size as u32).clamp(100, 150);
             }
-            appearance.density = density.into();
-        }
-        if let Some(animations) = args.get("animations").and_then(Value::as_bool) {
-            appearance.animations = animations;
-        }
-        if let Some(start_in) = args.get("startIn").and_then(Value::as_str) {
-            if !["start", "last"].contains(&start_in) {
-                return Err(ApiError::bad_args("startIn"));
+            if let Some(density) = density {
+                appearance.density = density.into();
             }
-            appearance.start_in = start_in.into();
-        }
-        self.config.appearance = appearance;
-        self.save_config();
+            if let Some(animations) = animations {
+                appearance.animations = animations;
+            }
+            if let Some(start_in) = start_in {
+                appearance.start_in = start_in.into();
+            }
+        });
         Ok(self.app_state())
     }
 
@@ -457,20 +548,46 @@ impl Api {
         self.media.set(Some(media::Roots {
             archive: archive.root().to_path_buf(),
             thumbs: self.cache_root.as_ref().map(|c| c.join(&archive.settings().archive_id).join("miniatury")),
+            key: None,
         }));
-        self.config.remember(RecentArchive {
+        let entry = RecentArchive {
             path: opened_path.to_string(),
             name: archive.settings().name.clone(),
             opened_at: heirloom_core::history::now(),
             people: archive.doc.records.iter().filter(|r| r.tag == "INDI").count(),
-        });
-        self.save_config();
+            kind: "archive".into(),
+            archives: None,
+        };
+        self.update_config(|c| c.remember(entry));
         self.session = Some(Session::new(archive));
+        self.combined = None;
         self.import = None;
         self.archive_status()
     }
 
+    /// Makes `set` the open view (closing the archive and any import) and remembers it in the recent list.
+    fn install_set(&mut self, set: combined::Combined) -> ApiResult {
+        self.media.set_many(set.media_roots(self.cache_root.as_deref()));
+        self.media.set_imports(Vec::new());
+        let entry = RecentArchive {
+            path: set.path.display().to_string(),
+            name: set.set.name.clone(),
+            opened_at: heirloom_core::history::now(),
+            people: set.people(),
+            kind: "set".into(),
+            archives: Some(set.parts.len()),
+        };
+        self.update_config(|c| c.remember(entry));
+        self.session = None;
+        self.import = None;
+        self.combined = Some(set);
+        self.archive_status()
+    }
+
     fn archive_status(&self) -> ApiResult {
+        if let Some(c) = &self.combined {
+            return Ok(c.status());
+        }
         let s = self.session.as_ref().ok_or_else(ApiError::no_archive)?;
         Ok(status_of(s))
     }
@@ -486,8 +603,7 @@ impl Api {
         let saved_at = heirloom_core::history::now();
         s.last_saved = Some(saved_at.clone());
         s.changed();
-        self.config.last_editor = Some(author);
-        self.save_config();
+        self.update_config(|c| c.last_editor = Some(author));
         Ok(json!({
             "backup": report.backup.map(|p| p.display().to_string()),
             "changes": report.history_entries,
@@ -534,10 +650,13 @@ impl Api {
         self.archive_status()
     }
 
-    fn save_config(&self) {
-        if let Some(dir) = &self.config_dir {
-            // Only conveniences (recent list, appearance, update checks, last places) live here; failing to write them must not break the app.
-            let _ = self.config.save(dir);
+    /// One change to `aplikacja.json`, made on the file as it is now: another window (another process) may have
+    /// written it since this one read it. Only conveniences (recent list, appearance, update checks, last places) live
+    /// there; failing to write them must not break the app.
+    fn update_config(&mut self, change: impl FnOnce(&mut AppConfig)) {
+        match &self.config_dir {
+            Some(dir) => self.config = AppConfig::update(dir, &self.config, change),
+            None => change(&mut self.config),
         }
     }
 }

@@ -9,6 +9,7 @@ import { pickFiles } from "../../lib/native";
 import { UpdateBanner } from "../../shell/UpdateBanner";
 import { runEdit } from "../media/shared";
 import { EmptyArchive } from "./EmptyArchive";
+import { SetCard } from "./SetCard";
 import "./start.css";
 
 interface Ref {
@@ -17,6 +18,8 @@ interface Ref {
   initials: string;
   branch: number;
   photo: string | null;
+  /** Archives opened together: which archives the person is in. */
+  from?: string[];
 }
 
 interface StartData {
@@ -35,7 +38,8 @@ interface StartData {
 export function Start() {
   const archive = useStore((s) => s.archive);
   const { data } = useApi<StartData>("start.data");
-  if (archive && archive.people === 0) return <EmptyArchive />;
+  const combined = archive?.combined != null;
+  if (archive && archive.people === 0 && !combined) return <EmptyArchive />;
   return (
     <div className="page">
       <div className="start">
@@ -52,14 +56,16 @@ export function Start() {
           <Stat value={data?.stats.documents ?? 0} words={["dokument", "dokumenty", "dokumentów"]} />
           <Stat value={data?.stats.generations ?? 0} words={["pokolenie", "pokolenia", "pokoleń"]} />
         </div>
+        {/* Archives opened together are only browsed: no quick actions and no history of changes here. */}
+        <SetCard />
         <div className="start-grid">
           <OnThisDay data={data} />
           <div className="col" style={{ gap: 18 }}>
             <RecentlyAdded data={data} />
-            <RecentlyEdited data={data} />
+            {!combined && <RecentlyEdited data={data} />}
           </div>
           <div className="col" style={{ gap: 18 }}>
-            <QuickActions />
+            {!combined && <QuickActions />}
             <RecentlyViewed />
           </div>
         </div>
@@ -94,7 +100,7 @@ function Card({ icon, title, right, children, footer }: { icon?: ReactNode; titl
 function PersonLine({ person, title, sub, value, onClick }: { person: Ref; title?: string; sub: string; value?: string; onClick: () => void }) {
   return (
     <button className="row person-line" onClick={onClick}>
-      <Avatar initials={person.initials} branch={person.branch} photo={person.photo} size={32} />
+      <Avatar initials={person.initials} branch={person.branch} photo={person.photo} size={32} from={person.from} />
       <span className="col grow" style={{ minWidth: 0, textAlign: "left" }}>
         <span className="serif ellipsis" style={{ fontSize: 15, fontWeight: 600 }}>
           {title ?? person.name}
@@ -165,7 +171,7 @@ function RecentlyAdded({ data }: { data: StartData | null }) {
       {data?.recentlyAdded.length === 0 && <div style={{ padding: 16, fontSize: 13, color: "var(--text3)" }}>Nikt nie został jeszcze dodany w Heirloom.</div>}
       {data?.recentlyAdded.map((r) => (
         <div key={r.person.id} className="list-row clickable" style={{ height: 48, gap: 10 }} {...rowButton(() => go({ name: "person", id: r.person.id }))}>
-          <Avatar initials={r.person.initials} branch={r.person.branch} photo={r.person.photo} size={30} />
+          <Avatar initials={r.person.initials} branch={r.person.branch} photo={r.person.photo} size={30} from={r.person.from} />
           <span className="col grow" style={{ minWidth: 0 }}>
             <span className="serif ellipsis" style={{ fontSize: 15, fontWeight: 600 }}>
               {r.person.name}

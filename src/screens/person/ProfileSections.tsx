@@ -326,8 +326,8 @@ export function FamilySection({ data }: Props) {
   return (
     <section id="sec-family" className={sectionClass(sec)} style={{ gap: 16 }}>
       <SectionHead title="Rodzina" edit={sec} />
-      {data.family.map((g) => (
-        <div key={g.title} className="col" style={{ gap: 8 }}>
+      {data.family.map((g, i) => (
+        <div key={`${g.title}-${i}`} className="col" style={{ gap: 8 }}>
           <span className="label-caps" style={{ fontSize: 12 }}>
             {g.title}
           </span>
@@ -337,7 +337,7 @@ export function FamilySection({ data }: Props) {
               return (
                 <div key={r.id} className="family-tile" style={{ boxShadow: `inset 0 3px 0 -1px var(--b${r.branch})` }}>
                   <button className="row family-tile-main" onClick={() => go({ name: "person", id: r.id })}>
-                    <Avatar initials={r.initials} branch={r.branch} photo={r.photo} size={36} />
+                    <Avatar initials={r.initials} branch={r.branch} photo={r.photo} size={36} from={r.from} />
                     <span className="col" style={{ minWidth: 0, textAlign: "left" }}>
                       <span className="serif ellipsis" style={{ fontSize: 15, fontWeight: 600 }}>
                         {cardName(r)}

@@ -59,3 +59,13 @@
   justify-content: center;
   padding: 40px;
 }
+
+/* „W tym zestawie” (archives opened together). */
+.set-archive {
+  min-height: 64px;
+  gap: 12px;
+  padding: 10px 16px;
+}
+.set-archive.missing {
+  background: color-mix(in oklab, var(--warn-soft) 60%, var(--surface));
+}

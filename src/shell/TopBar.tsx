@@ -20,6 +20,7 @@ const SECTION_LABEL: Record<string, string> = {
   import: "Import",
   settings: "Ustawienia",
   activity: "Historia zmian",
+  pairs: "Do sprawdzenia",
 };
 
 function crumbsFor(route: Route, crumb: string | null, empty: boolean): { parent: string; parentRoute?: Route; current?: string } {
@@ -129,8 +130,10 @@ export function TopBar() {
             Edycja
           </button>
           {lockHint && (
-            <div className="tooltip" style={{ right: 0, top: 38, width: 250 }}>
-              Edycja wyłączona, bo w tym archiwum włączono tryb tylko do odczytu. Wyłączysz go w pasku poniżej albo w Ustawienia › Archiwum.
+            <div className="tooltip" style={{ right: 0, top: 38, width: 250, whiteSpace: "normal" }}>
+              {archive?.combined
+                ? "Archiwa otwarte razem są tylko do przeglądania — pliki zostają nietknięte. Osobę zmienisz w jej archiwum: „Edytuj w jego archiwum” na profilu."
+                : "Edycja wyłączona, bo w tym archiwum włączono tryb tylko do odczytu. Wyłączysz go w pasku poniżej albo w Ustawienia › Archiwum."}
             </div>
           )}
         </div>

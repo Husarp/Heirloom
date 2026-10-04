@@ -12,8 +12,9 @@ import { placeLabels } from "./labels";
 
 export interface OverviewData {
   /** [id, x, y, branch, given, surname, birth year, death year, birth uncertain, death uncertain, living, generation,
-   *  surname branch, [father, mother] as indices] (tree.rs `overview`). */
-  people: [string, number, number, number, string, string, string | null, string | null, boolean, boolean, boolean, number | null, number, [number | null, number | null]][];
+   *  surname branch, [father, mother] as indices, and in archives opened together the archives' keys] (tree.rs
+   *  `overview`). */
+  people: [string, number, number, number, string, string, string | null, string | null, boolean, boolean, boolean, number | null, number, [number | null, number | null], string[]?][];
   clusters: { label: string; branch: number; count: number; fromGen: number | null; toGen: number | null; x: number; width: number }[];
   bands: number;
   bandHeight: number;

@@ -1,4 +1,4 @@
-import { BookOpen, FileSearch, History, House, Images, Import, Library, MapPin, Network, Search, SearchX, Settings, Signature, UserPlus, Users } from "lucide-react";
+import { BookOpen, FileSearch, GitMerge, History, House, Images, Import, Library, MapPin, Network, Search, SearchX, Settings, Signature, UserPlus, Users } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { call } from "../api/transport";
 import type { PersonSummary } from "../api/types";
@@ -102,6 +102,7 @@ export function CommandPalette() {
   const go = useStore((s) => s.go);
   const requireEdit = useStore((s) => s.requireEdit);
   const peopleOnly = options?.scope === "people";
+  const combined = useStore((s) => s.archive?.combined != null);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<Hit[]>([]);
   const [ms, setMs] = useState<number | null>(null);
@@ -125,16 +126,19 @@ export function CommandPalette() {
       return;
     }
     const started = performance.now();
-    call<Hit[]>("people.search", { q, limit: 12 })
+    const only = options?.only;
+    call<Hit[]>("people.search", { q, limit: only ? 300 : 12 })
       .then((list) => {
         if (cancelled) return;
-        setHits(list);
+        setHits(only ? list.filter(only).slice(0, 12) : list);
         setMs(Math.max(1, Math.round(performance.now() - started)));
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
+    // The filter is set when the window opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
   // Places and surnames are loaded once, when typing starts.
@@ -155,11 +159,15 @@ export function CommandPalette() {
       { label: "Historie", icon: <BookOpen size={15} />, route: { name: "stories" } as Route, words: "historie opowiesci powiedzonka ciekawostki" },
       { label: "Media", icon: <Images size={15} />, route: { name: "media" } as Route, words: "media zdjecia dokumenty" },
       { label: "Źródła", icon: <Library size={15} />, route: { name: "sources" } as Route, words: "zrodla akty" },
-      { label: "Import", icon: <Import size={15} />, route: { name: "import" } as Route, words: "import paczka ai pliki" },
-      { label: "Historia zmian", icon: <History size={15} />, route: { name: "activity" } as Route, words: "historia zmian cofnij" },
+      ...(combined
+        ? [{ label: "Do sprawdzenia", icon: <GitMerge size={15} />, route: { name: "pairs" } as Route, words: "do sprawdzenia ta sama osoba polacz pary duplikaty" }]
+        : [
+            { label: "Import", icon: <Import size={15} />, route: { name: "import" } as Route, words: "import paczka ai pliki" },
+            { label: "Historia zmian", icon: <History size={15} />, route: { name: "activity" } as Route, words: "historia zmian cofnij" },
+          ]),
       { label: "Ustawienia", icon: <Settings size={15} />, route: { name: "settings" } as Route, words: "ustawienia wyglad motyw" },
     ],
-    [],
+    [combined],
   );
 
   const items: Item[] = [];
@@ -179,7 +187,7 @@ export function CommandPalette() {
       alt: peopleOnly ? undefined : () => goTo({ name: "tree", view: "family", person: h.id }),
       node: (
         <>
-          <Avatar initials={h.initials} branch={h.branch} photo={h.photo} size={32} />
+          <Avatar initials={h.initials} branch={h.branch} photo={h.photo} size={32} from={h.from} />
           <span className="col grow" style={{ minWidth: 0, lineHeight: 1.3 }}>
             <span className="ellipsis" style={{ fontSize: 14 }}>
               <Marked text={cardName(h)} query={q} />
@@ -259,7 +267,7 @@ export function CommandPalette() {
         ),
       });
     }
-    if (!q || "dodaj nowa osoba".includes(f)) {
+    if (!combined && (!q || "dodaj nowa osoba".includes(f))) {
       items.push({
         key: "add-person",
         group: "Polecenia",
@@ -341,7 +349,7 @@ export function CommandPalette() {
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={peopleOnly ? "Skocz do osoby…" : "Szukaj osób, miejsc i poleceń…"}
+            placeholder={options?.placeholder ?? (peopleOnly ? "Skocz do osoby…" : "Szukaj osób, miejsc i poleceń…")}
             aria-controls="palette-list"
             aria-activedescendant={list[active] ? `palette-${list[active].key}` : undefined}
             onKeyDown={(e) => {
@@ -395,7 +403,7 @@ export function CommandPalette() {
         )}
         <div className="palette-foot">
           <span>↑ ↓ wybierz</span>
-          <span>{peopleOnly ? "Enter pokaż w drzewie" : "Enter otwórz"}</span>
+          <span>{options?.placeholder ? "Enter wybierz" : peopleOnly ? "Enter pokaż w drzewie" : "Enter otwórz"}</span>
           {!peopleOnly && <span>Ctrl Enter pokaż w drzewie</span>}
           <span className="grow" />
           <span>Esc zamknij</span>
