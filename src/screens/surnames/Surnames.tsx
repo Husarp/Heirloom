@@ -347,6 +347,7 @@ function SurnamePage({ data, stale, pane }: { data: SurnameData; stale: boolean;
                   <PersonRow
                     key={p.id}
                     name={p.name}
+                    maiden={p.maiden}
                     years={<span className={p.birth?.uncertain || p.death?.uncertain ? "uncertain" : undefined}>{p.years}</span>}
                     place={p.birthPlace}
                     parents={p.parentsText}
@@ -489,6 +490,7 @@ function NoSurname({ pane }: { pane: RefObject<HTMLDivElement | null> }) {
               <PersonRow
                 key={p.id}
                 name={p.name}
+                maiden={p.maiden}
                 years={<Lifespan birth={p.birth} death={p.death} living={p.living} />}
                 place={p.birthPlace}
                 top={item.start - virtual.options.scrollMargin}
@@ -502,11 +504,19 @@ function NoSurname({ pane }: { pane: RefObject<HTMLDivElement | null> }) {
   );
 }
 
-function PersonRow({ name, years, place, parents, top, onClick }: { name: string; years: ReactNode; place: string | null; parents?: string; top: number; onClick: () => void }) {
+function PersonRow({ name, maiden, years, place, parents, top, onClick }: { name: string; maiden: string | null; years: ReactNode; place: string | null; parents?: string; top: number; onClick: () => void }) {
   return (
     <button className={`sn-grid person${parents == null ? " no-parents" : ""}`} style={{ transform: `translateY(${top}px)` }} onClick={onClick}>
-      <span className="serif ellipsis" style={{ fontSize: 15, fontWeight: 600 }}>
-        {name}
+      {/* The name keeps its room; the maiden name shrinks first (as in Osoby). */}
+      <span className="row" style={{ gap: 8, minWidth: 0 }}>
+        <span className="serif ellipsis" style={{ fontSize: 15, fontWeight: 600, flex: "0 1 auto", minWidth: 90 }}>
+          {name}
+        </span>
+        {maiden && (
+          <span className="ellipsis" style={{ fontSize: 12, color: "var(--text3)", flex: "0 8 auto", minWidth: 24 }}>
+            z d. {maiden}
+          </span>
+        )}
       </span>
       <span className="num nowrap muted">{years}</span>
       <span className="muted ellipsis" title={place ?? undefined}>

@@ -711,3 +711,20 @@
     grid-template-columns: 84px 140px minmax(0, 1fr) 132px;
   }
 }
+.relative-tools.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.relative-tools.row .icon-btn {
+  width: 30px;
+  height: 30px;
+}
+.relative-menu-question {
+  padding: 8px 12px 6px;
+  font-size: 12px;
+  color: var(--text2);
+}

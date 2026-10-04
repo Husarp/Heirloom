@@ -43,6 +43,7 @@ import { cardName, cardYears, clock, count, relativeTime } from "../../lib/forma
 import { openUrl, pickFiles } from "../../lib/native";
 import { Lightbox } from "../media/Lightbox";
 import { runEdit } from "../media/shared";
+import { RelativeTools } from "./RelativeTools";
 import { SectionEditButton, SectionFoot, useSection, type SectionEdit } from "./sectionEdit";
 import type { Profile, TextItem } from "./types";
 
@@ -293,7 +294,8 @@ export function FamilySection({ data }: Props) {
   const setAsk = useStore((s) => s.setAsk);
   const editing = useEditing();
   const sec = useSection(`${data.person.id}:family`, "Rodzina");
-  const { data: relations } = useApi<Relation[]>(sec.open ? "person.relations" : null, { id: data.person.id });
+  // In edit mode every relative has its tools (the same as under the tree's cards); using one opens the section.
+  const { data: relations } = useApi<Relation[]>(editing ? "person.relations" : null, { id: data.person.id });
   const [adding, setAdding] = useState(false);
   useEffect(() => {
     if (!sec.open) setAdding(false);
@@ -315,7 +317,7 @@ export function FamilySection({ data }: Props) {
         {
           label: "Usuń relację",
           kind: "danger",
-          run: () => run(() => (r.role === "associate" ? call("relation.dissociate", { person: data.person.id, other: r.id }) : call("relation.remove", { person: data.person.id, other: r.id }))),
+          run: () => run(() => call("relation.dissociate", { person: data.person.id, other: r.id })),
         },
       ],
     });
@@ -329,9 +331,9 @@ export function FamilySection({ data }: Props) {
           <span className="label-caps" style={{ fontSize: 12 }}>
             {g.title}
           </span>
-          <div className={`family-grid${sec.open ? " editing" : ""}`}>
+          <div className={`family-grid${editing ? " editing" : ""}`}>
             {g.people.map((r) => {
-              const rel = sec.open ? relations?.find((x) => x.id === r.id && x.role !== "associate") : undefined;
+              const rel = editing ? relations?.find((x) => x.id === r.id && x.role !== "associate") : undefined;
               return (
                 <div key={r.id} className="family-tile" style={{ boxShadow: `inset 0 3px 0 -1px var(--b${r.branch})` }}>
                   <button className="row family-tile-main" onClick={() => go({ name: "person", id: r.id })}>
@@ -345,14 +347,18 @@ export function FamilySection({ data }: Props) {
                       </span>
                     </span>
                   </button>
-                  {rel && (
-                    <span className="row family-tile-tools">
-                      <RelationChip relation={rel} personId={data.person.id} run={run} />
-                      <span className="grow" />
-                      <button className="icon-btn" title="Usuń relację" aria-label={`Usuń relację z: ${rel.name}`} onClick={() => remove(rel)}>
-                        <Trash2 size={14} />
-                      </button>
-                    </span>
+                  {rel && rel.role !== "associate" && (
+                    <RelativeTools
+                      variant="row"
+                      of={data.person}
+                      relative={rel}
+                      kind={rel.role}
+                      family={rel.family}
+                      pedi={rel.pedi}
+                      // „ojciec (adopcja)” already says the kind; otherwise it is added („córka · przybrana”).
+                      chip={rel.pedi && rel.pedi !== "birth" && !rel.label.includes("(") ? `${rel.label} · ${rel.detail}` : rel.label}
+                      guard={(then) => sec.start(then)}
+                    />
                   )}
                 </div>
               );
@@ -412,43 +418,18 @@ const ASSO_TYPES: { role: string; label: string; icon: ReactNode; phrase?: strin
   { role: "OTHER", label: "narzeczony / narzeczona", icon: <Gem size={14} />, phrase: "narzeczony" },
 ];
 
-/** The kind of a relation, changeable where the file can record it: a child's link to its parents (biological,
- *  adopted, foster, unknown) and a relation outside the family. */
+/** The kind of a relation outside the family, changeable (the family's own are changed with `RelativeTools`). */
 function RelationChip({ relation: r, personId, run }: { relation: Relation; personId: string; run: (fn: () => Promise<unknown>) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
-  const text = r.role === "associate" ? r.label : r.detail || r.label;
-  const canChangeKind = (r.role === "parent" || r.role === "child") && !!r.family;
-  const changeable = canChangeKind || r.role === "associate";
-  const setPedi = (pedi: string) => {
-    const child = r.role === "child" ? r.id : personId;
-    run(() => call("relation.setPedigree", { child, family: r.family, pedi }));
-    setOpen(false);
-  };
-  // A kind that can't be changed is already in the line above (siostra przyrodnia, ślub 1932).
-  if (!text || !changeable) return null;
+  if (!r.label) return null;
   return (
     <div ref={ref} style={{ position: "relative", minWidth: 0 }}>
-      <button className="relation-chip" style={open ? { borderColor: "var(--accent)" } : undefined} onClick={() => setOpen((o) => !o)} disabled={!changeable} aria-haspopup={changeable ? "menu" : undefined}>
-        <span className="ellipsis">{text}</span>
-        {changeable && <ChevronDown size={12} />}
+      <button className="relation-chip" style={open ? { borderColor: "var(--accent)" } : undefined} onClick={() => setOpen((o) => !o)} aria-haspopup="menu">
+        <span className="ellipsis">{r.label}</span>
+        <ChevronDown size={12} />
       </button>
-      {open && canChangeKind && (
-        <div className="popover" style={{ left: 0, top: 32, width: 220, padding: "4px 0", fontSize: 13 }}>
-          <div className="menu-label">Rodzaj więzi</div>
-          {[
-            ["birth", "biologiczny"],
-            ["adopted", "adoptowany"],
-            ["foster", "przybrany"],
-            ["unknown", "nieznany"],
-          ].map(([value, label]) => (
-            <button key={value} className={`menu-item${r.pedi === value ? " on" : ""}`} onClick={() => setPedi(value)}>
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
-      {open && r.role === "associate" && (
+      {open && (
         <div className="popover" style={{ left: 0, top: 32, width: 260, padding: "4px 0", fontSize: 13 }}>
           <div className="menu-label">Spoza rodziny</div>
           {ASSO_TYPES.map((t) => (

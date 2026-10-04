@@ -7,9 +7,11 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffec
 import type { TreeCamera } from "../../app/store";
 import { Avatar, CardYears } from "../../components/bits";
 import { cardName, cardYears } from "../../lib/format";
+import { RelativeTools } from "../person/RelativeTools";
 import { cameraOf, viewOf, type Camera2D } from "./camera";
 import type { Graph, GraphPerson } from "./graph";
 import { CARD_H, CARD_W, type Scene, type SceneCard } from "./layout";
+import { fitName, forgetNameWidths, nameWidth } from "./nameFit";
 
 export type Lod = 1 | 2 | 3 | 4;
 
@@ -70,8 +72,12 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
   onRestored?: () => void;
   /** The camera moved (to remember the place). */
   onCamera?: () => void;
+  /** Edit mode: the tools under the relatives' cards, under all of them (`all`, Rodzina) or the chosen one's. */
+  tools?: "all" | "selected" | null;
+  /** A relative was unlinked or deleted with those tools. */
+  onGone?: (id: string) => void;
 }>(function FocusCanvas(props, ref) {
-  const { scene, graph, selected, style, hidden, animate, onSelect, onOpen, onHover, onPill, onBox, onZoom, focusId, photos, anchor, restore, onRestored, onCamera } = props;
+  const { scene, graph, selected, style, hidden, animate, onSelect, onOpen, onHover, onPill, onBox, onZoom, focusId, photos, anchor, restore, onRestored, onCamera, tools, onGone } = props;
   const host = useRef<HTMLDivElement>(null);
   const [camera, setCamera] = useState<Camera2D>({ x: 0, y: 0, zoom: 1 });
   const [lod, setLod] = useState<Lod>(1);
@@ -79,6 +85,14 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
   const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const cameraRef = useRef(camera);
   cameraRef.current = camera;
+  // The card names are fitted to the measured width of their font, so once it has loaded they are fitted again.
+  const [, setFontReady] = useState(false);
+  useEffect(() => {
+    document.fonts?.load('600 15px "Newsreader Variable"').then(() => {
+      forgetNameWidths();
+      setFontReady(true);
+    });
+  }, []);
 
   const apply = useCallback(
     (next: Camera2D, withAnimation = false) => {
@@ -213,7 +227,7 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
     // The keys (arrows, Enter…) go to the tree after a click in it.
     host.current?.focus({ preventScroll: true });
     // Only the left button pans and deselects (the mouse's back button goes back, nothing more).
-    if (e.button !== 0 || (e.target as HTMLElement).closest("button, .tree-card")) return;
+    if (e.button !== 0 || (e.target as HTMLElement).closest("button, .tree-card, .tree-strip, .relative-menu")) return;
     drag.current = { x: e.clientX, y: e.clientY, moved: false };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
@@ -275,8 +289,8 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
         </svg>
         {lod <= 2 &&
           scene.labels.map((l) => (
-            <span key={l.key} className={`tree-label${l.accent ? " accent" : ""}`} style={{ left: l.x, top: l.y }}>
-              {l.key === "focus-label" && scene.cards.find((c) => c.focus && c.id !== focusId) ? "" : l.text}
+            <span key={l.key} className="tree-label" style={{ left: l.x, top: l.y }}>
+              {l.text}
             </span>
           ))}
         {lod <= 2 &&
@@ -309,6 +323,27 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
               {p.label}
             </button>
           ))}
+        {lod === 1 &&
+          tools &&
+          scene.cards.map((c) => {
+            const p = graph.people[c.id];
+            const of = c.rel && graph.people[c.rel.of];
+            if (!c.rel || !p || !of || c.stub || (tools === "selected" && selected !== c.id)) return null;
+            const [parent, child] = c.rel.kind === "parent" ? [c.id, c.rel.of] : [c.rel.of, c.id];
+            const union = c.rel.kind === "parent" || c.rel.kind === "child" ? graph.unions.find((u) => u.partners.includes(parent) && u.children.some((k) => k.id === child)) : undefined;
+            // Under the card, or beside it at the top where the next card is too close below (Przodkowie's last column).
+            const w = c.w ?? CARD_W;
+            const side = scene.cards.some((o) => o !== c && o.y > c.y && o.y < c.y + CARD_H + 30 && o.x < c.x + w && o.x + (o.w ?? CARD_W) > c.x);
+            return (
+              <div
+                key={`tools-${c.id}`}
+                className={`tree-strip${side ? " side" : ""}`}
+                style={{ transform: side ? `translate(${c.x + w - 1}px, ${c.y - 3}px)` : `translate(${c.x}px, ${c.y + CARD_H - 1}px)`, transition: animate ? "transform 280ms ease, opacity 200ms" : undefined, opacity: style.dimmed(c.id) ? 0.35 : 1 }}
+              >
+                <RelativeTools variant="strip" of={of} relative={p} kind={c.rel.kind} family={union?.id} pedi={union?.children.find((k) => k.id === child)?.pedi} onGone={onGone} />
+              </div>
+            );
+          })}
       </div>
     </div>
   );
@@ -397,12 +432,17 @@ function Card({
       </div>
     );
   }
+  const name = cardName(p);
+  // The room left of the padding, border and photo (`.tree-card.full`, selected), less 2 px for rounding.
+  const fit = fitName(name, card.w ? card.w - 23 : CARD_W - 79, card.w ? 14 : 15, nameWidth);
   return (
     <div className={`tree-card full${selected ? " selected" : ""}${card.focus ? " focus" : ""}${card.w ? " narrow" : ""}`} style={base} {...events}>
       <span className="stripe" style={{ background: branchColor }} />
       {!card.w && <Avatar initials={p.initials} branch={color ?? undefined} photo={photos ? p.photo : null} size={40} tint={22} />}
       <span className="card-text">
-        <span className="card-name">{cardName(p)}</span>
+        <span className={`card-name${fit.lines === 2 ? " two" : ""}`} style={{ fontSize: fit.size }} title={fit.cut ? name : undefined}>
+          {name}
+        </span>
         {card.sub && <span className="card-sub">{card.sub}</span>}
         <span className="card-meta">
           {dates}

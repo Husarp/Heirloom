@@ -419,6 +419,15 @@ This is the roadmap, with a checkbox per task.
 - [x] **Tree: the zoom buttons in one row** (done 2026-10-03, 0.4.1): in Rodzina, Przodkowie and Potomkowie the zoom
       was a column in the bottom-left corner that stuck up over the cards; now it is a row at the bottom right, as
       high as the line legend, the same as in Całe drzewo (which also gets „Dopasuj do ekranu”)
+- [x] **Maiden names wherever a married woman's name stands alone** (your note from testing 0.4.1; done 2026-10-04,
+      0.4.2): „z d. …” under the name in the side panel and on the profile, after every relative's name in the side
+      panel, in the Nazwiska lists and the Osoby photo grid; the tree cards keep their short „z d.” line
+- [x] **Long names on the tree cards** (your note from testing 0.4.1; done 2026-10-04, 0.4.2): the font shrinks to
+      13 px, then the name takes two lines down to 11.5 px, and only then it is cut with the whole name on hover;
+      the cards keep their size (also the narrow sibling cards and Całe drzewo). „Osoba w centrum” is gone
+- [x] **Changing and removing relatives** (your note from testing 0.4.1; done 2026-10-04, 0.4.2): in edit mode each
+      relative's tree card has a strip under it (edit, „Zmień pokrewieństwo”, „Odłącz”, „Usuń osobę z archiwum…”),
+      and the profile's Rodzina tiles the same; „Odłącz” says exactly what will change; all undoable
 - [x] **Your idea: how the archive stores its data** — decided 2026-09-29: it stays one file. Now: one `rodzina.ged` (GEDCOM 7, all
       people, families, sources, texts) + `media/` (photos, PDFs) + `zrodla-ai/` (the AI answers as they came) +
       `.heirloom/` (settings, change history, backup copies); „Zapisz import” writes the batch into `rodzina.ged` at
