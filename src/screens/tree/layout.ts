@@ -339,8 +339,12 @@ export function layoutFamily(graph: Graph, focusId: string, options: { editing: 
 
   // Row +1: the children of each union, centred under it, pushed apart where they would overlap.
   const groups: { key: string; fromX: number; fromY: number; parents: string[]; kids: string[] }[] = [];
+  // A child listed in two of the person's unions (archives opened together, before both mothers are linked) is
+  // drawn once, under the first.
+  const claimed = new Set<string>();
   for (const u of graph.unions.filter((u) => u.partners.includes(focusId))) {
-    const kids = childrenOf(graph, u).filter((id) => !placed.has(id));
+    const kids = childrenOf(graph, u).filter((id) => !placed.has(id) && !claimed.has(id));
+    for (const id of kids) claimed.add(id);
     if (!kids.length) continue;
     const other = u.partners.find((x) => x !== focusId && placed.has(x));
     const marker = other ? unions.find((m) => m.people.includes(focusId) && m.people.includes(other)) : undefined;

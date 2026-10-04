@@ -54,6 +54,15 @@
   --b11: #8c3b3b;
   --b12: #5e7f5b;
 
+  /* Archives opened together (a set): each archive's colour, taken from the branch colours so the tree's „Koloruj
+     wg: archiwum” and the badges agree (bits.tsx ARCH_BRANCH). Follows the theme through the --b tokens. */
+  --arch1: var(--b5);
+  --arch2: var(--b9);
+  --arch3: var(--b3);
+  --arch4: var(--b6);
+  --arch5: var(--b7);
+  --arch6: var(--b10);
+
   --f-serif: "Newsreader Variable", Georgia, serif;
   --f-sans: "IBM Plex Sans", system-ui, sans-serif;
   --f-mono: Consolas, ui-monospace, monospace;

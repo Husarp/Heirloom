@@ -428,6 +428,21 @@ This is the roadmap, with a checkbox per task.
 - [x] **Changing and removing relatives** (your note from testing 0.4.1; done 2026-10-04, 0.4.2): in edit mode each
       relative's tree card has a strip under it (edit, „Zmień pokrewieństwo”, „Odłącz”, „Usuń osobę z archiwum…”),
       and the profile's Rodzina tiles the same; „Odłącz” says exactly what will change; all undoable
+- [x] **„Otwórz razem…”: several archives as one tree** (your idea; decisions 1a and 2a of 2026-10-04; done
+      2026-10-04, 0.5.0): one tree, Osoby, Nazwiska, Miejsca, Ctrl K, Start and profiles for 2+ archives, each person
+      with their archive's colour; „To ta sama osoba?” suggests people to link (tak / nie / pomiń, „Połącz
+      wszystkie…” from 90%), plus „Połącz z osobą z innego archiwum…” and „Rozłącz…”; browse-only, with „Edytuj w
+      jego archiwum” in a new window; the list of archives and the links in a `.heirloom-zestaw` file next to them;
+      the archives' files are never changed
+- [x] **„Otwórz w nowym oknie”** (done 2026-10-04, 0.5.0): any archive or set in a window of its own; windows keep
+      each other's recent list and last places
+- [ ] **Check 0.5.0 on Windows** (could only be tried in a browser here): „Otwórz w nowym oknie” and „Edytuj w jego
+      archiwum” really start a second window at the right person; two windows at once (WebView2), the installer
+      with two Heirlooms running; the set's „Zmień…” save dialog; coming back to the combined window after saving in
+      the other one shows „Odświeżono: …”
+- [ ] **Later for sets** (not in 0.5.0): double-clicking a `.heirloom-zestaw` file opens Heirloom (file association
+      in the installer); the same photo in two linked archives shown once; copying a person from one archive into
+      another
 - [x] **Your idea: how the archive stores its data** — decided 2026-09-29: it stays one file. Now: one `rodzina.ged` (GEDCOM 7, all
       people, families, sources, texts) + `media/` (photos, PDFs) + `zrodla-ai/` (the AI answers as they came) +
       `.heirloom/` (settings, change history, backup copies); „Zapisz import” writes the batch into `rodzina.ged` at

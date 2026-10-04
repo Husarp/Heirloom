@@ -5,7 +5,7 @@
 import { Camera, ChevronsDown, ChevronsUp, ChevronRight, Plus } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { TreeCamera } from "../../app/store";
-import { Avatar, CardYears } from "../../components/bits";
+import { ArchiveDot, Avatar, CardYears } from "../../components/bits";
 import { cardName, cardYears } from "../../lib/format";
 import { RelativeTools } from "../person/RelativeTools";
 import { cameraOf, viewOf, type Camera2D } from "./camera";
@@ -425,6 +425,7 @@ function Card({
     return (
       <div className={`tree-card compact${selected ? " selected" : ""}`} style={base} {...events}>
         <span className="stripe" style={{ background: branchColor }} />
+        <ArchiveDot from={p.from} size={9} style={CARD_DOT} />
         <span className="compact-text">
           <span className="compact-name">{p.given || p.name}</span>
           <span className="compact-years num">{cardYears(p.birth?.year, p.death?.year, p.living)}</span>
@@ -433,11 +434,13 @@ function Card({
     );
   }
   const name = cardName(p);
-  // The room left of the padding, border and photo (`.tree-card.full`, selected), less 2 px for rounding.
-  const fit = fitName(name, card.w ? card.w - 23 : CARD_W - 79, card.w ? 14 : 15, nameWidth);
+  // The room left of the padding, border and photo (`.tree-card.full`, selected), less 2 px for rounding, and of the
+  // archive's dot in archives opened together.
+  const fit = fitName(name, (card.w ? card.w - 23 : CARD_W - 79) - (p.from ? 8 : 0), card.w ? 14 : 15, nameWidth);
   return (
     <div className={`tree-card full${selected ? " selected" : ""}${card.focus ? " focus" : ""}${card.w ? " narrow" : ""}`} style={base} {...events}>
       <span className="stripe" style={{ background: branchColor }} />
+      <ArchiveDot from={p.from} size={10} style={CARD_DOT} />
       {!card.w && <Avatar initials={p.initials} branch={color ?? undefined} photo={photos ? p.photo : null} size={40} tint={22} />}
       <span className="card-text">
         <span className={`card-name${fit.lines === 2 ? " two" : ""}`} style={{ fontSize: fit.size }} title={fit.cut ? name : undefined}>
@@ -458,6 +461,9 @@ function Card({
     </div>
   );
 }
+
+/** Archives opened together: the archive's dot in the card's top right corner. */
+const CARD_DOT: CSSProperties = { position: "absolute", top: 6, right: 6, boxShadow: "0 0 0 2px var(--card)" };
 
 export function useStableSet(values: Iterable<string>): Set<string> {
   const list = [...values].sort().join("|");

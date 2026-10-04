@@ -239,7 +239,7 @@ pub fn overview(d: &Derived, focus: Option<&str>) -> Value {
     let people: Vec<Value> = (0..n)
         .map(|i| {
             let info = &d.info[i];
-            json!([
+            let mut row = json!([
                 d.xref(i),
                 positions[i].0,
                 positions[i].1,
@@ -254,7 +254,12 @@ pub fn overview(d: &Derived, focus: Option<&str>) -> Value {
                 info.generation,
                 info.surname_branch,
                 father_and_mother(d, i),
-            ])
+            ]);
+            // Archives opened together: the archives the person comes from, last, so the indexes above stay.
+            if let (Some(from), Some(list)) = (d.from(i), row.as_array_mut()) {
+                list.push(json!(from));
+            }
+            row
         })
         .collect();
     json!({

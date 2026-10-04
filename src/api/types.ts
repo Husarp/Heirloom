@@ -5,6 +5,10 @@ export interface RecentArchive {
   name: string;
   openedAt: string;
   people: number;
+  /** A set of archives opened together („Otwórz razem…”, a `.heirloom-zestaw` file); older entries have no kind. */
+  kind?: "archive" | "set";
+  /** A set's number of archives. */
+  archives?: number;
 }
 
 export interface Appearance {
@@ -55,6 +59,36 @@ export interface ArchiveStatus {
   gedcomVersion: string | null;
   sidecar: string;
   lastSaved: string | null;
+  /** Only when archives are opened together (a set): then the status is the set's, and `readOnly` is always on. */
+  combined?: CombinedInfo;
+}
+
+/** Archives opened together („Otwórz razem…”, crates/heirloom-api/src/combined). */
+export interface CombinedInfo {
+  setPath: string;
+  archives: CombinedArchive[];
+  /** People who stand for records in more than one archive. */
+  linked: number;
+  /** Links in the set file whose people are no longer found. */
+  lost: number;
+  /** Pairs „Do sprawdzenia”; null until they were looked for (`set.pairs`). */
+  pending: number | null;
+}
+
+export interface CombinedArchive {
+  /** The archive's key in the set („a”, „b” …), the one in `PersonSummary.from` and in combined ids (`@a~I12@`). */
+  key: string;
+  id: string;
+  name: string;
+  /** 1-based: `--arch1` … */
+  colour: number;
+  state: "ok" | "missing" | "unreadable" | "other";
+  error: string | null;
+  people: number;
+  root: string | null;
+  /** The folder or .ged to open the archive by itself. */
+  path: string | null;
+  dataPath: string | null;
 }
 
 /** A name offered by „Kto edytuje?”. */
@@ -150,4 +184,6 @@ export interface PersonSummary {
   photoCount: number;
   changed: string | null;
   created: string | null;
+  /** Archives opened together: the keys of the archives the person is in (two or more for a linked person). */
+  from?: string[];
 }

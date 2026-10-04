@@ -3,6 +3,42 @@
 Format: `X.Y.Z — YYYY-MM-DD HH:MM: description`. Newest on top.
 X = major change, Y = feature / bigger change, Z = small change.
 
+## 0.5.0 — 2026-10-04 16:41: „Otwórz razem…” — several archives as one tree, „To ta sama osoba?”, new windows
+- **„Otwórz razem…”** (in the archive picker and in the sidebar's archive menu): pick two or more archives and a
+  name; Heirloom saves a **set file** next to them (`Rodzina razem.heirloom-zestaw`) and shows them as one: one tree
+  (all views, Całe drzewo too), one Osoby list, Nazwiska, Miejsca, Ctrl K, Start's numbers and the profiles. The
+  archives' files are only read, never changed. The set file holds the list of archives
+  (paths relative to it, so moving the whole family folder keeps working) and who is the same person; opening it
+  opens the view again, and the recent list shows sets with „zestaw · 2 archiwa”.
+- **Where each person comes from:** every archive has its colour; a small dot on every avatar (Osoby, the photo
+  grid, Ctrl K, Start, Miejsca, the profile's Rodzina, the tree's panel) and in the corner of the tree cards, a badge
+  with the archive's name on the profile and in the panel. A person in two archives gets both colours. The tree has
+  „Koloruj wg: archiwum” with its key (people in several archives in green).
+- **„To ta sama osoba?” („Do sprawdzenia” in the sidebar, with the count):** Heirloom looks for people of different
+  archives who are probably one person (the Import's matching: names, dates, places, parents, partners) and shows
+  one pair at a time, side by side with parents, partners and children (names on both sides marked), the percent
+  and the reasons. „Tak, to ta sama osoba” (T) makes them one person in this view and the two trees join there
+  (often the next pairs, e.g. the spouse, become near-certain); „Nie” (N) is remembered and not asked again;
+  „Pomiń” (→) leaves it for later. „Decyduje:” names who answered, saved with the link. „Połącz wszystkie…” links
+  every pair from 90% at once (two copies of the same family: 413 pairs in one click). Links whose people are gone
+  from an archive are listed under „Nie znaleziono”.
+- **On a profile in the combined view:** „Ta osoba jest w 2 archiwach” with each archive's record and „Różnice”
+  (birth or death given differently), „Rozłącz…”, and „Połącz z osobą z innego archiwum…” (search limited to the
+  other archives, then the same side-by-side check).
+- **Browse-only (decision 1a):** the combined view can't be edited — the Edycja switch is locked with a short
+  explanation, a bar under the top bar says so, Import, „Historia zmian” and the archives' settings are not offered.
+  **„Edytuj w jego archiwum”** (profile and tree panel; a menu for a person in several archives) opens that person
+  in their own archive in a new window; coming back to the combined window reads the saved archive again
+  („Odświeżono: Kowalscy (zmiany z innego okna).”).
+- **Start of a set:** „W tym zestawie” lists the archives with their colours, people and folders; an archive that
+  isn't found shows „Nie znaleziono…” here and in a bar, with „Wskaż folder…”; „Dodaj archiwum…”, „Usuń z zestawu”
+  (the archive stays on disk) and the way to „Do sprawdzenia”.
+- **„Otwórz w nowym oknie”:** every row of the recent list (archives and sets) and every archive of a set can open
+  in a window of its own (another Heirloom process). Windows no longer erase each other's recent list, last places
+  or settings: `aplikacja.json` is read again before every change.
+- **Fixes on the way:** a child listed in two of a person's families is drawn once in the tree; the hint over the
+  locked Edycja switch is no longer one cut-off line.
+
 ## 0.4.2 — 2026-10-04 15:29: Maiden names everywhere, long names fit on the tree cards, relatives changed and unlinked in place
 - **Maiden names:** a woman who took her husband's surname now shows „z d. …” wherever her name stands on its own:
   under the name in the tree's side panel and on her profile (moved up from the end of the dates line), after the

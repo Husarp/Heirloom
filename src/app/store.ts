@@ -5,6 +5,7 @@ import { create } from "zustand";
 import { call, ApiError } from "../api/transport";
 import type { AppState, ArchiveStatus, PersonSummary, SaveResult } from "../api/types";
 import { count } from "../lib/format";
+import { openInNewWindow } from "../lib/native";
 
 export type TreeView = "family" | "ancestors" | "descendants" | "overview";
 
@@ -37,7 +38,19 @@ export type Route =
   | { name: "sources"; id?: string }
   | { name: "import" }
   | { name: "settings"; section?: string }
-  | { name: "activity" };
+  | { name: "activity" }
+  /** „Do sprawdzenia”: people of archives opened together who may be the same person. */
+  | { name: "pairs" };
+
+/** The search window's options: people only, and what picking someone does (design 17e). */
+export interface PaletteOptions {
+  scope: "all" | "people";
+  pick?: (id: string) => void;
+  /** Only these people are offered (e.g. „Połącz z osobą z innego archiwum…”: people of the other archives). */
+  only?: (person: PersonSummary) => boolean;
+  /** The field's placeholder, when picking for something other than the tree. */
+  placeholder?: string;
+}
 
 /** Full-window states before an archive is ready. */
 export type Phase = "boot" | "picker" | "loading" | "firstOpen" | "ready";
@@ -109,7 +122,7 @@ interface Store {
   toasts: Toast[];
   paletteOpen: boolean;
   /** „Skocz do osoby…” is the same window, only for people, and picking someone does `pick` (design 17e). */
-  palette: { scope: "all" | "people"; pick?: (id: string) => void } | null;
+  palette: PaletteOptions | null;
   /** The last part of the breadcrumb, set by the screen (e.g. the person's name). */
   crumb: string | null;
   ask: Ask | null;
@@ -122,7 +135,14 @@ interface Store {
 
   boot: () => Promise<void>;
   refreshApp: () => Promise<void>;
+  /** An archive (folder or .ged) or a set of archives (.heirloom-zestaw). */
   openArchive: (path: string) => Promise<boolean>;
+  /** „Otwórz razem…”: writes the set file and opens the archives together. */
+  /** `replace`: the user chose this file in the save dialog, which asked before replacing it. */
+  createSet: (path: string, name: string, archives: string[], replace?: boolean) => Promise<boolean>;
+  /** „Otwórz w nowym oknie”, „Edytuj w jego archiwum”: another window with `path` (at `person`); where there are
+   *  no windows (the browser bridge), this window. */
+  openElsewhere: (path: string, person?: string) => Promise<void>;
   createArchive: (folder: string, name: string) => Promise<boolean>;
   closeArchive: () => Promise<void>;
   finishFirstOpen: () => void;
@@ -156,7 +176,7 @@ interface Store {
   closeForeignConfirm: () => void;
   notify: (text: string, options?: Omit<Toast, "id" | "text">) => void;
   dismissToast: (id: number) => void;
-  setPalette: (open: boolean, options?: { scope: "all" | "people"; pick?: (id: string) => void }) => void;
+  setPalette: (open: boolean, options?: PaletteOptions) => void;
   viewed: (person: ViewedPerson) => void;
   setCrumb: (crumb: string | null) => void;
   setAsk: (ask: Ask | null) => void;
@@ -243,6 +263,16 @@ export const useStore = create<Store>((set, get) => ({
   boot: async () => {
     const app = await call<AppState>("app.state");
     set({ app });
+    // Started for one archive or set (`--open`, a new window): that one, at the person asked for.
+    const start = await call<{ path: string; person: string | null } | null>("app.takeStart").catch(() => null);
+    if (start) {
+      if (!(await get().openArchive(start.path))) return;
+      if (start.person) {
+        set({ phase: "ready" });
+        get().go({ name: "person", id: start.person });
+      }
+      return;
+    }
     // The app opens on Start with the last archive (PLAN §11.1); if it can't be opened, the picker shows why.
     const last = app.recent[0];
     if (last && (await get().openArchive(last.path))) return;
@@ -254,38 +284,20 @@ export const useStore = create<Store>((set, get) => ({
     set({ app, archive: app.archive ?? get().archive });
   },
 
-  openArchive: async (path) => {
-    flushPlace();
-    set({ opening: path, openError: null, phase: get().phase === "boot" ? "boot" : "loading" });
-    // Known from before opening: opening puts the archive at the top of the recent list.
-    const seenBefore = get().app?.recent.some((r) => r.path === path) ?? false;
+  openArchive: (path) => opened(path, () => call<ArchiveStatus>(isSetPath(path) ? "set.open" : "archive.open", { path })),
+
+  createSet: (path, name, archives, replace = false) => opened(path, () => call<ArchiveStatus>("set.create", { path, name, archives, replace })),
+
+  openElsewhere: async (path, person) => {
     try {
-      const status = await call<ArchiveStatus>("archive.open", { path });
-      const app = await call<AppState>("app.state");
-      const firstTime = status.people > 0 && !seenBefore;
-      const [route, recentlyViewed] = await Promise.all([firstTime ? ({ name: "start" } as Route) : firstRoute(app), viewedBefore(app)]);
-      set({
-        app,
-        archive: status,
-        opening: null,
-        phase: firstTime ? "firstOpen" : "ready",
-        route,
-        back: [],
-        forward: [],
-        mode: "browse",
-        editor: null,
-        dataVersion: get().dataVersion + 1,
-        lastSaved: status.lastSaved,
-        lastSave: null,
-        section: null,
-        recentlyViewed,
-        treePlace: treePlaceOf(app),
-      });
-      return true;
+      if (await openInNewWindow(path, person)) return;
     } catch (e) {
-      set({ opening: null, openError: e as ApiError, phase: "picker" });
-      return false;
+      get().notify((e as { message?: string }).message ?? String(e), { kind: "err" });
+      return;
     }
+    if (!(await get().openArchive(path)) || !person) return;
+    set({ phase: "ready" });
+    get().go({ name: "person", id: person });
   },
 
   createArchive: async (folder, name) => {
@@ -356,6 +368,10 @@ export const useStore = create<Store>((set, get) => ({
 
   requireEdit: (action) => {
     const { mode, archive } = get();
+    if (archive?.combined) {
+      get().notify(COMBINED_READ_ONLY);
+      return;
+    }
     if (archive?.readOnly) {
       get().notify("Archiwum jest tylko do odczytu. Wyłącz to w Ustawienia › Archiwum.");
       return;
@@ -577,6 +593,65 @@ export const useStore = create<Store>((set, get) => ({
     });
   },
 }));
+
+/** Opens an archive or a set with `open` and shows it: Start, or the place where it was left. */
+async function opened(path: string, open: () => Promise<ArchiveStatus>): Promise<boolean> {
+  const get = useStore.getState;
+  const set = useStore.setState;
+  flushPlace();
+  set({ opening: path, openError: null, phase: get().phase === "boot" ? "boot" : "loading" });
+  // Known from before opening: opening puts the archive at the top of the recent list.
+  const seenBefore = get().app?.recent.some((r) => r.path === path) ?? false;
+  try {
+    const status = await open();
+    const app = await call<AppState>("app.state");
+    // „Pierwsze otwarcie” is about one archive; archives opened together go straight to Start.
+    const firstTime = status.people > 0 && !seenBefore && !status.combined;
+    const [route, recentlyViewed] = await Promise.all([firstTime ? ({ name: "start" } as Route) : firstRoute(app), viewedBefore(app)]);
+    set({
+      app,
+      archive: status,
+      opening: null,
+      phase: firstTime ? "firstOpen" : "ready",
+      route,
+      back: [],
+      forward: [],
+      mode: "browse",
+      editor: null,
+      dataVersion: get().dataVersion + 1,
+      lastSaved: status.lastSaved,
+      lastSave: null,
+      section: null,
+      recentlyViewed,
+      treePlace: treePlaceOf(app),
+    });
+    if (status.combined) lookForPairs();
+    return true;
+  } catch (e) {
+    set({ opening: null, openError: e as ApiError, phase: "picker" });
+    return false;
+  }
+}
+
+/** The pairs „Do sprawdzenia” of archives opened together, looked for once the view is on screen; the sidebar shows
+ *  how many there are. */
+export function lookForPairs() {
+  setTimeout(() => {
+    call("set.pairs")
+      .then(() => call<ArchiveStatus>("archive.status"))
+      .then((status) => {
+        if (status.combined && useStore.getState().archive?.archiveId === status.archiveId) useStore.getState().setArchive(status);
+      })
+      .catch(() => {});
+  }, 600);
+}
+
+export const COMBINED_READ_ONLY = "Archiwa otwarte razem są tylko do przeglądania. Osobę zmienisz w jej archiwum: „Edytuj w jego archiwum” na profilu.";
+
+/** A set of archives opened together, not an archive. */
+export function isSetPath(path: string): boolean {
+  return /\.heirloom-zestaw$/i.test(path.trim());
+}
 
 /** Moves on, unless a screen has unsaved form changes: then it asks first. */
 function leaving(move: () => void) {

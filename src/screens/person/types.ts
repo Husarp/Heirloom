@@ -107,8 +107,27 @@ export interface BrokenLink {
   what: string;
 }
 
+/** One archive's record of a person, in archives opened together. */
+export interface CombinedMember {
+  archive: string;
+  archiveName: string;
+  /** The archive's folder or .ged, to open it by itself. */
+  path: string;
+  /** The record's id in its own archive. */
+  id: string;
+  /** The record's id in this view (for „Rozłącz”). */
+  combinedId: string;
+  name: string;
+  years: string;
+}
+
 export interface Profile {
   brokenLinks?: BrokenLink[];
+  /** Archives opened together: the person's records in each archive and where they differ. */
+  combined?: {
+    members: CombinedMember[];
+    differences: { label: string; values: { archive: string; text: string }[] }[];
+  };
   person: PersonSummary;
   uid: string | null;
   names: { kind: string; given: string; surname: string; nickname: string | null; orig: string | null; origLang: string | null }[];

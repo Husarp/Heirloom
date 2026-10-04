@@ -1,4 +1,4 @@
-//! `heirloom-bridge [--port 1430] [--open <archive>]`
+//! `heirloom-bridge [--port 1430] [--open <archive or .heirloom-zestaw>]`
 //!
 //! Development only. Serves the same commands as the app window over HTTP on 127.0.0.1, so the UI can run in a
 //! normal browser (`npm run dev`, then http://localhost:1420). Vite forwards `/api` and `/media` here.
@@ -22,7 +22,7 @@ fn main() {
     let dir = std::env::temp_dir().join("heirloom-bridge");
     let mut api = Api::new(Some(dir.join("config")), Some(dir.join("cache")));
     if let Some(path) = open {
-        if let Err(e) = api.call("archive.open", json!({ "path": path })) {
+        if let Err(e) = api.open_path(&path) {
             eprintln!("could not open {path}: {}", e.message);
         }
     }

@@ -5,7 +5,7 @@ import type { ArchiveStatus } from "../../api/types";
 import { rememberPlace, useStore, type TreeCamera, type TreeRoute } from "../../app/store";
 import { useApi } from "../../app/useApi";
 import { useDark } from "../../app/useAppearance";
-import { Dropdown, Segmented, Spinner } from "../../components/bits";
+import { ArchiveDot, archBranch, Dropdown, Segmented, Spinner, useArchives } from "../../components/bits";
 import { people as peopleCount } from "../../lib/format";
 import { FocusCanvas, type FocusCanvasHandle } from "./FocusCanvas";
 import { SIDE, sideColors } from "./colors";
@@ -16,7 +16,7 @@ import { SidePanel } from "./SidePanel";
 import "./tree.css";
 
 type View = "family" | "ancestors" | "descendants" | "overview";
-type ColorMode = "branch" | "surname" | "side" | "generation" | "none";
+type ColorMode = "branch" | "surname" | "side" | "generation" | "archive" | "none";
 
 const DEPTH: Record<Exclude<View, "overview">, { up: number; down: number }> = {
   family: { up: 1, down: 1 },
@@ -44,7 +44,16 @@ export function Tree({ hidden }: { hidden: boolean }) {
   const [panelOpen, setPanelOpen] = useState(true);
   const [hovered, setHovered] = useState<string | null>(null);
   const display = (archive?.display ?? {}) as Record<string, unknown>;
-  const [colorMode, setColorMode] = useState<ColorMode>(((display.treeColor as ColorMode) ?? "branch"));
+  const combined = archive?.combined != null;
+  const archives = useArchives();
+  const [chosenColor, setColorMode] = useState<ColorMode>(((display.treeColor as ColorMode) ?? "branch"));
+  // „archiwum” is only for archives opened together.
+  const colorMode: ColorMode = chosenColor === "archive" && !combined ? "branch" : chosenColor;
+  /** Archives opened together: the archive's colour, or the accent's green for a person in several of them. */
+  const archiveColor = useCallback(
+    (from: string[] | undefined) => (!from?.length ? null : from.length > 1 ? LINKED : archBranch(archives.get(from[0])?.colour ?? 1)),
+    [archives],
+  );
   const [lineOn, setLineOn] = useState(true);
   const [photos, setPhotos] = useState((display.cardStyle as string) !== "plain");
   // Changed in Ustawienia while the tree stays mounted in the background.
@@ -152,11 +161,13 @@ export function Tree({ hidden }: { hidden: boolean }) {
           return sides?.get(p.id) ?? null;
         case "surname":
           return p.surnameBranch;
+        case "archive":
+          return archiveColor(p.from);
         default:
           return p.branch;
       }
     },
-    [colorMode, sides],
+    [colorMode, sides, archiveColor],
   );
 
   const highlighted = useMemo(() => {
@@ -321,6 +332,8 @@ export function Tree({ hidden }: { hidden: boolean }) {
   };
 
   const saveDisplay = (key: string, value: string) => {
+    // Archives opened together are only read: the choice lasts while they are open.
+    if (combined) return;
     call<ArchiveStatus>("archive.setSettings", { display: { [key]: value } })
       .then((status) => useStore.getState().setArchive(status))
       .catch(() => {});
@@ -351,11 +364,13 @@ export function Tree({ hidden }: { hidden: boolean }) {
           return overviewSides?.get(index) ?? 0;
         case "surname":
           return p[12];
+        case "archive":
+          return archiveColor(p[14]) ?? 0;
         default:
           return p[3];
       }
     },
-    [overviewData, colorMode, overviewSides],
+    [overviewData, colorMode, overviewSides, archiveColor],
   );
 
   const showPanel = panelOpen && selected;
@@ -461,6 +476,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
               { value: "surname", label: "nazwisko", note: "noszone teraz (żona w kolorze męża)" },
               { value: "side", label: "strona ojca–matki", note: view === "overview" ? "względem wybranej osoby" : view === "descendants" ? "tu tylko osoba w centrum" : "względem osoby w centrum" },
               { value: "generation", label: "pokolenie" },
+              ...(combined ? [{ value: "archive" as const, label: "archiwum", note: "skąd jest osoba; w kilku: zielony" }] : []),
               { value: "none", label: "brak" },
             ]}
           />
@@ -509,6 +525,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
           </>
         )}
         {colorMode === "side" && (view === "overview" ? overviewData : scene) && <SideKey view={view} />}
+        {colorMode === "archive" && (view === "overview" ? overviewData : scene) && <ArchiveKey overview={view === "overview"} />}
       </div>
       {showPanel && selected && (
         <SidePanel
@@ -535,6 +552,17 @@ export function Tree({ hidden }: { hidden: boolean }) {
 
 /** The suggested central person (archive.firstOpen: the one with the most links first), other than `except`. */
 async function suggested(except?: string | null): Promise<{ id: string; name: string } | undefined> {
+  if (useStore.getState().archive?.combined) {
+    // Archives opened together have no „Pierwsze otwarcie”: the one with the most parents and children, from the map.
+    const d = await call<OverviewData>("tree.overview");
+    const links = d.people.map((p) => p[13].filter((x) => x != null).length);
+    d.people.forEach((p) => p[13].forEach((parent) => parent != null && links[parent]++));
+    let best = -1;
+    d.people.forEach((p, i) => {
+      if (p[0] !== except && (best < 0 || links[i] > links[best])) best = i;
+    });
+    return best < 0 ? undefined : { id: d.people[best][0], name: `${d.people[best][4]} ${d.people[best][5]}`.trim() };
+  }
   const d = await call<{ suggestions: { person: { id: string; name: string } }[] }>("archive.firstOpen");
   return d.suggestions.find((s) => s.person.id !== except)?.person;
 }
@@ -598,6 +626,28 @@ function JumpBox({ onPick }: { onPick: (id: string) => void }) {
         Skocz do osoby…
       </span>
     </button>
+  );
+}
+
+/** „Koloruj wg: archiwum”: a person in several archives is one colour of its own. */
+const LINKED = 2;
+
+/** The key for „Koloruj wg: archiwum”, where the side key goes. */
+function ArchiveKey({ overview }: { overview: boolean }) {
+  const archives = [...useArchives().values()];
+  return (
+    <div className={`tree-legend side-key${overview ? " overview" : ""}`}>
+      <span className="label-caps">Archiwum</span>
+      {archives.map((a) => (
+        <span key={a.key} className="item">
+          <ArchiveDot from={[a.key]} size={10} style={{ boxShadow: "none" }} />
+          {a.name}
+        </span>
+      ))}
+      <span className="item">
+        <span style={{ width: 10, height: 10, borderRadius: "50%", background: `var(--b${LINKED})`, flex: "none" }} />w kilku archiwach
+      </span>
+    </div>
   );
 }
 

@@ -1,4 +1,4 @@
-import { Check, Lock, LockOpen, Pencil, Save, Undo2 } from "lucide-react";
+import { Check, Layers, Lock, LockOpen, Pencil, Save, TriangleAlert, Undo2 } from "lucide-react";
 import { call } from "../api/transport";
 import type { ArchiveStatus } from "../api/types";
 import { useStore } from "../app/store";
@@ -112,5 +112,43 @@ export function ReadOnlyBar() {
         Wyłącz
       </button>
     </div>
+  );
+}
+
+/** Archives opened together (decision 1a): only for browsing, said once under the top bar, with the archives that
+ *  couldn't be opened. */
+export function CombinedBar() {
+  const combined = useStore((s) => s.archive?.combined);
+  const go = useStore((s) => s.go);
+  const onStart = useStore((s) => s.route.name === "start");
+  if (!combined) return null;
+  const missing = combined.archives.filter((a) => a.state !== "ok");
+  return (
+    <>
+      <div className="readonly-bar">
+        <Layers size={15} color="var(--text2)" style={{ flex: "none" }} />
+        <span className="grow">
+          {count(combined.archives.length, "archiwum", "archiwa", "archiwów")} otwarte razem — tylko do przeglądania.{" "}
+          <span style={{ color: "var(--text2)" }}>Pliki zostają nietknięte; osobę zmienisz w jej archiwum.</span>
+        </span>
+      </div>
+      {missing.map((a) => (
+        <div key={a.key} className="readonly-bar warn-bar">
+          <TriangleAlert size={15} color="var(--warn)" style={{ flex: "none" }} />
+          <span className="grow">
+            {a.state === "missing"
+              ? `Nie znaleziono archiwum „${a.name}”${a.path ? ` (${displayPath(a.path)})` : ""}. Jego osób nie widać.`
+              : a.state === "other"
+                ? `Archiwum „${a.name}” ma inny identyfikator niż zapisany w zestawie — to może być inne archiwum.`
+                : `Nie udało się odczytać archiwum „${a.name}”${a.error ? `: ${a.error}` : "."}`}
+          </span>
+          {!onStart && (
+            <button className="btn secondary" style={{ height: 32 }} onClick={() => go({ name: "start" })}>
+              Pokaż na Starcie
+            </button>
+          )}
+        </div>
+      ))}
+    </>
   );
 }

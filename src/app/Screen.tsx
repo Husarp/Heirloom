@@ -14,6 +14,7 @@ import { Media } from "../screens/media/Media";
 import { MissingFiles } from "../screens/media/MissingFiles";
 import { Sources } from "../screens/sources/Sources";
 import { Settings } from "../screens/settings/Settings";
+import { Pairs } from "../screens/pairs/Pairs";
 
 /** The screen for the current route. The tree is created on first visit and then kept (hidden and idle) so
  *  coming back is instant (PLAN §11.1). */
@@ -56,6 +57,8 @@ export function Screen() {
         return <Sources selected={route.id} />;
       case "settings":
         return <Settings section={route.section} />;
+      case "pairs":
+        return <Pairs />;
       default:
         return null;
     }

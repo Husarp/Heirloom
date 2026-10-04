@@ -109,6 +109,7 @@ const EMPTY_FILTERS: Filters = { query: "", living: "all", hasPhoto: false, noBi
 
 /** Osoby (spec §4.9): a virtualised table with fixed 40 px rows, filters, grouping, columns, A–Z and a photo grid. */
 export function People() {
+  const combined = useStore((s) => s.archive?.combined != null);
   const { data } = useApi<ListData>("people.list");
   const archive = useStore((s) => s.archive);
   const go = useStore((s) => s.go);
@@ -390,7 +391,8 @@ export function People() {
           onPick={(key) => setFilters({ ...filters, surnames: [...new Set([...filters.surnames, key])] })}
         />
         <span className="grow" />
-        <SurnameOptions marriedWomen={marriedWomen} maidenStyle={maidenStyle} />
+        {/* Archives opened together are only read: their display settings stay as the first archive has them. */}
+        {!combined && <SurnameOptions marriedWomen={marriedWomen} maidenStyle={maidenStyle} />}
         <GroupPicker value={groupBy} onChange={setGroupBy} />
         <SavedFilters filters={filters} onApply={setFilters} />
       </div>
@@ -442,7 +444,7 @@ export function People() {
                   const p = row.person!;
                   return (
                     <div key={row.key} className="people-row person" style={{ ...style, gridTemplateColumns: template }} {...rowButton(() => go({ name: "person", id: p.id }))}>
-                      <Avatar initials={p.initials} branch={p.branch} photo={p.photo} size={28} />
+                      <Avatar initials={p.initials} branch={p.branch} photo={p.photo} size={28} from={p.from} />
                       <span className="row" style={{ gap: 8, minWidth: 0 }}>
                         {/* The name keeps its room; the maiden name and the badge shrink first. */}
                         <span className="serif ellipsis" style={{ fontSize: 15, fontWeight: 600, flex: "0 1 auto", minWidth: 90 }}>
@@ -792,7 +794,7 @@ function PhotoGrid({ people }: { people: PersonSummary[] }) {
       <div className="people-grid">
         {list.map((p) => (
           <button key={p.id} className="people-card" onClick={() => go({ name: "person", id: p.id })}>
-            <Avatar initials={p.initials} branch={p.branch} photo={p.photo} size={96} tint={22} />
+            <Avatar initials={p.initials} branch={p.branch} photo={p.photo} size={96} tint={22} from={p.from} />
             <span className="serif ellipsis" style={{ fontSize: 15, fontWeight: 600, maxWidth: "100%" }}>
               {p.name}
             </span>
