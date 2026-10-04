@@ -86,7 +86,7 @@ interface Card {
 }
 
 // † and · for the years on cards (design v2, A9).
-const CHARS = [["a", "z"], ["A", "Z"], ["0", "9"], " ąćęłńóśźżĄĆĘŁŃÓŚŹŻéüöäÉÜÖÄ–-.,()?„”'/&†·"];
+const CHARS = [["a", "z"], ["A", "Z"], ["0", "9"], " ąćęłńóśźżĄĆĘŁŃÓŚŹŻéüöäÉÜÖÄ–-.,()?„”'/&†·…"];
 
 export const OverviewCanvas = forwardRef<OverviewHandle, {
   data: OverviewData;
@@ -398,9 +398,13 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
             // „Józef KOWALSKI”, „1878 † 1951” (design v2, A9).
             c.name.text = `${p[4]} ${p[5].toLocaleUpperCase("pl-PL")}`.trim();
             c.years.text = cardYears(p[6], p[7], !!p[10]);
+            // A long name gets smaller down to 12 px and is cut with „…” only below that (as in nameFit.ts).
             const maxName = CARD_W - 24;
             c.name.scale.set(1);
-            if (c.name.width > maxName) c.name.scale.set(maxName / c.name.width);
+            const wide = c.name.width;
+            if (wide > maxName) c.name.scale.set(Math.max(maxName / wide, 0.8));
+            // Cut by the share that fits rather than measuring shorter and shorter tries.
+            if (wide * 0.8 > maxName) c.name.text = `${c.name.text.slice(0, Math.floor((c.name.text.length * maxName) / (wide * 0.8)) - 2).trimEnd()}…`;
             shown.set(i, c);
           }
         }

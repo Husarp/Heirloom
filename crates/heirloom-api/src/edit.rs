@@ -126,6 +126,10 @@ fn prepare(s: &mut Session) -> Result<(), ApiError> {
 }
 
 pub fn call(s: &mut Session, method: &str, args: &Value) -> ApiResult {
+    // Only reads: it says what „Odłącz” would change, before anything is changed.
+    if method == "relation.unlinkPreview" {
+        return unlink_preview(s, args);
+    }
     prepare(s)?;
     match method {
         "person.create" => create_person(s, args),
@@ -134,6 +138,7 @@ pub fn call(s: &mut Session, method: &str, args: &Value) -> ApiResult {
         "person.removeBrokenLink" => remove_broken_link(s, args),
         "relation.add" => add_relation(s, args),
         "relation.remove" => remove_relation(s, args),
+        "relation.change" => change_relation(s, args),
         "relation.setPedigree" => set_pedigree(s, args),
         "relation.associate" => associate(s, args),
         "relation.dissociate" => dissociate(s, args),
@@ -721,14 +726,18 @@ pub(crate) fn link(changes: &mut Changes, kind: &str, person: &str, other: &str,
     match kind {
         "parent" => {
             // Into a family the person is already a child of, if the parent's place there is free.
+            let mut joined = false;
             for fam in pointers(changes, person, "FAMC") {
                 if changes.exists(&fam) && add_partner_to_family(changes, &fam, other)? {
-                    return Ok(());
+                    joined = true;
+                    break;
                 }
             }
-            let fam = new_family(changes);
-            add_partner_to_family(changes, &fam, other)?;
-            add_child_to_family(changes, &fam, person, pedi)?;
+            if !joined {
+                let fam = new_family(changes);
+                add_partner_to_family(changes, &fam, other)?;
+                add_child_to_family(changes, &fam, person, pedi)?;
+            }
         }
         "partner" => {
             let shared = pointers(changes, person, "FAMS").into_iter().find(|f| pointers(changes, other, "FAMS").contains(f));
@@ -804,7 +813,34 @@ pub(crate) fn link(changes: &mut Changes, kind: &str, person: &str, other: &str,
         }
         _ => return Err(ApiError::bad_args("kind")),
     }
+    // A new parent–child link may close a circle (a grandson as his grandfather's father): refused. The archive had
+    // none before, so a new one would run through one of the two people just linked.
+    if is_own_ancestor(changes, person) || is_own_ancestor(changes, other) {
+        return Err(ApiError::new("bad_args", "Tak się nie da: ktoś byłby wtedy swoim własnym przodkiem (np. dziadek dzieckiem własnego wnuka)."));
+    }
     Ok(())
+}
+
+/// Whether `xref` is among their own ancestors (through the families in this command's state of the records).
+fn is_own_ancestor(changes: &Changes, xref: &str) -> bool {
+    let mut seen: Vec<String> = Vec::new();
+    let mut queue = vec![xref.to_string()];
+    while let Some(at) = queue.pop() {
+        let Some(indi) = changes.peek(&at) else { continue };
+        for fam in indi.children.iter().filter(|c| c.tag == "FAMC").filter_map(Node::pointer) {
+            let Some(family) = changes.peek(fam) else { continue };
+            for parent in family.children.iter().filter(|c| c.tag == "HUSB" || c.tag == "WIFE").filter_map(Node::pointer) {
+                if parent == xref {
+                    return true;
+                }
+                if !seen.iter().any(|x| x == parent) {
+                    seen.push(parent.to_string());
+                    queue.push(parent.to_string());
+                }
+            }
+        }
+    }
+    false
 }
 
 fn add_relation(s: &mut Session, args: &Value) -> ApiResult {
@@ -821,44 +857,126 @@ fn add_relation(s: &mut Session, args: &Value) -> ApiResult {
     Ok(Value::Null)
 }
 
-/// Removes the direct link between two people (parent, child, partner or sibling).
+/// One family `other` leaves when it is unlinked from `person` (for the sentence that says so).
+pub(crate) struct Leaving {
+    /// They were a child in it (else a partner).
+    as_child: bool,
+    /// The family's partners and children besides `other`.
+    partners: Vec<String>,
+    children: Vec<String>,
+}
+
+/// The families that tie `other` to `person` directly: the ones both are in, or, for half-siblings, the family of
+/// `other` with the parent they share.
+fn shared_families(changes: &Changes, person: &str, other: &str) -> Vec<String> {
+    let members = |fam: &str| -> Vec<(String, String)> {
+        changes.peek(fam).map(|f| f.children.iter().filter(|c| matches!(c.tag.as_str(), "HUSB" | "WIFE" | "CHIL")).filter_map(|c| Some((c.tag.clone(), c.pointer()?.to_string()))).collect()).unwrap_or_default()
+    };
+    let families = |xref: &str, tags: &[&str]| -> Vec<String> {
+        changes.peek(xref).map(|n| n.children.iter().filter(|c| tags.contains(&c.tag.as_str())).filter_map(|c| c.pointer().map(str::to_string)).collect()).unwrap_or_default()
+    };
+    let both: Vec<String> = families(other, &["FAMC", "FAMS"]).into_iter().filter(|f| changes.exists(f) && members(f).iter().any(|(_, x)| x == person) && members(f).iter().any(|(_, x)| x == other)).collect();
+    if !both.is_empty() {
+        return both;
+    }
+    let parents: Vec<String> = families(person, &["FAMC"]).iter().flat_map(|f| members(f)).filter(|(tag, _)| tag != "CHIL").map(|(_, x)| x).collect();
+    families(other, &["FAMC"]).into_iter().filter(|f| members(f).iter().any(|(tag, x)| tag != "CHIL" && parents.contains(x))).collect()
+}
+
+/// Unlinks `other` from `person`: `other` leaves the family that ties them (as its child or as its partner) and
+/// everyone else's links stay. A family left with fewer than two people goes (GEDCOM keeps no empty FAM).
+fn unlink(changes: &mut Changes, person: &str, other: &str) -> Result<Vec<Leaving>, ApiError> {
+    if person == other {
+        return Err(ApiError::new("bad_args", "Osoba nie może być swoim własnym krewnym."));
+    }
+    let families = shared_families(changes, person, other);
+    if families.is_empty() {
+        return Err(ApiError::new("not_found", "Te osoby nie są bezpośrednio powiązane."));
+    }
+    let mut out = Vec::new();
+    for fam in families {
+        let family = changes.peek(&fam).cloned().ok_or_else(|| ApiError::bad_args("family"))?;
+        let Some(role) = family.children.iter().find(|c| c.pointer() == Some(other)).map(|c| c.tag.clone()) else { continue };
+        let list = |child: bool| -> Vec<String> {
+            family.children.iter().filter(|c| (c.tag == "CHIL") == child && matches!(c.tag.as_str(), "HUSB" | "WIFE" | "CHIL")).filter_map(Node::pointer).filter(|x| *x != other && *x != "@VOID@").map(str::to_string).collect()
+        };
+        out.push(Leaving { as_child: role == "CHIL", partners: list(false), children: list(true) });
+        remove_pointer(changes.get(&fam)?, &role, other);
+        remove_pointer(changes.get(other)?, if role == "CHIL" { "FAMC" } else { "FAMS" }, &fam);
+        drop_empty_family(changes, &fam)?;
+    }
+    Ok(out)
+}
+
+/// Removes the direct link between two people (parent, child, partner or sibling): `other` leaves the family that
+/// ties them; both stay in the archive.
 fn remove_relation(s: &mut Session, args: &Value) -> ApiResult {
     let person = req(args, "person")?;
     let other = req(args, "other")?;
     let mut changes = Changes::new(&s.archive.doc);
-    let families: Vec<String> = s
-        .archive
-        .doc
-        .records
-        .iter()
-        .filter(|r| r.tag == "FAM")
-        .filter(|f| f.children.iter().any(|c| c.pointer() == Some(person.as_str())) && f.children.iter().any(|c| c.pointer() == Some(other.as_str())))
-        .filter_map(|f| f.xref.clone())
-        .collect();
-    if families.is_empty() {
-        return Err(ApiError::new("not_found", "Te osoby nie są bezpośrednio powiązane."));
-    }
-    for fam in families {
-        let family = changes.peek(&fam).cloned().ok_or_else(|| ApiError::bad_args("family"))?;
-        let role = |x: &str| family.children.iter().find(|c| c.pointer() == Some(x)).map(|c| c.tag.clone()).unwrap_or_default();
-        let (rp, ro) = (role(&person), role(&other));
-        // Who leaves the family: the child when a parent link is removed; the other partner; the other sibling.
-        let leaving = match (rp.as_str(), ro.as_str()) {
-            ("CHIL", "HUSB" | "WIFE") => person.clone(),
-            ("HUSB" | "WIFE", "CHIL") | (_, _) => other.clone(),
-        };
-        let leaving_role = role(&leaving);
-        let fam_record = changes.get(&fam)?;
-        remove_pointer(fam_record, &leaving_role, &leaving);
-        let indi = changes.get(&leaving)?;
-        remove_pointer(indi, if leaving_role == "CHIL" { "FAMC" } else { "FAMS" }, &fam);
-        drop_empty_family(&mut changes, &fam)?;
-    }
+    unlink(&mut changes, &person, &other)?;
     let edits = changes.into_edits();
     commit(s, edits)?;
     Ok(Value::Null)
 }
 
+/// „Zmień pokrewieństwo”: `other` becomes `person`'s `kind` (parent, partner, child, sibling) instead of what they
+/// were: they leave the family that tied them and are linked anew, in one undo step.
+fn change_relation(s: &mut Session, args: &Value) -> ApiResult {
+    let person = req(args, "person")?;
+    let other = req(args, "other")?;
+    let kind = req(args, "kind")?;
+    if !matches!(kind.as_str(), "parent" | "partner" | "child" | "sibling") {
+        return Err(ApiError::bad_args("kind"));
+    }
+    let mut changes = Changes::new(&s.archive.doc);
+    if !changes.exists(&person) || !changes.exists(&other) {
+        return Err(crate::people::not_found(if changes.exists(&person) { &other } else { &person }));
+    }
+    unlink(&mut changes, &person, &other)?;
+    link(&mut changes, &kind, &person, &other, None, arg_str(args, "pedi"), &Value::Null)?;
+    let edits = changes.into_edits();
+    commit(s, edits)?;
+    Ok(Value::Null)
+}
+
+/// What „Odłącz” would change, in words: „Franciszek Kowalski przestanie być dzieckiem: Jan Kowalski i Maria
+/// Kowalska.” Nothing is changed.
+fn unlink_preview(s: &mut Session, args: &Value) -> ApiResult {
+    let person = req(args, "person")?;
+    let other = req(args, "other")?;
+    let leaving = {
+        let mut changes = Changes::new(&s.archive.doc);
+        unlink(&mut changes, &person, &other)?
+    };
+    let d = s.derived();
+    let name = |x: &str| d.index(x).map(|i| d.info[i].name.clone()).unwrap_or_else(|| x.to_string());
+    let list = |xs: &[String]| -> String {
+        let names: Vec<String> = xs.iter().map(|x| name(x)).collect();
+        match names.len() {
+            0 => String::new(),
+            1 => names[0].clone(),
+            n if n <= 4 => format!("{} i {}", names[..n - 1].join(", "), names[n - 1]),
+            n => format!("{} i {}", names[..3].join(", "), crate::count_pl(n - 3, "inna osoba", "inne osoby", "innych osób")),
+        }
+    };
+    let who = name(&other);
+    let mut parts = Vec::new();
+    for l in &leaving {
+        parts.push(if l.as_child && !l.partners.is_empty() {
+            format!("{who} przestanie być dzieckiem: {}.", list(&l.partners))
+        } else if l.as_child {
+            format!("{who} przestanie być rodzeństwem: {}.", list(&l.children))
+        } else if l.partners.contains(&person) {
+            let kids = if l.children.is_empty() { String::new() } else { format!(" Ich dzieci ({}) zostaną dziećmi tylko: {}.", list(&l.children), name(&person)) };
+            format!("{} i {who} nie będą już parą.{kids}", name(&person))
+        } else {
+            format!("{who} przestanie być rodzicem: {}.", list(&l.children))
+        });
+    }
+    parts.push(format!("{who} zostaje w archiwum. Do zapisu możesz to cofnąć (Ctrl Z)."));
+    Ok(json!({ "title": format!("Odłączyć: {who}?"), "text": parts.join(" ") }))
+}
 
 /// A relation outside the family (friend, neighbour, godparent, colleague…): `1 ASSO @I2@` + `ROLE` (+ `PHRASE`).
 fn associate(s: &mut Session, args: &Value) -> ApiResult {
@@ -1119,6 +1237,165 @@ mod tests {
         let d = s.derived();
         assert!(d.info[d.index(&a).unwrap()].partners.is_empty());
         assert!(s.archive.doc.records.iter().all(|r| r.tag != "FAM"), "an empty family is removed");
+    }
+
+    /// Every FAM has at least two people and every link is written on both sides (CHIL ↔ FAMC, HUSB/WIFE ↔ FAMS).
+    fn assert_tidy(s: &Session) {
+        let doc = &s.archive.doc;
+        for fam in doc.records.iter().filter(|r| r.tag == "FAM") {
+            let x = fam.xref.as_deref().unwrap();
+            let members: Vec<&Node> = fam.children.iter().filter(|c| matches!(c.tag.as_str(), "HUSB" | "WIFE" | "CHIL")).collect();
+            assert!(members.len() >= 2, "{x} has {} people", members.len());
+            for m in members {
+                let back = if m.tag == "CHIL" { "FAMC" } else { "FAMS" };
+                assert!(has_pointer(doc.record(m.pointer().unwrap()).unwrap(), back, x), "{x}: {} {} has no {back}", m.tag, m.pointer().unwrap());
+            }
+        }
+        for indi in doc.records.iter().filter(|r| r.tag == "INDI") {
+            let x = indi.xref.as_deref().unwrap();
+            for c in indi.children.iter().filter(|c| c.tag == "FAMC" || c.tag == "FAMS") {
+                let fam = doc.record(c.pointer().unwrap()).unwrap_or_else(|| panic!("{x}: {} leads nowhere", c.tag));
+                let tags: &[&str] = if c.tag == "FAMC" { &["CHIL"] } else { &["HUSB", "WIFE"] };
+                assert!(tags.iter().any(|t| has_pointer(fam, t, x)), "{x}: {} without its pair", c.tag);
+            }
+        }
+    }
+
+    #[test]
+    fn relatives_are_moved_unlinked_and_refused_in_a_circle() {
+        let (_dir, mut s) = session();
+        let new = |s: &mut Session, given: &str, sex: &str, relation: Value| -> String {
+            let mut args = json!({ "given": given, "surname": "Kowalski", "sex": sex });
+            if !relation.is_null() {
+                args["relation"] = relation;
+            }
+            run(s, "person.create", args)["id"].as_str().unwrap().to_string()
+        };
+        let ewa = new(&mut s, "Ewa", "F", Value::Null);
+        let jan = new(&mut s, "Jan", "M", json!({ "kind": "parent", "of": ewa }));
+        let maria = new(&mut s, "Maria", "F", json!({ "kind": "parent", "of": ewa }));
+        let franciszek = new(&mut s, "Franciszek", "M", json!({ "kind": "sibling", "of": ewa }));
+        let tomasz = new(&mut s, "Tomasz", "M", json!({ "kind": "partner", "of": ewa }));
+        let zosia = new(&mut s, "Zosia", "F", json!({ "kind": "child", "of": ewa }));
+        let anna = new(&mut s, "Anna", "F", json!({ "kind": "partner", "of": jan }));
+        let piotr = new(&mut s, "Piotr", "M", json!({ "kind": "child", "of": jan, "otherParent": anna }));
+        assert_tidy(&s);
+        let parents = |s: &mut Session, x: &str| -> Vec<String> {
+            let d = s.derived();
+            let mut v: Vec<String> = d.info[d.index(x).unwrap()].parents.iter().map(|&p| d.xref(p).to_string()).collect();
+            v.sort();
+            v
+        };
+        let pair = |a: &str, b: &str| -> Vec<String> {
+            let mut v = vec![a.to_string(), b.to_string()];
+            v.sort();
+            v
+        };
+        assert_eq!(parents(&mut s, &zosia), pair(&ewa, &tomasz));
+        let fams = s.archive.doc.records.iter().filter(|r| r.tag == "FAM").count();
+
+        // A child made a sibling: out of Ewa and Tomasz's family, into Jan and Maria's.
+        run(&mut s, "relation.change", json!({ "person": ewa, "other": zosia, "kind": "sibling" }));
+        assert_eq!(parents(&mut s, &zosia), pair(&jan, &maria));
+        assert_tidy(&s);
+        assert_eq!(s.archive.doc.records.iter().filter(|r| r.tag == "FAM").count(), fams, "Ewa and Tomasz keep their family");
+        // …and back, in one undo step.
+        s.archive.undo();
+        s.changed();
+        assert_eq!(parents(&mut s, &zosia), pair(&ewa, &tomasz));
+        assert_tidy(&s);
+
+        // A sibling made a child: into the family Ewa already has.
+        run(&mut s, "relation.change", json!({ "person": ewa, "other": franciszek, "kind": "child" }));
+        assert_eq!(parents(&mut s, &franciszek), pair(&ewa, &tomasz));
+        assert_tidy(&s);
+        s.archive.undo();
+        s.changed();
+
+        // Unlinking a partner: Tomasz leaves, the children stay with Ewa; both stay in the archive.
+        let preview = run(&mut s, "relation.unlinkPreview", json!({ "person": ewa, "other": tomasz }));
+        assert_eq!(preview["text"], "Ewa Kowalski i Tomasz Kowalski nie będą już parą. Ich dzieci (Zosia Kowalski) zostaną dziećmi tylko: Ewa Kowalski. Tomasz Kowalski zostaje w archiwum. Do zapisu możesz to cofnąć (Ctrl Z).");
+        let before = s.archive.doc.clone();
+        assert_eq!(s.archive.doc.records.len(), before.records.len(), "the preview changes nothing");
+        run(&mut s, "relation.remove", json!({ "person": ewa, "other": tomasz }));
+        assert_eq!(parents(&mut s, &zosia), [ewa.clone()]);
+        assert!(s.derived().index(&tomasz).is_some());
+        assert_tidy(&s);
+        s.archive.undo();
+        s.changed();
+
+        // Unlinking a parent: Jan leaves Ewa's family, Maria stays the mother of both children.
+        let preview = run(&mut s, "relation.unlinkPreview", json!({ "person": ewa, "other": jan }));
+        assert!(preview["text"].as_str().unwrap().starts_with("Jan Kowalski przestanie być rodzicem: Ewa Kowalski i Franciszek Kowalski."), "{preview}");
+        run(&mut s, "relation.remove", json!({ "person": ewa, "other": jan }));
+        assert_eq!(parents(&mut s, &ewa), [maria.clone()]);
+        assert_eq!(parents(&mut s, &franciszek), [maria.clone()]);
+        assert_tidy(&s);
+        s.archive.undo();
+        s.changed();
+
+        // A half-brother: Piotr leaves Jan and Anna's family (it stays: they are still a couple).
+        let preview = run(&mut s, "relation.unlinkPreview", json!({ "person": ewa, "other": piotr }));
+        assert!(preview["text"].as_str().unwrap().starts_with("Piotr Kowalski przestanie być dzieckiem: Jan Kowalski i Anna Kowalski."), "{preview}");
+        run(&mut s, "relation.remove", json!({ "person": ewa, "other": piotr }));
+        assert!(parents(&mut s, &piotr).is_empty());
+        assert_tidy(&s);
+
+        // A circle is refused and changes nothing: a granddaughter as her grandfather's mother, a person as their
+        // own relative.
+        let undo_depth = s.archive.undo_depth();
+        let error = call(&mut s, "relation.add", &json!({ "kind": "parent", "person": jan, "other": zosia })).unwrap_err();
+        assert!(error.message.contains("swoim własnym przodkiem"), "{}", error.message);
+        assert!(call(&mut s, "relation.change", &json!({ "person": ewa, "other": jan, "kind": "child" })).is_ok(), "no longer her father, so he can be her son");
+        s.archive.undo();
+        s.changed();
+        assert!(call(&mut s, "relation.change", &json!({ "person": zosia, "other": jan, "kind": "child" })).is_err(), "not directly related");
+        assert!(call(&mut s, "relation.change", &json!({ "person": ewa, "other": ewa, "kind": "child" })).is_err());
+        assert_eq!(s.archive.undo_depth(), undo_depth);
+        assert_tidy(&s);
+    }
+
+    /// Every change and unlink between any two people of a small family keeps the families tidy and is undone
+    /// exactly; a parent joining a family that already has children can't close a circle either.
+    #[test]
+    fn every_change_between_relatives_is_tidy_and_undone_exactly() {
+        let (_dir, mut s) = session();
+        let new = |s: &mut Session, given: &str, sex: &str, relation: Value| -> String {
+            let mut args = json!({ "given": given, "surname": "Nowak", "sex": sex });
+            if !relation.is_null() {
+                args["relation"] = relation;
+            }
+            run(s, "person.create", args)["id"].as_str().unwrap().to_string()
+        };
+        let ewa = new(&mut s, "Ewa", "F", Value::Null);
+        let jan = new(&mut s, "Jan", "M", json!({ "kind": "parent", "of": ewa }));
+        let franciszek = new(&mut s, "Franciszek", "M", json!({ "kind": "sibling", "of": ewa }));
+        let dorota = new(&mut s, "Dorota", "F", json!({ "kind": "child", "of": franciszek }));
+        let tomasz = new(&mut s, "Tomasz", "M", json!({ "kind": "partner", "of": ewa, "married": true, "date": "1.1.1950" }));
+        let zosia = new(&mut s, "Zosia", "F", json!({ "kind": "child", "of": ewa, "otherParent": tomasz }));
+        let piotr = new(&mut s, "Piotr", "M", json!({ "kind": "child", "of": zosia }));
+        assert_tidy(&s);
+        // Franciszek's daughter as Ewa's mother would join Jan's family, so she'd be her own father's mother.
+        let error = call(&mut s, "relation.add", &json!({ "kind": "parent", "person": ewa, "other": dorota })).unwrap_err();
+        assert!(error.message.contains("swoim własnym przodkiem"), "{}", error.message);
+        let people = [&ewa, &jan, &franciszek, &dorota, &tomasz, &zosia, &piotr];
+        for a in people {
+            for b in people {
+                let mut tries = vec![("relation.remove", json!({ "person": a, "other": b }))];
+                tries.extend(["parent", "partner", "child", "sibling"].map(|k| ("relation.change", json!({ "person": a, "other": b, "kind": k }))));
+                for (method, args) in tries {
+                    let before = s.archive.doc.records.clone();
+                    let depth = s.archive.undo_depth();
+                    if call(&mut s, method, &args).is_ok() && s.archive.undo_depth() > depth {
+                        assert_tidy(&s);
+                        assert_eq!(s.archive.undo_depth(), depth + 1, "{method} {args}: one undo step");
+                        s.archive.undo();
+                        s.changed();
+                    }
+                    assert!(s.archive.doc.records == before, "{method} {args}: as before");
+                }
+            }
+        }
     }
 
     /// Adds records written by another program, as they would be read from its file.

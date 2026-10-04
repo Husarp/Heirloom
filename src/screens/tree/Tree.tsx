@@ -417,6 +417,10 @@ export function Tree({ hidden }: { hidden: boolean }) {
             restore={restore && restore.view === view && restore.person === focus ? restore.cam : null}
             onRestored={() => setRestore(null)}
             onCamera={rememberPlace}
+            tools={mode === "edit" ? (view === "family" ? "all" : "selected") : null}
+            onGone={(id) => {
+              if (selected === id) setSelected(focus);
+            }}
           />
         ) : (
           firstLoad && <Loading count={archive?.people ?? 0} busy />

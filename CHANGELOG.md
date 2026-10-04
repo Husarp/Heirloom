@@ -3,6 +3,46 @@
 Format: `X.Y.Z — YYYY-MM-DD HH:MM: description`. Newest on top.
 X = major change, Y = feature / bigger change, Z = small change.
 
+## 0.4.2 — 2026-10-04 15:29: Maiden names everywhere, long names fit on the tree cards, relatives changed and unlinked in place
+- **Maiden names:** a woman who took her husband's surname now shows „z d. …” wherever her name stands on its own:
+  under the name in the tree's side panel and on her profile (moved up from the end of the dates line), after the
+  name of every relative in the side panel (before only the mother and the wife, and without the married surname),
+  in the Nazwiska lists and in the Osoby photo grid. Tree cards keep their „z d.” line as before; Ctrl K, the
+  Osoby list, the mention cards and the profile's Rodzina tiles already had it.
+- **Tree:**
+  - a name too long for its card gets a smaller font, down to 13 px on one line, then onto two lines (given names,
+    then the surname) down to 11.5 px; only a name still too long is cut with „…”, and then the whole name shows
+    on hover. The cards keep their size, so nothing moves. The same in the narrow sibling cards; in Całe drzewo a
+    long name shrinks to 12 px at most and is then cut;
+  - the capitals' accents (Ó, Ń, Ś) at the top of a card name are no longer cut off („KROL” → „KRÓL”);
+  - „Osoba w centrum” over the centre person is gone: the highlighted card says it.
+- **Relatives: change, unlink or delete them where you see them.** Before, only adding a relative was obvious;
+  removing one was in the profile's Rodzina only after „Edytuj sekcję”, and making a child a sibling instead wasn't
+  possible at all. Now, in edit mode:
+  - in Rodzina every relative's card has a small strip hanging under it (in Przodkowie and Potomkowie the chosen
+    card's): „Edytuj osobę”, „Zmień pokrewieństwo” (what they are to the person: ojciec / matka, brat / siostra,
+    mąż / żona, syn / córka; for a parent and child also biologiczne, adopcja, przybrane, nieznane), „Odłącz” and
+    „Usuń osobę z archiwum…”. It hangs from the card's bottom-left corner, so the lines stay free, fits the narrow
+    sibling cards, and in the last column of Przodkowie it sits beside the card; the menu stays on screen;
+  - the profile's Rodzina has the same tools on every tile, with the kind as a chip („córka · adoptowana”); using
+    one opens the section, so its „Anuluj” takes the change back;
+  - „Odłącz” asks first, with a sentence that says exactly what changes („Weronika Michalak przestanie być
+    dzieckiem: Elżbieta Michalak i Michał Michalak.”, „… nie będą już parą. Ich dzieci (…) zostaną dziećmi tylko:
+    …”); the person stays in the archive. Deleting the person asks separately and says it is not an unlink;
+  - every change is one step of Ctrl Z (and „Cofnij” in the message); someone made their own ancestor (a grandson
+    as his grandfather's father) is refused with a plain message, and no family is left with fewer than two people.
+- **Review fixes (before release):**
+  - a parent added to a family that already has children (the usual „Dodaj krewnego › Rodzic” or „Zmień
+    pokrewieństwo › ojciec”) skipped the check for a circle: a brother's daughter could become the mother of her
+    own father. Now refused like the rest; a new test tries every change and unlink between any two people of a
+    small family and checks the families stay tidy and Ctrl Z brings back exactly what was there;
+  - „Cofnij” in an older message (after another change, or after Ctrl Z) took back the newest change instead of
+    its own; now it says the message is out of date and to use „Cofnij” in the bar;
+  - a change from the tree's strip first finishes a profile section still open, so that section's „Anuluj” can't
+    take the tree's change back later.
+- **Fix: removing a parent took the person away from both parents.** Unlinking a parent now takes only that parent
+  out of the family (and so from its other children too, as the question says); the other parent stays.
+
 ## 0.4.1 — 2026-10-03 19:57: The installer with a running Heirloom, siblings always shown
 - **Tree:**
   - Rodzina always shows the brothers and sisters as cards, in birth order: older ones left of the person, younger

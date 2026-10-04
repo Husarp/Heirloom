@@ -796,6 +796,11 @@ function PhotoGrid({ people }: { people: PersonSummary[] }) {
             <span className="serif ellipsis" style={{ fontSize: 15, fontWeight: 600, maxWidth: "100%" }}>
               {p.name}
             </span>
+            {p.maiden && (
+              <span className="ellipsis" style={{ marginTop: -6, fontSize: 12, color: "var(--text3)", maxWidth: "100%" }}>
+                z d. {p.maiden}
+              </span>
+            )}
             <span style={{ fontSize: 12, color: "var(--text2)" }}>
               {cardYears(p.birth?.year, p.death?.year, p.living) || "—"}
             </span>

@@ -54,6 +54,7 @@ export function SidePanel({ id, onClose, onFocus, relativeTitle = "Pokaż w cent
             <span className="serif" style={{ fontSize: 26, lineHeight: 1.15, fontWeight: 500 }}>
               {p.name}
             </span>
+            {p.maiden && <span style={{ fontSize: 14, color: "var(--text2)" }}>z d. {p.maiden}</span>}
             {p.nickname && (
               <span className="serif" style={{ fontSize: 16, fontStyle: "italic", color: "var(--text2)" }}>
                 „{p.nickname}”
@@ -101,9 +102,16 @@ export function SidePanel({ id, onClose, onFocus, relativeTitle = "Pokaż w cent
               {data.relatives.map((r) => (
                 <button key={`${r.id}-${r.label}`} className="panel-relative" onClick={() => onFocus(r.id)} title={relativeTitle}>
                   <Avatar initials={r.initials} branch={r.branch} photo={r.photo} size={26} />
-                  <span className="ellipsis grow" style={{ fontSize: 13, fontWeight: 500 }}>
-                    {/* „z d.” only for the mother and the wife (spec §4.1); a married daughter keeps her married surname. */}
-                    {r.maiden && /^(matka|żona)/.test(r.label ?? "") ? `${r.given} z d. ${r.maiden}` : r.name}
+                  {/* The name keeps its room; the maiden name shrinks first. */}
+                  <span className="row grow" style={{ gap: 6, minWidth: 0 }}>
+                    <span className="ellipsis" style={{ fontSize: 13, fontWeight: 500, flex: "0 1 auto", minWidth: 60 }}>
+                      {r.name}
+                    </span>
+                    {r.maiden && (
+                      <span className="ellipsis" style={{ fontSize: 12, color: "var(--text3)", flex: "0 8 auto", minWidth: 24 }}>
+                        z d. {r.maiden}
+                      </span>
+                    )}
                   </span>
                   <span style={{ fontSize: 12, color: "var(--text3)", whiteSpace: "nowrap" }}>{r.label}</span>
                 </button>

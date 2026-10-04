@@ -221,6 +221,7 @@ function Hero({ data }: { data: ProfileData }) {
           </span>
         )}
         <h1 className="hero-name">{p.name}</h1>
+        {p.maiden && <span className="serif" style={{ marginTop: -6, fontSize: 18, color: "var(--text2)" }}>z d. {p.maiden}</span>}
         {p.nickname && <span className="hero-nickname">„{p.nickname}”</span>}
         <div className="row hero-life">
           <span>{birthFact ? birthFact.value.replace(/ (par. [^)]*)/, "") : <Lifespan birth={p.birth} death={null} living={p.living} />}</span>
@@ -228,7 +229,6 @@ function Hero({ data }: { data: ProfileData }) {
           {deathFact && <span>{deathFact.value.replace(/ (par. [^)]*)/, "")}</span>}
           {!deathFact && p.living && <span style={{ color: "var(--text3)" }}>żyje</span>}
           {data.age && <span style={{ color: "var(--text3)" }}>· {data.age}</span>}
-          {p.maiden && <span style={{ color: "var(--text3)" }}>· z d. {p.maiden}</span>}
         </div>
         {data.tags.length > 0 && (
           <div className="row" style={{ gap: 6, flexWrap: "wrap", marginTop: 4 }}>

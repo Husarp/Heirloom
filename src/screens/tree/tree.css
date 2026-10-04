@@ -146,6 +146,9 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* Room above for the accents of capitals (Ó, Ń, Ś), which the overflow cut off before. */
+  padding-top: 3px;
+  margin-top: -3px;
 }
 .tree-card .card-sub {
   font-size: 12px;
@@ -180,7 +183,7 @@
   color: var(--text3);
 }
 
-/* Rodzina with many siblings: narrower cards without the photo; the name may take two lines. */
+/* Rodzina with many siblings: narrower cards without the photo. */
 .tree-card.full.narrow {
   padding: 0 6px 0 12px;
 }
@@ -190,9 +193,11 @@
 .tree-card.full.narrow.selected {
   padding-left: 11px;
 }
-.tree-card.full.narrow .card-name {
-  font-size: 14px;
+/* A name too long for one line even in the smaller font (nameFit.ts). */
+.tree-card .card-name.two {
+  line-height: 1.15;
   white-space: normal;
+  overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -282,9 +287,6 @@
   color: var(--text3);
   white-space: nowrap;
   pointer-events: none;
-}
-.tree-label.accent {
-  color: var(--accent-text);
 }
 
 .tree-box {
@@ -634,4 +636,43 @@
 }
 .zoom-h button:hover {
   background: var(--surface2);
+}
+
+/* Edit mode: the tools under a relative's card (edit, change the relationship, unlink, delete), hung from its bottom
+   left corner, so the line that leaves a card's bottom middle stays free. */
+.tree-strip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+}
+.relative-tools.strip {
+  position: relative;
+  display: flex;
+  gap: 1px;
+  padding: 1px 3px 2px;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-top-color: transparent;
+  border-radius: 0 0 var(--r-ctl) var(--r-ctl);
+  box-shadow: 0 2px 4px rgb(0 0 0 / 0.06);
+}
+.tree-strip.side .relative-tools.strip {
+  border-top-color: var(--card-border);
+  border-left-color: transparent;
+  border-radius: 0 var(--r-ctl) var(--r-ctl) 0;
+  padding: 1px 3px 1px 2px;
+}
+.relative-tools.strip .icon-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+}
+.relative-tools.strip .icon-btn.on {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.relative-tools .icon-btn.danger:hover:not(:disabled) {
+  background: var(--err-soft);
+  color: var(--err);
 }

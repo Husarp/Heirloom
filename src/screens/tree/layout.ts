@@ -28,6 +28,8 @@ export interface SceneCard {
   focus?: boolean;
   /** A narrower card (NARROW_W) than CARD_W. */
   w?: number;
+  /** What this person is to the card they hang from (edit mode's tools under the card change it). */
+  rel?: { of: string; kind: "parent" | "partner" | "child" | "sibling" };
 }
 
 export interface SceneLink {
@@ -71,7 +73,6 @@ export interface SceneLabel {
   x: number;
   y: number;
   text: string;
-  accent?: boolean;
 }
 
 export interface Scene {
@@ -183,7 +184,7 @@ export function layoutFamily(graph: Graph, focusId: string, options: { editing: 
   partners.forEach((p, i) => {
     const step = Math.floor(i / 2) + 1;
     const x = i % 2 === 0 ? step * (CARD_W + PARTNER_GAP) : -step * (CARD_W + PARTNER_GAP);
-    place(p, x, 0);
+    place(p, x, 0, { rel: { of: focusId, kind: "partner" } });
   });
   for (const p of partners) {
     const a = placed.get(focusId)!;
@@ -246,13 +247,14 @@ export function layoutFamily(graph: Graph, focusId: string, options: { editing: 
   }
   const placeCouple = (child: string, present: string[], left: number) => {
     if (present.length === 2) {
-      const pair = [place(present[0], left, y), place(present[1], left + CARD_W + PARTNER_GAP, y)];
+      const rel = { of: child, kind: "parent" as const };
+      const pair = [place(present[0], left, y, { rel }), place(present[1], left + CARD_W + PARTNER_GAP, y, { rel })];
       const midX = left + CARD_W + PARTNER_GAP / 2;
       links.push({ key: `pp-${child}`, d: `M${left + CARD_W} ${y + CARD_H / 2} H${left + CARD_W + PARTNER_GAP}`, kind: "partner", people: present });
       unions.push({ key: `pu-${child}`, x: midX, y: y + CARD_H / 2, people: present });
       return { fromX: midX, fromY: y + CARD_H / 2, cards: pair };
     }
-    return { fromX: left + CARD_W / 2, fromY: y + CARD_H, cards: [place(present[0], left, y)] };
+    return { fromX: left + CARD_W / 2, fromY: y + CARD_H, cards: [place(present[0], left, y, { rel: { of: child, kind: "parent" } })] };
   };
   const ownCouple = own.width ? placeCouple(focusId, own.present, ownLeft) : null;
   if (ownCouple) {
@@ -310,7 +312,7 @@ export function layoutFamily(graph: Graph, focusId: string, options: { editing: 
   const sibling = (id: string, x: number, isHalf: boolean) => {
     const p = graph.people[id];
     const sub = isHalf ? [half(p), subLine(p)].filter(Boolean).join(" · ") : subLine(p);
-    return place(id, x, 0, { sub, ...(narrow ? { w } : {}) });
+    return place(id, x, 0, { sub, rel: { of: focusId, kind: "sibling" }, ...(narrow ? { w } : {}) });
   };
   const leftSide = [...halfLeft, ...older].reverse().map((id) => {
     left -= w;
@@ -353,7 +355,7 @@ export function layoutFamily(graph: Graph, focusId: string, options: { editing: 
     let left = groups.length === 1 ? g.fromX - width / 2 : k === 0 ? g.fromX + CARD_W / 2 - width : g.fromX - CARD_W / 2;
     if (left < cursor) left = cursor;
     const kids = g.kids.map((id, i) => {
-      const card = place(id, left + i * (CARD_W + SIBLING_GAP), FAMILY_PITCH);
+      const card = place(id, left + i * (CARD_W + SIBLING_GAP), FAMILY_PITCH, { rel: { of: focusId, kind: "child" } });
       const p = graph.people[id];
       if (p && p.descendants > 0) pills.push({ key: `down-${id}`, x: card.x + CARD_W - 64, y: card.y + CARD_H - 11, label: `+${p.descendants}`, target: id, direction: "down" });
       return { id, x: card.x, y: card.y, kind: linkKind(pediOf(graph, id), false) };
@@ -362,8 +364,6 @@ export function layoutFamily(graph: Graph, focusId: string, options: { editing: 
     cursor = left + width + SIBLING_GAP * 2;
   });
 
-  // Right of the line coming down from the parents (or „Dodaj rodziców”), not across it.
-  labels.push({ key: "focus-label", x: ownCouple || options.editing ? CARD_W / 2 + 8 : 0, y: -24, text: "Osoba w centrum", accent: true });
   const scene = { cards, links, unions, pills, boxes, labels };
   return { ...scene, bounds: bounds(scene) };
 }
@@ -396,7 +396,8 @@ export function layoutAncestors(graph: Graph, focusId: string, generations = 3, 
     slots[g].forEach((id, i) => {
       const cy = y(g, i);
       if (id) {
-        cards.push({ id, x: x(g), y: cy, sub: subLine(graph.people[id]), focus: g === 0 });
+        const child = g > 0 ? slots[g - 1][Math.floor(i / 2)] : null;
+        cards.push({ id, x: x(g), y: cy, sub: subLine(graph.people[id]), focus: g === 0, ...(child ? { rel: { of: child, kind: "parent" as const } } : {}) });
         const p = graph.people[id];
         if (g === G && p && p.ancestors > 0) pills.push({ key: `more-${id}`, x: x(g) + CARD_W + 12, y: cy + CARD_H / 2 - 12, label: `+${p.ancestors}`, target: id, direction: "right" });
       } else if (g > 0 && slots[g - 1][Math.floor(i / 2)]) {
@@ -446,12 +447,12 @@ export function layoutDescendants(graph: Graph, focusId: string, depth = 2, roun
     return w;
   };
   width(focusId, 0);
-  const place = (id: string, level: number, left: number) => {
+  const place = (id: string, level: number, left: number, parent?: string) => {
     const w = widths.get(`${level}:${id}`) ?? CARD_W;
     const cx = left + (w - CARD_W) / 2;
     const cy = level * DESCENDANT_PITCH;
     const p = graph.people[id];
-    cards.push({ id, x: cx, y: cy, sub: p ? spouseLine(graph, p) : null, focus: level === 0 });
+    cards.push({ id, x: cx, y: cy, sub: p ? spouseLine(graph, p) : null, focus: level === 0, ...(parent ? { rel: { of: parent, kind: "child" as const } } : {}) });
     const kids = level < depth ? kidsOf(id) : [];
     if (level === depth && p && p.descendants > 0) {
       const n = p.descendants;
@@ -461,7 +462,7 @@ export function layoutDescendants(graph: Graph, focusId: string, depth = 2, roun
     const placedKids: { id: string; x: number; y: number; kind: LinkKind }[] = [];
     for (const k of kids) {
       const kw = widths.get(`${level + 1}:${k}`) ?? CARD_W;
-      place(k, level + 1, cursor);
+      place(k, level + 1, cursor, id);
       placedKids.push({ id: k, x: cursor + (kw - CARD_W) / 2, y: (level + 1) * DESCENDANT_PITCH, kind: linkKind(pediOf(graph, k), false) });
       cursor += kw + SIBLING_GAP;
     }
