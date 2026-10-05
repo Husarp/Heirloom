@@ -26,6 +26,8 @@ export interface Graph {
   /** The depth it was fetched with, so a graph meant for another view isn't laid out. */
   up: number;
   down: number;
+  /** The people unfolded below (Potomkowie's „+N potomków”) it was fetched with. */
+  expand?: string[];
   people: Record<string, GraphPerson>;
   unions: GraphUnion[];
 }
