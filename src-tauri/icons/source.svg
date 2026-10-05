@@ -1,13 +1,42 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-  <!-- The sidebar logo tile from the design: accent green, a serif "H" in warm white. -->
-  <rect x="64" y="64" width="896" height="896" rx="168" fill="#2F5D50"/>
-  <g fill="#F7F4EE">
-    <rect x="318" y="252" width="100" height="520"/>
-    <rect x="606" y="252" width="100" height="520"/>
-    <rect x="418" y="486" width="188" height="58"/>
-    <rect x="262" y="252" width="212" height="34" rx="6"/>
-    <rect x="550" y="252" width="212" height="34" rx="6"/>
-    <rect x="262" y="738" width="212" height="34" rx="6"/>
-    <rect x="550" y="738" width="212" height="34" rx="6"/>
+  <!-- Heirloom's icon: a light-green tree on the app's deep green (#2F5D50) rounded square. Redrawn from
+       heirloom-5a.ico (the icon itself, used as is up to 256 px) for the sizes above 256 px. -->
+  <defs>
+    <radialGradient id="ground">
+      <stop offset="0" stop-color="#4A7F6D" stop-opacity="1"/>
+      <stop offset="0.4" stop-color="#4A7F6D" stop-opacity="0.8"/>
+      <stop offset="0.65" stop-color="#4A7F6D" stop-opacity="0.57"/>
+      <stop offset="0.8" stop-color="#4A7F6D" stop-opacity="0.33"/>
+      <stop offset="0.92" stop-color="#4A7F6D" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#4A7F6D" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="224" fill="#2F5D50"/>
+  <ellipse cx="512" cy="832" rx="400" ry="76" fill="url(#ground)"/>
+  <g fill="#C8A57E">
+    <path d="M482 440 L542 440 L542 662 C542 740 580 832 598 832 L426 832 C444 832 482 740 482 662 Z"/>
+    <path d="M507 683 L435 597 L414 614 L486 700 Z"/>
+    <path d="M517 689 L621 583 L602 564 L498 670 Z"/>
+  </g>
+  <g fill="#5C8F7E">
+    <circle cx="512" cy="232" r="120"/>
+    <circle cx="344" cy="352" r="112"/>
+    <circle cx="680" cy="344" r="112"/>
+    <circle cx="256" cy="504" r="96"/>
+    <circle cx="768" cy="488" r="88"/>
+  </g>
+  <g fill="#7FAE9A">
+    <circle cx="432" cy="296" r="88"/>
+    <circle cx="608" cy="280" r="80"/>
+    <circle cx="392" cy="512" r="104"/>
+    <circle cx="640" cy="504" r="104"/>
+  </g>
+  <g fill="#A9C9B8">
+    <circle cx="512" cy="400" r="136"/>
+  </g>
+  <g fill="#D5E5DB">
+    <circle cx="456" cy="344" r="40"/>
+    <circle cx="584" cy="232" r="24"/>
+    <circle cx="312" cy="472" r="24"/>
   </g>
 </svg>

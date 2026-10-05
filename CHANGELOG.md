@@ -3,6 +3,21 @@
 Format: `X.Y.Z — YYYY-MM-DD HH:MM: description`. Newest on top.
 X = major change, Y = feature / bigger change, Z = small change.
 
+## 0.6.1 — 2026-10-05 13:40: The new tree icon everywhere; set files open with a double-click
+- **New icon:** a light-green tree on the deep green square (`src-tauri/icons/heirloom-5a.ico`, used as is in
+  `icon.ico`) replaces the „H” everywhere: heirloom.exe, the window and the taskbar, the Start menu and desktop
+  shortcuts, „Aplikacje i funkcje”, the installer's exe and window, the sidebar, the archive picker, the empty
+  archive's start, Ustawienia › O programie and the page icon in a browser. Every picture up to 256 px is made from
+  that icon's own frames; the bigger ones (icon.png, the 284/310 px logos, icon.icns) from `source.svg`, the tree
+  redrawn to match it.
+- **Set files are Heirloom's own file type:** the installer registers `.heirloom-zestaw` (the „Otwórz razem…” set
+  file) for this user only, no administrator rights: „Zestaw archiwów Heirloom” with a document icon (a page with the
+  tree, `heirloom-zestaw.ico` next to heirloom.exe), and a double-click opens it in Heirloom — with Heirloom already
+  open, in a new window, as „Otwórz w nowym oknie” does. Explorer shows the icon at once. An update registers it
+  again; uninstalling removes it (only Heirloom's part, if another program has taken the extension over). `.ged`
+  files and folders are left to other programs. A file dropped on heirloom.exe opens too.
+- The installer's registry code for the file type has tests that run without Windows (`installer/test_setup.py`).
+
 ## 0.6.0 — 2026-10-05 12:45: Facts and the life timeline edited in place on the profile; Przodkowie and Potomkowie redrawn
 - **Profile: change a fact where you see it.** In edit mode:
   - **„W skrócie”:** each fact cell opens a small form in place (date, place, description); a cell of several facts

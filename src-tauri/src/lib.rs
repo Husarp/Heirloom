@@ -3,7 +3,9 @@
 //! the window is hidden, the interface checks itself (scripts/build.ps1 runs it before packaging) and the app quits.
 //! While it runs, `%LOCALAPPDATA%\Heirloom\running\<pid>.json` tells the installer whether closing it would lose work.
 //! `--open <archive or set> [--person <xref>]` opens that (the interface asks with `app.takeStart`); „Otwórz w nowym
-//! oknie” starts another Heirloom that way (`open_window`), each window a process of its own.
+//! oknie” starts another Heirloom that way (`open_window`), each window a process of its own. So does Windows for a
+//! double-clicked `.heirloom-zestaw` file (the file type installer/setup.py registers): a Heirloom already open keeps
+//! its window, and the set opens in a new one.
 
 use heirloom_api::{Api, ApiError, media, running::RunningFile, update::Updater};
 use serde_json::Value;
@@ -151,7 +153,7 @@ fn open_window(path: String, person: Option<String>) -> Result<(), ApiError> {
     command.spawn().map(|_| ()).map_err(failed)
 }
 
-/// `--open <path> [--person <xref>]` from the command line.
+/// `--open <path> [--person <xref>]` from the command line, or the path alone (a file dropped on heirloom.exe).
 fn open_args(args: impl Iterator<Item = String>) -> Option<(String, Option<String>)> {
     let (mut path, mut person) = (None, None);
     let mut args = args.skip(1);
@@ -159,6 +161,10 @@ fn open_args(args: impl Iterator<Item = String>) -> Option<(String, Option<Strin
         match arg.as_str() {
             "--open" => path = args.next(),
             "--person" => person = args.next(),
+            "--selftest" => {
+                args.next();
+            }
+            _ if path.is_none() && !arg.starts_with("--") => path = Some(arg),
             _ => {}
         }
     }
@@ -255,5 +261,15 @@ mod tests {
             Some(("D:\\Rodzina razem.heirloom-zestaw".into(), Some("@I12@".into())))
         );
         assert_eq!(args(&["heirloom.exe", "--open"]), None, "a path is needed");
+    }
+
+    #[test]
+    fn a_set_file_opened_from_windows() {
+        let args = |list: &[&str]| open_args(list.iter().map(|s| s.to_string()));
+        // The file type's command (installer/setup.py), and a file dropped on heirloom.exe.
+        let set = "C:\\Users\\Ala\\Rodzina\\Rodzina razem.heirloom-zestaw";
+        assert_eq!(args(&["heirloom.exe", "--open", set]), Some((set.into(), None)));
+        assert_eq!(args(&["heirloom.exe", set]), Some((set.into(), None)));
+        assert_eq!(args(&["heirloom.exe", "--selftest", "C:\\build\\selftest.txt"]), None, "a report is not an archive");
     }
 }

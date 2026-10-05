@@ -51,6 +51,7 @@ You need Rust (`%USERPROFILE%\.cargo\bin` on the PATH) and Node.js. Run `npm ins
 | The same screens in a normal browser, on a test family | `cargo run -p heirloom-bridge -- --open test-archives/demo`, then `npm run dev` and open http://localhost:1420 |
 | Run all Rust tests | `cargo test --workspace` |
 | Type-check and test the interface | `npx tsc --noEmit -p tsconfig.json` and `npx vitest run` |
+| Test the installer's registry code (runs on any system, touches nothing) | `python -m unittest installer/test_setup.py` |
 | Make a test family (fictional, never real data) | `cargo run --release -p heirloom-gen -- test-archives/5000 --people 5000 --media 200` |
 | Download the official GEDCOM 7 test files (then `cargo test` runs over them) | `powershell -File scripts\fetch-gedcom-test-files.ps1` |
 | Time the core on it | `cargo run --release -p heirloom-core --example open_bench -- test-archives/5000` |
@@ -65,7 +66,11 @@ You need Rust (`%USERPROFILE%\.cargo\bin` on the PATH) and Node.js. Run `npm ins
   administrator rights (APP-STANDARDS.md §1), in a window with the standard's steps and Heirloom's look (§5). It never
   closes a running Heirloom by force (after you say OK it asks it to close the way its ✕ does, so Heirloom asks about
   unsaved changes), puts the old files back if a step fails, and never touches the family archives; on uninstall the
-  program's own settings and thumbnails go to the Recycle Bin only if you tick the box.
+  program's own settings and thumbnails go to the Recycle Bin only if you tick the box. It registers the set file
+  (`.heirloom-zestaw`, „Otwórz razem…”) as Heirloom's file type for the user, removed again on uninstall.
+- `src-tauri/icons/`: the app's icon. `heirloom-5a.ico` is the source (copied unchanged to `icon.ico`);
+  pictures up to 256 px come from its frames, bigger ones from `source.svg`; `heirloom-zestaw.ico`/`.svg` is the set
+  file's document icon.
 - Updates (APP-STANDARDS.md §2–§3, `crates/heirloom-api/src/update.rs`): only with „Sprawdzaj aktualizacje” switched
   on (off by default), at start and on coming back to the window (at most every 5 minutes), the app asks
   `api.github.com/repos/Husarp/Heirloom/releases/latest`, and a newer version shows a banner on Start; „Sprawdź teraz”

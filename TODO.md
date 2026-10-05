@@ -440,9 +440,11 @@ This is the roadmap, with a checkbox per task.
       archiwum” really start a second window at the right person; two windows at once (WebView2), the installer
       with two Heirlooms running; the set's „Zmień…” save dialog; coming back to the combined window after saving in
       the other one shows „Odświeżono: …”
-- [ ] **Later for sets** (not in 0.5.0): double-clicking a `.heirloom-zestaw` file opens Heirloom (file association
-      in the installer); the same photo in two linked archives shown once; copying a person from one archive into
-      another
+- [x] **Sets open with a double-click** (done 2026-10-05, 0.6.1): the installer registers `.heirloom-zestaw` for the
+      user („Zestaw archiwów Heirloom”, a document icon with the tree); with Heirloom open, the set opens in a new
+      window. Not `.ged` or folders (other programs own GEDCOM)
+- [ ] **Later for sets** (not in 0.5.0): the same photo in two linked archives shown once; copying a person from one
+      archive into another
 - [x] **Profile: facts, „Oś życia” and sources edited in place** (your notes; done 2026-10-05, 0.6.0): „W skrócie”
       cells and the timeline's rows open a small form in place (also from browse mode, after „who edits”), „Dodaj
       kolejny zawód”, „Dodaj wydarzenie”, „Odłącz źródło”; undated facts on the timeline with „bez daty”; Rodzina
@@ -452,6 +454,12 @@ This is the roadmap, with a checkbox per task.
       column at the left; lines visible at every zoom
 - [ ] **Check 0.6.0 on Windows** (could only be tried in a browser here): editing facts in „W skrócie” and „Oś
       życia”, Przodkowie and Potomkowie with the side panel, unfolding and „Partnerzy”
+- [x] **New icon everywhere** (your icon, done 2026-10-05, 0.6.1): the tree on the green square for the exe, the
+      window and taskbar, shortcuts, „Aplikacje i funkcje”, the installer's window, the sidebar, the archive picker
+      and O programie
+- [ ] **Check 0.6.1 on Windows** (only the Linux parts could be tried here): the new icon on the exe, taskbar,
+      shortcuts and „Aplikacje i funkcje”; a double-clicked `.heirloom-zestaw` opens in Heirloom (also with Heirloom
+      already open: a new window) and shows the document icon at once; uninstalling removes the file type
 - [x] **Your idea: how the archive stores its data** — decided 2026-09-29: it stays one file. Now: one `rodzina.ged` (GEDCOM 7, all
       people, families, sources, texts) + `media/` (photos, PDFs) + `zrodla-ai/` (the AI answers as they came) +
       `.heirloom/` (settings, change history, backup copies); „Zapisz import” writes the batch into `rodzina.ged` at

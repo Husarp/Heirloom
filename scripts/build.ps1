@@ -3,8 +3,8 @@
 #   2. heirloom.exe: npx tauri build --no-bundle (the interface is built into the exe)
 #   3. self-test: heirloom.exe --selftest starts hidden and checks the interface, the bundled fonts and an archive
 #      round trip in a throwaway folder (skip with -NoSelfTest)
-#   4. HeirloomSetup-<version>.exe: installer\setup.py with the program folder zipped inside it and the logo for its
-#      window (PyInstaller)
+#   4. HeirloomSetup-<version>.exe: installer\setup.py with the program folder (heirloom.exe, the set file's icon)
+#      zipped inside it and the logo for its window (PyInstaller)
 #   5. build\BUILT.json: which version this run built
 # No admin needed, at build time or install time. Run from any folder:
 #   & "<project folder>\scripts\build.ps1" [-Python <python.exe with PyInstaller>] [-NoSelfTest]
@@ -46,6 +46,8 @@ if (Test-Path $dist) { Remove-Item $dist -Recurse -Force -ErrorAction Stop }
 New-Item -ItemType Directory -Force $dist -ErrorAction Stop | Out-Null
 Copy-Item $exe $dist -ErrorAction Stop
 if ((Get-FileHash $exe).Hash -ne (Get-FileHash "$dist\heirloom.exe").Hash) { throw "The program folder does not hold the exe just built" }
+# The set file's document icon: installer\setup.py registers *.heirloom-zestaw with it, from the program folder.
+Copy-Item "$Root\src-tauri\icons\heirloom-zestaw.ico" $dist -ErrorAction Stop
 
 # 3. self-test, of the very exe that goes into the installer
 if (-not $NoSelfTest) {

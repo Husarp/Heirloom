@@ -34,19 +34,10 @@
   color: var(--sidebar-text);
 }
 
-.logo-tile {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--r-ctl);
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-family: var(--f-serif);
-  font-weight: 700;
-  font-size: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.brand-mark {
+  display: block;
   flex: none;
+  user-select: none;
 }
 
 .wordmark {
