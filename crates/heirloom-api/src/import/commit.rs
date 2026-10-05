@@ -504,10 +504,12 @@ fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, St
         let tag = check::import_tag(e.kind.as_deref());
         let principals: Vec<&str> = {
             let explicit: Vec<&str> = e.people.iter().filter(|r| r.role.as_deref() == Some("principal")).map(|r| r.p.as_str()).collect();
-            if !explicit.is_empty() {
+            if matches!(tag.as_str(), "MARR" | "MARB" | "DIV") {
+                // Both partners, however the AI named their roles (one "principal" and one "spouse" used to lose the
+                // whole marriage).
+                e.people.iter().filter(|r| r.role.as_deref().is_none_or(|x| x == "spouse" || x == "principal")).map(|r| r.p.as_str()).collect()
+            } else if !explicit.is_empty() {
                 explicit
-            } else if matches!(tag.as_str(), "MARR" | "MARB" | "DIV") {
-                e.people.iter().filter(|r| r.role.as_deref().is_none_or(|x| x == "spouse")).map(|r| r.p.as_str()).collect()
             } else {
                 e.people.first().map(|r| vec![r.p.as_str()]).unwrap_or_default()
             }
@@ -892,6 +894,21 @@ mod tests {
         let history = s.history();
         assert!(history.iter().all(|e| e.batch.as_deref() == Some("Kowalscy-Leczna-2026-10-01")));
         assert_eq!(history[0].note.as_deref(), Some("akty z Łęcznej"));
+    }
+
+    #[test]
+    fn a_marriage_with_one_principal_and_one_spouse_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let (answer, photo) = example(dir.path());
+        let answer = answer.replacen("{ \"p\": \"P1\", \"role\": \"spouse\" }", "{ \"p\": \"P1\", \"role\": \"principal\" }", 1);
+        assert!(answer.contains("\"role\": \"principal\" },\n        { \"p\": \"P4\""));
+        let mut draft = None;
+        load(&mut s, &mut draft, &answer, &photo);
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+        let d = s.derived();
+        let jozef = (0..d.info.len()).find(|&i| d.info[i].name == "Józef Kowalski").unwrap();
+        assert_eq!(crate::kin::marriage(d, jozef, d.info[jozef].partners[0]), (true, Some("1904".into())));
     }
 
     /// The documented example answer, with its photo M002 dropped next to it.

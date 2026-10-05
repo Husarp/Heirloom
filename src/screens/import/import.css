@@ -322,6 +322,41 @@
   flex-direction: column;
   gap: 8px;
 }
+.imp-guide-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.imp-guide {
+  margin: 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--text2);
+}
+.imp-guide li {
+  padding-left: 2px;
+}
+.imp-guide li > .btn {
+  display: flex;
+}
+.imp-guide li::marker {
+  color: var(--text);
+  font-weight: 600;
+}
+.imp-guide b {
+  color: var(--text);
+  font-weight: 600;
+}
 .imp-past-row {
   display: flex;
   align-items: center;
