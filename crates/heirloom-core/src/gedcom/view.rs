@@ -281,12 +281,14 @@ pub struct View {
     pub version: Option<Version>,
 }
 
-const INDI_EVENTS: &[&str] = &[
+/// A person's events and attributes; the profile numbers a person's facts in this order (the `fact.*` commands too).
+pub const INDI_EVENTS: &[&str] = &[
     "BIRT", "CHR", "BAPM", "DEAT", "BURI", "CREM", "ADOP", "BARM", "BASM", "BLES", "CHRA", "CONF", "FCOM", "GRAD", "EMIG",
     "IMMI", "NATU", "CENS", "PROB", "WILL", "RETI", "ORDN", "EVEN", "CAST", "DSCR", "EDUC", "IDNO", "NATI", "NCHI", "NMR",
     "OCCU", "PROP", "RELI", "RESI", "SSN", "TITL", "FACT", "_MILT", "_MILI",
 ];
-const FAM_EVENTS: &[&str] = &["ANUL", "CENS", "DIV", "DIVF", "ENGA", "MARB", "MARC", "MARR", "MARL", "MARS", "EVEN", "RESI", "NCHI", "FACT"];
+/// A family's events, numbered the same way.
+pub const FAM_EVENTS: &[&str] = &["ANUL", "CENS", "DIV", "DIVF", "ENGA", "MARB", "MARC", "MARR", "MARL", "MARS", "EVEN", "RESI", "NCHI", "FACT"];
 /// INDI substructures shown somewhere in the app; everything else goes to "Inne dane z pliku".
 const INDI_KNOWN: &[&str] = &[
     "NAME", "SEX", "FAMC", "FAMS", "SNOTE", "NOTE", "OBJE", "SOUR", "UID", "_UID", "CREA", "CHAN", "_MARNM", "_HLM_TAG",

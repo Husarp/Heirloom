@@ -6,7 +6,7 @@ use crate::gedwrite::{
     text_node, touch,
 };
 use crate::{ApiError, ApiResult, Session};
-use heirloom_core::gedcom::view::TextKind;
+use heirloom_core::gedcom::view::{FAM_EVENTS, INDI_EVENTS, TextKind};
 use heirloom_core::gedcom::{Document, Node, Version, model};
 use heirloom_core::{Edit, polish};
 use serde_json::{Value, json};
@@ -130,6 +130,9 @@ pub fn call(s: &mut Session, method: &str, args: &Value) -> ApiResult {
     if method == "relation.unlinkPreview" {
         return unlink_preview(s, args);
     }
+    if method == "source.detachPreview" {
+        return crate::media_edit::detach_preview(s, args);
+    }
     prepare(s)?;
     match method {
         "person.create" => create_person(s, args),
@@ -143,6 +146,9 @@ pub fn call(s: &mut Session, method: &str, args: &Value) -> ApiResult {
         "relation.associate" => associate(s, args),
         "relation.dissociate" => dissociate(s, args),
         "family.update" => update_family(s, args),
+        "fact.update" => update_fact(s, args),
+        "fact.add" => add_fact(s, args),
+        "fact.delete" => delete_fact(s, args),
         "text.save" => save_text(s, args),
         "text.delete" => delete_text(s, args),
         "text.move" => move_text(s, args),
@@ -1062,6 +1068,115 @@ fn update_family(s: &mut Session, args: &Value) -> ApiResult {
     Ok(Value::Null)
 }
 
+/// The position among a record's children of its `index`-th event (as the profile numbers them: a person's events
+/// and attributes, or a family's), checked against the tag the screen saw, so a stale screen changes nothing.
+fn fact_position(record: &Node, index: usize, tag: &str) -> Result<usize, ApiError> {
+    let events = if record.tag == "FAM" { FAM_EVENTS } else { INDI_EVENTS };
+    record
+        .children
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| events.contains(&c.tag.as_str()))
+        .nth(index)
+        .filter(|(_, c)| c.tag == tag)
+        .map(|(p, _)| p)
+        .ok_or_else(|| ApiError::new("stale", "Ten wpis zmienił się w międzyczasie. Odśwież profil i spróbuj jeszcze raz."))
+}
+
+/// Sets a fact's date, place and description (`text`: the occupation for OCCU, a note for a birth or an event).
+/// Keys left out stay as they are; a fact left with nothing in it goes.
+fn apply_fact(record: &mut Node, pos: usize, args: &Value) {
+    let mut wrapper = Node::new("X");
+    wrapper.children.push(record.children.remove(pos));
+    let tag = wrapper.children[0].tag.clone();
+    // The description first: an event with only a description typed in is not empty.
+    if let Some(text) = arg_str(args, "text") {
+        let event = &mut wrapper.children[0];
+        if crate::people::holds_value(&event.tag, event.value.as_deref()) {
+            event.set_text(text.trim(), Version::V7);
+        } else {
+            set_child_text(event, "NOTE", Some(text));
+        }
+    }
+    apply_event(&mut wrapper, &[tag.as_str()], args);
+    let empty = wrapper.children.first().is_some_and(|e| e.value.is_none() && e.children.iter().all(|c| matches!(c.tag.as_str(), "_HLM_CERT" | "_HLM_BASIS")));
+    if let Some(event) = wrapper.children.pop().filter(|_| !empty) {
+        record.children.insert(pos, event);
+    }
+}
+
+/// `fact.update`: one fact of a person or a family, edited in place on the profile („W skrócie”, „Oś życia”).
+fn update_fact(s: &mut Session, args: &Value) -> ApiResult {
+    let record = req(args, "record")?;
+    let index = args.get("index").and_then(Value::as_u64).ok_or_else(|| ApiError::bad_args("index"))? as usize;
+    let tag = req(args, "tag")?;
+    let mut changes = Changes::new(&s.archive.doc);
+    let node = changes.get(&record)?;
+    let pos = fact_position(node, index, &tag)?;
+    apply_fact(node, pos, args);
+    let edits = changes.into_edits();
+    commit(s, edits)?;
+    Ok(Value::Null)
+}
+
+/// The kinds of facts the profile can add, with the event name an "EVEN" needs.
+const ADDABLE: &[&str] = &["OCCU", "RESI", "EDUC", "_MILT", "EMIG", "IMMI", "RELI", "EVEN"];
+
+/// `fact.add`: a new fact for a person (a second occupation, a place they lived, an event), after the facts of its
+/// kind. Returns its index.
+fn add_fact(s: &mut Session, args: &Value) -> ApiResult {
+    let record = req(args, "record")?;
+    let tag = req(args, "tag")?;
+    if !ADDABLE.contains(&tag.as_str()) {
+        return Err(ApiError::bad_args("tag"));
+    }
+    let kind = arg_str(args, "kind").map(str::trim).filter(|k| !k.is_empty());
+    if tag == "EVEN" && kind.is_none() {
+        return Err(ApiError::new("bad_args", "Podaj, co to za wydarzenie."));
+    }
+    let filled = |key: &str| arg_str(args, key).is_some_and(|v| !v.trim().is_empty());
+    if !filled("date") && !filled("place") && !filled("text") {
+        return Err(ApiError::new("bad_args", "Wpisz datę, miejsce albo opis."));
+    }
+    let mut changes = Changes::new(&s.archive.doc);
+    let node = changes.get(&record)?;
+    if node.tag != "INDI" {
+        return Err(ApiError::bad_args("record"));
+    }
+    let mut fact = Node::new(&tag);
+    if let Some(kind) = kind {
+        fact.children.push(Node::with_value("TYPE", kind));
+    }
+    // After the facts of its kind, else after the last event (else after the names).
+    let at = node
+        .children
+        .iter()
+        .rposition(|c| c.tag == tag)
+        .or_else(|| node.children.iter().rposition(|c| INDI_EVENTS.contains(&c.tag.as_str())))
+        .or_else(|| node.children.iter().rposition(|c| matches!(c.tag.as_str(), "NAME" | "SEX")))
+        .map_or(node.children.len(), |p| p + 1);
+    node.children.insert(at, fact);
+    let index = node.children[..at].iter().filter(|c| INDI_EVENTS.contains(&c.tag.as_str())).count();
+    apply_fact(node, at, args);
+    let edits = changes.into_edits();
+    commit(s, edits)?;
+    Ok(json!({ "index": index }))
+}
+
+/// `fact.delete`: one fact of a person or a family, with its date, place, notes and citations.
+fn delete_fact(s: &mut Session, args: &Value) -> ApiResult {
+    let record = req(args, "record")?;
+    let index = args.get("index").and_then(Value::as_u64).ok_or_else(|| ApiError::bad_args("index"))? as usize;
+    let tag = req(args, "tag")?;
+    let mut changes = Changes::new(&s.archive.doc);
+    let node = changes.get(&record)?;
+    let pos = fact_position(node, index, &tag)?;
+    node.children.remove(pos);
+    let edits = changes.into_edits();
+    commit(s, edits)?;
+    Ok(Value::Null)
+}
+
 /// Creates or updates a text (biography section, story, saying, trivia, note, summary) and links it to the person.
 fn save_text(s: &mut Session, args: &Value) -> ApiResult {
     let person = req(args, "person")?;
@@ -1237,6 +1352,46 @@ mod tests {
         let d = s.derived();
         assert!(d.info[d.index(&a).unwrap()].partners.is_empty());
         assert!(s.archive.doc.records.iter().all(|r| r.tag != "FAM"), "an empty family is removed");
+    }
+
+    #[test]
+    fn facts_are_changed_added_and_deleted_in_place() {
+        let (_dir, mut s) = session();
+        let a = run(&mut s, "person.create", json!({ "given": "Józef", "surname": "Kowalski", "sex": "M", "occupation": "rolnik", "events": { "birth": { "date": "1878", "place": "Wólka" } } }))["id"].as_str().unwrap().to_string();
+        let b = run(&mut s, "person.create", json!({ "given": "Marianna", "surname": "Nowak", "sex": "F", "relation": { "kind": "partner", "of": a, "married": true, "date": "1904" } }))["id"].as_str().unwrap().to_string();
+        let facts = |s: &mut Session| -> Vec<(String, Option<String>, Option<String>, Option<String>, Option<String>)> {
+            let d = s.derived();
+            d.view.people[d.index(&a).unwrap()].facts.iter().map(|f| (f.tag.clone(), f.value.clone(), f.date_text.clone(), f.place.clone(), f.note.clone())).collect()
+        };
+        // The occupation (index 1, after the birth) is changed, and a second one added with a date.
+        run(&mut s, "fact.update", json!({ "record": a, "index": 1, "tag": "OCCU", "text": "kolejarz", "place": "Lublin" }));
+        let added = run(&mut s, "fact.add", json!({ "record": a, "tag": "OCCU", "text": "dróżnik", "date": "od 1920" }));
+        assert_eq!(added["index"], 2);
+        // A note on the birth (in brackets, as a family member would add it) and a fixed town.
+        run(&mut s, "fact.update", json!({ "record": a, "index": 0, "tag": "BIRT", "place": "Wólka (dziś Wólka Łęczyńska)", "text": "w domu dziadków" }));
+        let f = facts(&mut s);
+        assert_eq!(f[0], ("BIRT".into(), None, Some("1878".into()), Some("Wólka (dziś Wólka Łęczyńska)".into()), Some("w domu dziadków".into())));
+        assert_eq!(f[1], ("OCCU".into(), Some("kolejarz".into()), None, Some("Lublin".into()), None));
+        assert_eq!(f[2], ("OCCU".into(), Some("dróżnik".into()), Some("FROM 1920".into()), None, None));
+        // A stale screen changes nothing.
+        assert!(call(&mut s, "fact.update", &json!({ "record": a, "index": 1, "tag": "RESI", "text": "x" })).is_err());
+        // The wedding is a family fact.
+        let fam = s.archive.doc.record(&a).unwrap().children.iter().find(|c| c.tag == "FAMS").unwrap().pointer().unwrap().to_string();
+        run(&mut s, "fact.update", json!({ "record": fam, "index": 0, "tag": "MARR", "date": "14.02.1904", "place": "Łęczna" }));
+        let d = s.derived();
+        assert_eq!(crate::kin::marriage(d, d.index(&a).unwrap(), d.index(&b).unwrap()), (true, Some("1904".into())));
+        // Deleting, and each command is one undo step.
+        let depth = s.archive.undo_depth();
+        run(&mut s, "fact.delete", json!({ "record": a, "index": 2, "tag": "OCCU" }));
+        assert_eq!(facts(&mut s).len(), 2);
+        assert_eq!(s.archive.undo_depth(), depth + 1);
+        s.archive.undo();
+        s.changed();
+        assert_eq!(facts(&mut s).len(), 3);
+        // Clearing everything of a fact removes it.
+        run(&mut s, "fact.update", json!({ "record": a, "index": 2, "tag": "OCCU", "text": "", "date": "", "place": "" }));
+        assert_eq!(facts(&mut s).len(), 2);
+        assert!(call(&mut s, "fact.add", &json!({ "record": a, "tag": "OCCU", "text": " " })).is_err(), "nothing typed, nothing added");
     }
 
     /// Every FAM has at least two people and every link is written on both sides (CHIL ↔ FAMC, HUSB/WIFE ↔ FAMS).
