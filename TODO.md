@@ -443,6 +443,15 @@ This is the roadmap, with a checkbox per task.
 - [ ] **Later for sets** (not in 0.5.0): double-clicking a `.heirloom-zestaw` file opens Heirloom (file association
       in the installer); the same photo in two linked archives shown once; copying a person from one archive into
       another
+- [x] **Profile: facts, „Oś życia” and sources edited in place** (your notes; done 2026-10-05, 0.6.0): „W skrócie”
+      cells and the timeline's rows open a small form in place (also from browse mode, after „who edits”), „Dodaj
+      kolejny zawód”, „Dodaj wydarzenie”, „Odłącz źródło”; undated facts on the timeline with „bez daty”; Rodzina
+      tiles with „z d. …” and the years on their own line; all undoable, a form never deletes by itself
+- [x] **Przodkowie and Potomkowie** (your notes; done 2026-10-05, 0.6.0): Przodkowie the whole line, the person at
+      the right; Potomkowie „+N potomków” unfolds in place, „Partnerzy” as greyed cards, generation names in a
+      column at the left; lines visible at every zoom
+- [ ] **Check 0.6.0 on Windows** (could only be tried in a browser here): editing facts in „W skrócie” and „Oś
+      życia”, Przodkowie and Potomkowie with the side panel, unfolding and „Partnerzy”
 - [x] **Your idea: how the archive stores its data** — decided 2026-09-29: it stays one file. Now: one `rodzina.ged` (GEDCOM 7, all
       people, families, sources, texts) + `media/` (photos, PDFs) + `zrodla-ai/` (the AI answers as they came) +
       `.heirloom/` (settings, change history, backup copies); „Zapisz import” writes the batch into `rodzina.ged` at
