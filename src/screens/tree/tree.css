@@ -40,38 +40,40 @@
   overflow: visible;
   pointer-events: none;
 }
+/* Widths and dashes never below these screen pixels when zoomed out, and growing with the cards when zoomed in: the
+   world is scaled by a CSS transform, which `vector-effect: non-scaling-stroke` doesn't see, so below 100 % they are
+   scaled back with --inv (1 / zoom) instead. */
 .tree-lines .link {
   fill: none;
   stroke: var(--line);
-  stroke-width: 1.5;
-  vector-effect: non-scaling-stroke;
+  stroke-width: max(calc(2px * var(--inv)), 2px);
   stroke-linejoin: round;
 }
 .lod-3 .tree-lines .link {
-  stroke-width: 2;
+  stroke-width: max(calc(2.25px * var(--inv)), 2.25px);
 }
 .lod-4 .tree-lines .link {
-  stroke-width: 2.5;
+  stroke-width: max(calc(2.5px * var(--inv)), 2.5px);
 }
 .tree-lines .link.adopted {
-  stroke-dasharray: 6 4;
+  stroke-dasharray: max(calc(6px * var(--inv)), 6px) max(calc(4px * var(--inv)), 4px);
 }
 .tree-lines .link.uncertain {
-  stroke-dasharray: 1.5 3.5;
+  stroke-dasharray: max(calc(1.5px * var(--inv)), 1.5px) max(calc(3.5px * var(--inv)), 3.5px);
 }
 .tree-lines .link.placeholder {
-  stroke-dasharray: 2 4;
+  stroke-dasharray: max(calc(2px * var(--inv)), 2px) max(calc(4px * var(--inv)), 4px);
   opacity: 0.7;
 }
 .tree-lines .link.on {
   stroke: var(--accent);
-  stroke-width: 2.5;
+  stroke-width: max(calc(3px * var(--inv)), 3px);
 }
 .lod-3 .tree-lines .link.on {
-  stroke-width: 3;
+  stroke-width: max(calc(3.25px * var(--inv)), 3.25px);
 }
 .lod-4 .tree-lines .link.on {
-  stroke-width: 3.5;
+  stroke-width: max(calc(3.5px * var(--inv)), 3.5px);
 }
 .tree-lines .union {
   fill: var(--canvas);
@@ -203,6 +205,22 @@
   -webkit-box-orient: vertical;
 }
 
+/* Potomkowie: a partner beside a descendant, greyed; the card itself stays opaque, so no line shows through it. */
+.tree-card.full.partner,
+.tree-card.compact.partner {
+  background: color-mix(in oklab, var(--card) 50%, var(--canvas));
+}
+.tree-card.full.partner > *,
+.tree-card.compact.partner > * {
+  opacity: 0.62;
+}
+.tree-card.full.partner:hover > * {
+  opacity: 0.9;
+}
+.tree-card.mini.partner {
+  filter: grayscale(0.8);
+}
+
 /* Compact: the box scales with the zoom, the text keeps its screen size. */
 .tree-card.compact {
   background: var(--card);
@@ -287,6 +305,40 @@
   color: var(--text3);
   white-space: nowrap;
   pointer-events: none;
+}
+/* Labels kept in view (FocusCanvas `StickyLabels`), on screen rather than in the world. */
+.tree-label.sticky {
+  font-size: 11px;
+  z-index: 2;
+}
+/* Przodkowie's column names, on a backing of the canvas where cards pass under them. */
+.tree-label.sticky.top {
+  margin-left: -6px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--canvas) 88%, transparent);
+}
+/* Potomkowie's row names: a column at the left edge, like Całe drzewo's, that the tree scrolls under. */
+.tree-gutter {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 112px;
+  z-index: 2;
+  overflow: hidden;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  pointer-events: none;
+}
+.tree-label.sticky.left {
+  left: 0;
+  right: 0;
+  padding: 0 8px 0 14px;
+  transform: translateY(-50%);
+  letter-spacing: 0.04em;
+  white-space: normal;
+  line-height: 1.25;
 }
 
 .tree-box {
@@ -411,6 +463,14 @@
 .tree-legend.side-key.overview {
   left: 112px;
   max-width: calc(100% - 128px);
+}
+.tree-legend.side-key.gutter {
+  left: 128px;
+  max-width: calc(100% - 144px);
+}
+/* Right of Potomkowie's column of names. */
+.tree-legend.gutter {
+  left: 128px;
 }
 .tree-legend .item {
   display: inline-flex;

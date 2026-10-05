@@ -2,13 +2,13 @@
 // with a CSS transform for the camera. Four levels of detail by zoom (spec §3.4–§3.8): full card ≥ 75 %, compact
 // 40–75 %, mini 15–40 %, dots below; text in the compact and mini levels keeps its screen size.
 
-import { Camera, ChevronsDown, ChevronsUp, ChevronRight, Plus } from "lucide-react";
+import { Camera, ChevronLeft, ChevronsDown, ChevronsUp, Plus } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { TreeCamera } from "../../app/store";
 import { ArchiveDot, Avatar, CardYears } from "../../components/bits";
 import { cardName, cardYears } from "../../lib/format";
 import { RelativeTools } from "../person/RelativeTools";
-import { cameraOf, viewOf, type Camera2D } from "./camera";
+import { cameraOf, unfoldView, viewOf, type Camera2D } from "./camera";
 import type { Graph, GraphPerson } from "./graph";
 import { CARD_H, CARD_W, type Scene, type SceneCard } from "./layout";
 import { fitName, forgetNameWidths, nameWidth } from "./nameFit";
@@ -37,6 +37,10 @@ export interface FocusCanvasHandle {
 
 const MIN_ZOOM = 0.06;
 const MAX_ZOOM = 2;
+/** The column of the generations' names at the left edge (Potomkowie; `.tree-gutter`). */
+const GUTTER = 112;
+/** Przodkowie's column names stop here, under the two toolbar rows, when the tree is scrolled down. */
+const STICKY_TOP = 104;
 
 export interface CardStyle {
   color: (p: GraphPerson) => number | null;
@@ -59,13 +63,16 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
   onSelect: (id: string | null) => void;
   onOpen: (id: string) => void;
   onHover: (id: string | null) => void;
-  onPill: (target: string) => void;
+  onPill: (target: string, unfold: boolean) => void;
   onBox: (action: string, of?: string) => void;
   onZoom: (zoom: number) => void;
   focusId: string;
   photos: boolean;
-  /** Where the person starts on screen: the middle (Rodzina), the left (Przodkowie) or the top (Potomkowie). */
-  anchor: "center" | "left" | "top";
+  /** Where the person starts on screen: the middle (Rodzina), the right (Przodkowie) or the top (Potomkowie). */
+  anchor: "center" | "right" | "top";
+  /** In a new layout of the same centre, the card that keeps its place on screen (the one just unfolded); else the
+   *  centre person's. */
+  pin?: string;
   /** A camera to come back to (Back, „Ostatnie miejsce”), used instead of the usual placement once the centre
    *  person's card is laid out; `onRestored` then says it was used. */
   restore?: TreeCamera | null;
@@ -77,7 +84,7 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
   /** A relative was unlinked or deleted with those tools. */
   onGone?: (id: string) => void;
 }>(function FocusCanvas(props, ref) {
-  const { scene, graph, selected, style, hidden, animate, onSelect, onOpen, onHover, onPill, onBox, onZoom, focusId, photos, anchor, restore, onRestored, onCamera, tools, onGone } = props;
+  const { scene, graph, selected, style, hidden, animate, onSelect, onOpen, onHover, onPill, onBox, onZoom, focusId, photos, anchor, pin, restore, onRestored, onCamera, tools, onGone } = props;
   const host = useRef<HTMLDivElement>(null);
   const [camera, setCamera] = useState<Camera2D>({ x: 0, y: 0, zoom: 1 });
   const [lod, setLod] = useState<Lod>(1);
@@ -105,15 +112,17 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
   );
 
   const size = () => ({ w: host.current?.clientWidth ?? 800, h: host.current?.clientHeight ?? 600 });
+  // The part of the screen left of the column of names isn't room for the tree.
+  const gutter = scene.labels.some((l) => l.stick === "left") ? GUTTER : 0;
 
   const fit = useCallback(() => {
     const { w, h } = size();
     const b = scene.bounds;
     const bw = b.maxX - b.minX + 160;
     const bh = b.maxY - b.minY + 200;
-    const zoom = Math.min(1.1, Math.max(0.1, Math.min(w / bw, h / bh)));
-    apply({ zoom, x: w / 2 - ((b.minX + b.maxX) / 2) * zoom, y: h / 2 - ((b.minY + b.maxY) / 2) * zoom + 10 }, true);
-  }, [scene, apply]);
+    const zoom = Math.min(1.1, Math.max(0.1, Math.min((w - gutter) / bw, h / bh)));
+    apply({ zoom, x: gutter + (w - gutter) / 2 - ((b.minX + b.maxX) / 2) * zoom, y: h / 2 - ((b.minY + b.maxY) / 2) * zoom + 10 }, true);
+  }, [scene, apply, gutter]);
 
   const centerOn = useCallback(
     (id: string, withAnimation = true) => {
@@ -121,9 +130,9 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
       if (!card) return;
       const { w, h } = size();
       const zoom = Math.max(cameraRef.current.zoom, 0.8);
-      apply({ zoom, x: w / 2 - (card.x + (card.w ?? CARD_W) / 2) * zoom, y: h / 2 - (card.y + CARD_H / 2) * zoom }, withAnimation);
+      apply({ zoom, x: gutter + (w - gutter) / 2 - (card.x + (card.w ?? CARD_W) / 2) * zoom, y: h / 2 - (card.y + CARD_H / 2) * zoom }, withAnimation);
     },
-    [scene, apply],
+    [scene, apply, gutter],
   );
 
   const zoomAt = useCallback(
@@ -148,9 +157,9 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
       const y = c.y + card.y * c.zoom;
       // The toolbars cover the top 110 px.
       const margin = 24;
-      if (x < margin || y < 110 || x + (card.w ?? CARD_W) * c.zoom > w - margin || y + CARD_H * c.zoom > h - margin) centerOn(id);
+      if (x < gutter + margin || y < 110 || x + (card.w ?? CARD_W) * c.zoom > w - margin || y + CARD_H * c.zoom > h - margin) centerOn(id);
     },
-    [scene, centerOn],
+    [scene, centerOn, gutter],
   );
 
   const focusCentre = useCallback(() => {
@@ -170,15 +179,41 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
   useEffect(() => cameraMoved.current?.(), [camera]);
 
   // A new scene: another person in the middle moves the camera to them with animation; the same person in a new
-  // layout (fresh data, edit mode) moves the camera with their card, so they stay put on screen.
+  // layout (fresh data, edit mode, a branch unfolded) moves the camera with their card, or with the pinned one, so it
+  // stays put on screen.
   const lastFocus = useRef<string | null>(null);
-  const lastSpot = useRef<{ x: number; y: number } | null>(null);
+  const lastScene = useRef<Scene | null>(null);
   // The first placement needs the canvas size; a window that isn't shown yet (minimised) reports 0 × 0.
   const [hasSize, setHasSize] = useState(false);
+  // Przodkowie: the tree hangs from the right edge, so when the canvas narrows (the side panel opens) the chosen card,
+  // or else the person at the right, stays in view: the tree moves left only as far as that card needs, so a card
+  // clicked further left stays under the pointer. Widening again (the panel closed) moves it back as far.
+  const rightAnchored = useRef(anchor === "right");
+  rightAnchored.current = anchor === "right";
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const panelShift = useRef(0);
   useEffect(() => {
     const el = host.current;
     if (!el) return;
-    const observer = new ResizeObserver(() => setHasSize(el.clientWidth > 0 && el.clientHeight > 0));
+    let width = el.clientWidth;
+    const observer = new ResizeObserver(() => {
+      setHasSize(el.clientWidth > 0 && el.clientHeight > 0);
+      const change = el.clientWidth - width;
+      if (change && width > 0 && el.clientWidth > 0 && rightAnchored.current && lastFocus.current) {
+        const c = cameraRef.current;
+        let shift = 0;
+        if (change > 0) shift = Math.min(change, panelShift.current);
+        else {
+          const id = selectedRef.current ?? lastFocus.current;
+          const card = lastScene.current?.cards.find((k) => k.id === id);
+          if (card) shift = -Math.min(-change, Math.max(0, c.x + (card.x + (card.w ?? CARD_W)) * c.zoom - (el.clientWidth - 24)));
+        }
+        panelShift.current -= shift;
+        if (shift) setCamera({ ...c, x: c.x + shift });
+      }
+      width = el.clientWidth;
+    });
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
@@ -187,27 +222,42 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
     if (!card) return;
     const { w, h } = size();
     if (lastFocus.current === null && (w === 0 || h === 0)) return;
-    const spot = lastSpot.current;
-    // Przodkowie: the generation labels above the tree stay below the two toolbar rows (spec §3.10: y 100).
-    const belowToolbars = (y: number, zoom: number) => (anchor === "left" ? Math.max(y, 118 - scene.bounds.minY * zoom) : y);
+    // Przodkowie: the person at the right, their ancestors to scroll to on the left; Potomkowie: at the top, right of
+    // the column of names.
+    const placeX = (zoom: number) => (anchor === "right" ? w - 80 - (card.x + CARD_W) * zoom : gutter + (w - gutter) / 2 - (card.x + CARD_W / 2) * zoom);
     if (restore && w > 0 && h > 0) {
+      panelShift.current = 0;
       apply(cameraOf(restore, { w, h }, { x: card.x + CARD_W / 2, y: card.y + CARD_H / 2 }, MIN_ZOOM, MAX_ZOOM));
       onRestored?.();
     } else if (lastFocus.current === null) {
-      const x = anchor === "left" ? 80 - card.x : w / 2 - (card.x + CARD_W / 2);
+      panelShift.current = 0;
       const y = anchor === "top" ? 150 - card.y : h / 2 - (card.y + CARD_H / 2) + (anchor === "center" && scene.bounds.minY < -100 ? 40 : 0);
-      apply({ zoom: 1, x, y: belowToolbars(y, 1) });
+      apply({ zoom: 1, x: placeX(1), y });
     } else if (lastFocus.current !== focusId) {
+      panelShift.current = 0;
       const zoom = Math.max(cameraRef.current.zoom, 0.8);
-      const x = anchor === "left" ? 80 - card.x * zoom : w / 2 - (card.x + CARD_W / 2) * zoom;
       const y = anchor === "top" ? 150 - card.y * zoom : h / 2 - (card.y + CARD_H / 2) * zoom;
-      apply({ zoom, x, y: belowToolbars(y, zoom) }, true);
-    } else if (spot && (spot.x !== card.x || spot.y !== card.y)) {
+      apply({ zoom, x: placeX(zoom), y }, true);
+    } else {
+      const old = lastScene.current?.cards;
+      const id = pin && old?.some((c) => c.id === pin) && scene.cards.some((c) => c.id === pin) ? pin : focusId;
+      const before = old?.find((c) => c.id === id);
+      const now = scene.cards.find((c) => c.id === id);
       const c = cameraRef.current;
-      apply({ zoom: c.zoom, x: c.x - (card.x - spot.x) * c.zoom, y: c.y - (card.y - spot.y) * c.zoom }, true);
+      let next = before && now && (before.x !== now.x || before.y !== now.y) ? { zoom: c.zoom, x: c.x - (now.x - before.x) * c.zoom, y: c.y - (now.y - before.y) * c.zoom } : c;
+      // A branch just unfolded: its card and the row of children below come into view, by the least move (and a
+      // little less zoom where the row is wider than the screen, as far as full cards).
+      const fresh = id === pin && now ? scene.cards.filter((k) => k.rel?.of === id && !old?.some((o) => o.id === k.id)) : [];
+      if (now && fresh.length) {
+        const row = [now, ...fresh];
+        const box = { x: Math.min(...row.map((k) => k.x)), y: Math.min(...row.map((k) => k.y)), r: Math.max(...row.map((k) => k.x + (k.w ?? CARD_W))), b: Math.max(...row.map((k) => k.y + CARD_H)) };
+        // The toolbars cover the top 110 px.
+        next = unfoldView(next, box, { x: now.x + (now.w ?? CARD_W) / 2, y: now.y }, { left: gutter + 24, top: 110, right: w - 24, bottom: h - 24 });
+      }
+      if (next !== c) apply(next, true);
     }
     lastFocus.current = focusId;
-    lastSpot.current = { x: card.x, y: card.y };
+    lastScene.current = scene;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusId, scene, hasSize, restore]);
 
@@ -268,6 +318,12 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      // A control focused at the edge (a pill half off screen) would scroll the canvas itself, shifting the tree
+      // under the column of names; the camera does all the moving, so the canvas stays unscrolled.
+      onScroll={(e) => {
+        e.currentTarget.scrollLeft = 0;
+        e.currentTarget.scrollTop = 0;
+      }}
     >
       <div className="tree-world" style={worldStyle}>
         <svg className="tree-lines" style={{ left: b.minX - pad, top: b.minY - pad, width: b.maxX - b.minX + pad * 2, height: b.maxY - b.minY + pad * 2 }} viewBox={`${b.minX - pad} ${b.minY - pad} ${b.maxX - b.minX + pad * 2} ${b.maxY - b.minY + pad * 2}`}>
@@ -288,11 +344,13 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
             })}
         </svg>
         {lod <= 2 &&
-          scene.labels.map((l) => (
-            <span key={l.key} className="tree-label" style={{ left: l.x, top: l.y }}>
-              {l.text}
-            </span>
-          ))}
+          scene.labels
+            .filter((l) => !l.stick)
+            .map((l) => (
+              <span key={l.key} className="tree-label" style={{ left: l.x, top: l.y }}>
+                {l.text}
+              </span>
+            ))}
         {lod <= 2 &&
           scene.boxes.map((box) => (
             <button key={box.key} className={`tree-box ${box.action}`} style={{ left: box.x, top: box.y, width: box.w, height: box.h }} onClick={() => onBox(box.action, box.of)}>
@@ -318,8 +376,14 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
         ))}
         {lod <= 2 &&
           scene.pills.map((p) => (
-            <button key={p.key} className={`tree-pill ${p.direction}`} style={{ left: p.x, top: p.y }} onClick={() => onPill(p.target)} title={p.direction === "up" || p.direction === "right" ? "Dalsi przodkowie — pokaż od tej osoby" : "Potomkowie — pokaż od tej osoby"}>
-              {p.direction === "up" ? <ChevronsUp size={12} /> : p.direction === "right" ? <ChevronRight size={12} /> : <ChevronsDown size={12} />}
+            <button
+              key={p.key}
+              className={`tree-pill ${p.direction}`}
+              style={{ left: p.x, top: p.y }}
+              onClick={() => onPill(p.target, !!p.unfold)}
+              title={p.unfold ? "Rozwiń kolejne 3 pokolenia tej gałęzi" : p.direction === "down" ? "Potomkowie — pokaż od tej osoby" : "Dalsi przodkowie — pokaż od tej osoby"}
+            >
+              {p.direction === "up" ? <ChevronsUp size={12} /> : p.direction === "left" ? <ChevronLeft size={12} /> : <ChevronsDown size={12} />}
               {p.label}
             </button>
           ))}
@@ -345,9 +409,47 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
             );
           })}
       </div>
+      <StickyLabels labels={scene.labels} camera={camera} lod={lod} smooth={smooth && animate} />
     </div>
   );
 });
+
+/** The labels kept in view (`SceneLabel.stick`), on screen rather than in the world: Przodkowie's column names
+ *  follow their columns across and stop under the toolbars going down; Potomkowie's row names sit in a column at the
+ *  left edge, over whatever is scrolled under it, beside their rows. */
+function StickyLabels({ labels, camera, lod, smooth }: { labels: Scene["labels"]; camera: Camera2D; lod: Lod; smooth: boolean }) {
+  const top = labels.filter((l) => l.stick === "top");
+  const left = labels.filter((l) => l.stick === "left");
+  const transition = smooth ? "left 280ms ease, top 280ms ease" : undefined;
+  // Row names while the rows are far enough apart for them.
+  const pitch = left.length > 1 ? (left[1].y - left[0].y) * camera.zoom : Infinity;
+  return (
+    <>
+      {lod <= 2 &&
+        top.map((l) => (
+          <span key={l.key} className="tree-label sticky top" style={{ left: camera.x + l.x * camera.zoom, top: Math.max(STICKY_TOP, camera.y + l.y * camera.zoom), transition }}>
+            {l.text}
+          </span>
+        ))}
+      {left.length > 0 && (
+        <div className="tree-gutter">
+          {pitch >= 24 &&
+            left.map((l) => {
+              // A row gone up under the toolbars takes its name with it (none of it peeks out beside them).
+              const top = camera.y + (l.y + CARD_H / 2) * camera.zoom;
+              return (
+                top >= STICKY_TOP + 8 && (
+                  <span key={l.key} className="tree-label sticky left" style={{ top, transition }}>
+                    {l.text}
+                  </span>
+                )
+              );
+            })}
+        </div>
+      )}
+    </>
+  );
+}
 
 function Card({
   card,
@@ -378,7 +480,7 @@ function Card({
     transform: `translate(${card.x}px, ${card.y}px)`,
     width: card.w,
     transition: animate ? "transform 280ms ease, opacity 200ms" : undefined,
-    opacity: dimmed ? 0.35 : 1,
+    opacity: dimmed ? 0.35 : undefined,
   };
   if (card.stub) {
     return (
@@ -409,7 +511,7 @@ function Card({
     // Dark ink on the light branch colours 4, 6, 9 and 10 (D3); per theme through the tokens.
     const ink = color && [4, 6, 9, 10].includes(color) ? "var(--lod-ink-dk)" : "var(--lod-ink)";
     return (
-      <div className={`tree-card mini${selected ? " selected" : ""}`} style={{ ...base, background: branchColor }} {...events}>
+      <div className={`tree-card mini${selected ? " selected" : ""}${card.partner ? " partner" : ""}`} style={{ ...base, background: branchColor }} {...events}>
         <span className="mini-letter" style={{ color: color ? ink : "var(--lod-ink)" }}>
           {(p.given || p.name).charAt(0)}
         </span>
@@ -423,7 +525,7 @@ function Card({
   );
   if (lod === 2) {
     return (
-      <div className={`tree-card compact${selected ? " selected" : ""}`} style={base} {...events}>
+      <div className={`tree-card compact${selected ? " selected" : ""}${card.partner ? " partner" : ""}`} style={base} {...events}>
         <span className="stripe" style={{ background: branchColor }} />
         <ArchiveDot from={p.from} size={9} style={CARD_DOT} />
         <span className="compact-text">
@@ -438,7 +540,7 @@ function Card({
   // archive's dot in archives opened together.
   const fit = fitName(name, (card.w ? card.w - 23 : CARD_W - 79) - (p.from ? 8 : 0), card.w ? 14 : 15, nameWidth);
   return (
-    <div className={`tree-card full${selected ? " selected" : ""}${card.focus ? " focus" : ""}${card.w ? " narrow" : ""}`} style={base} {...events}>
+    <div className={`tree-card full${selected ? " selected" : ""}${card.focus ? " focus" : ""}${card.w ? " narrow" : ""}${card.partner ? " partner" : ""}`} style={base} {...events}>
       <span className="stripe" style={{ background: branchColor }} />
       <ArchiveDot from={p.from} size={10} style={CARD_DOT} />
       {!card.w && <Avatar initials={p.initials} branch={color ?? undefined} photo={photos ? p.photo : null} size={40} tint={22} />}

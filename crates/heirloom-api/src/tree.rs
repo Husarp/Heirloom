@@ -64,8 +64,11 @@ fn union_json(d: &Derived, fam: &str, included: &HashSet<usize>) -> Option<Value
     }))
 }
 
-/// People around `id`: ancestors `up` generations, descendants `down` generations (more under `expand`), the
-/// siblings, and every partner of the people shown with their parents' count.
+/// Generations one click on „+N potomków” unfolds below that person (layout.ts `UNFOLD`).
+pub const UNFOLD: usize = 3;
+
+/// People around `id`: ancestors `up` generations, descendants `down` generations (UNFOLD more below each person in
+/// `expand`), the siblings, and every partner of the people shown with their parents' count.
 pub fn graph(d: &Derived, id: &str, up: usize, down: usize, expand: &[String]) -> Result<Value, ApiError> {
     let focus = d.index(id).ok_or_else(|| not_found(id))?;
     let mut included: HashSet<usize> = HashSet::from([focus]);
@@ -83,13 +86,13 @@ pub fn graph(d: &Derived, id: &str, up: usize, down: usize, expand: &[String]) -
         frontier = next;
     }
     // Descendants with their partners.
-    // Each person carries how many more generations below them to show; an expanded person ("+12") gets the
-    // full depth again.
+    // Each person carries how many more generations below them to show; an expanded person („+12 potomków”
+    // clicked) gets UNFOLD more.
     let expanded: HashSet<usize> = expand.iter().filter_map(|x| d.index(x)).collect();
     let mut queue: VecDeque<(usize, usize)> = VecDeque::from([(focus, down)]);
     let mut best: HashMap<usize, usize> = HashMap::new();
     while let Some((p, budget)) = queue.pop_front() {
-        let budget = if expanded.contains(&p) { budget.max(down.max(1)) } else { budget };
+        let budget = if expanded.contains(&p) { budget.max(UNFOLD) } else { budget };
         if best.get(&p).is_some_and(|&b| b >= budget) {
             continue;
         }
@@ -133,7 +136,7 @@ pub fn graph(d: &Derived, id: &str, up: usize, down: usize, expand: &[String]) -
         people.insert(d.xref(i).to_string(), v);
     }
     let unions: Vec<Value> = families.iter().filter_map(|f| union_json(d, f, &included)).collect();
-    Ok(json!({ "focus": id, "up": up, "down": down, "people": people, "unions": unions }))
+    Ok(json!({ "focus": id, "up": up, "down": down, "expand": expand, "people": people, "unions": unions }))
 }
 
 /// [father, mother] as indices, either missing: the first man and the first woman among the parents, a parent of
@@ -294,6 +297,27 @@ mod tests {
         for &c in &d.info[someone].children {
             assert!(people.contains_key(d.xref(c)), "children are included");
         }
+        // A person at the bottom of Potomkowie, unfolded: UNFOLD generations below them come too, no more.
+        let root = (0..d.info.len()).max_by_key(|&i| descendant_count(&d, i)).unwrap();
+        let generations = |g: &Value, from: usize| {
+            let people = g["people"].as_object().unwrap();
+            let (mut level, mut frontier) = (0, vec![from]);
+            loop {
+                frontier = frontier.iter().flat_map(|&p| d.info[p].children.clone()).filter(|&c| people.contains_key(d.xref(c))).collect();
+                if frontier.is_empty() {
+                    return level;
+                }
+                level += 1;
+            }
+        };
+        let grandchild = d.info[root].children.iter().flat_map(|&c| d.info[c].children.clone()).max_by_key(|&g| descendant_count(&d, g)).unwrap();
+        assert!(descendant_count(&d, grandchild) > 0);
+        let plain = graph(&d, d.xref(root), 0, 2, &[]).unwrap();
+        assert_eq!(generations(&plain, grandchild), 0);
+        let unfolded = graph(&d, d.xref(root), 0, 2, &[d.xref(grandchild).to_string()]).unwrap();
+        let below = generations(&unfolded, grandchild);
+        assert!((1..=UNFOLD).contains(&below), "{below} generations below");
+        assert_eq!(unfolded["expand"][0], d.xref(grandchild));
         let overview = overview(&d, Some(d.xref(someone)));
         assert_eq!(overview["people"].as_array().unwrap().len(), d.info.len());
         assert!(overview["line"].as_array().unwrap().len() >= 2);

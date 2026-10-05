@@ -1,4 +1,4 @@
-import { Crosshair, GitCommitVertical, IdCard, LocateFixed, Maximize, Minus, Palette, Plus } from "lucide-react";
+import { Crosshair, GitCommitVertical, IdCard, LocateFixed, Maximize, Minus, Palette, Plus, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { call } from "../../api/transport";
 import type { ArchiveStatus } from "../../api/types";
@@ -20,7 +20,8 @@ type ColorMode = "branch" | "surname" | "side" | "generation" | "archive" | "non
 
 const DEPTH: Record<Exclude<View, "overview">, { up: number; down: number }> = {
   family: { up: 1, down: 1 },
-  ancestors: { up: 3, down: 0 },
+  // The whole line, as far back as it is known (tree.graph allows 64).
+  ancestors: { up: 64, down: 0 },
   descendants: { up: 0, down: 2 },
 };
 
@@ -56,9 +57,12 @@ export function Tree({ hidden }: { hidden: boolean }) {
   );
   const [lineOn, setLineOn] = useState(true);
   const [photos, setPhotos] = useState((display.cardStyle as string) !== "plain");
+  // Potomkowie: the partners as cards beside each person (on unless switched off).
+  const [partners, setPartners] = useState((display.treePartners as string) !== "off");
   // Changed in Ustawienia while the tree stays mounted in the background.
   useEffect(() => setColorMode((display.treeColor as ColorMode) ?? "branch"), [display.treeColor]);
   useEffect(() => setPhotos((display.cardStyle as string) !== "plain"), [display.cardStyle]);
+  useEffect(() => setPartners((display.treePartners as string) !== "off"), [display.treePartners]);
   const [zoom, setZoom] = useState(1);
   const canvas = useRef<FocusCanvasHandle>(null);
   const overview = useRef<OverviewHandle>(null);
@@ -109,9 +113,17 @@ export function Tree({ hidden }: { hidden: boolean }) {
   // Rodzina shows it (§4.1).
   useEffect(() => setPanelOpen(view === "family"), [view]);
 
+  // Potomkowie: the people whose „+N potomków” was clicked, unfolded in place (the centre stays); the last one keeps
+  // its place on screen. A new centre or view starts folded again.
+  const [unfolded, setUnfolded] = useState<string[]>([]);
+  useEffect(() => setUnfolded([]), [focus, view]);
   const depth = view === "overview" ? null : DEPTH[view];
   // Paused while hidden: coming back fetches nothing (and redraws nothing) unless the archive changed meanwhile.
-  const { data: graphData, loading, error: graphError } = useApi<Graph>(focus && depth ? "tree.graph" : null, { id: focus, up: depth?.up, down: depth?.down }, !hidden);
+  const { data: graphData, loading, error: graphError } = useApi<Graph>(
+    focus && depth ? "tree.graph" : null,
+    { id: focus, up: depth?.up, down: depth?.down, ...(view === "descendants" && unfolded.length ? { expand: unfolded } : {}) },
+    !hidden,
+  );
   // While another person loads, the previous graph stays on screen; a graph fetched for another view does not.
   const graph = graphData && depth && graphData.up === depth.up && graphData.down === depth.down ? graphData : null;
   // The person in the middle is gone (deleted, or their adding undone): start again from a suggestion.
@@ -140,10 +152,11 @@ export function Tree({ hidden }: { hidden: boolean }) {
   const rounded = display.treeLines === "rounded";
   const scene = useMemo(() => {
     if (!graph || !focus || !graph.people[focus]) return null;
-    if (view === "ancestors") return layoutAncestors(graph, focus, 3, rounded);
-    if (view === "descendants") return layoutDescendants(graph, focus, 2, rounded);
+    if (view === "ancestors") return layoutAncestors(graph, focus, rounded);
+    // Unfolded as far as the graph in hand was fetched for, so a pill doesn't vanish before its people come.
+    if (view === "descendants") return layoutDescendants(graph, focus, { depth: DEPTH.descendants.down, rounded, partners, unfolded: graph.expand });
     return layoutFamily(graph, focus, { editing: mode === "edit", rounded });
-  }, [graph, focus, view, mode, rounded]);
+  }, [graph, focus, view, mode, rounded, partners]);
 
   // Colours by the chosen mode (spec §3.2 „Koloruj wg”); „strona” is relative to the person in the centre.
   const sides = useMemo(
@@ -408,7 +421,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
         ) : scene && graph && focus ? (
           <FocusCanvas
             key={view}
-            anchor={view === "ancestors" ? "left" : view === "descendants" ? "top" : "center"}
+            anchor={view === "ancestors" ? "right" : view === "descendants" ? "top" : "center"}
             ref={canvas}
             scene={scene}
             graph={graph}
@@ -424,7 +437,8 @@ export function Tree({ hidden }: { hidden: boolean }) {
             }}
             onOpen={refocus}
             onHover={setHovered}
-            onPill={refocus}
+            onPill={(target, unfold) => (unfold ? setUnfolded((list) => (list.includes(target) ? list : [...list, target])) : refocus(target))}
+            pin={view === "descendants" ? unfolded[unfolded.length - 1] : undefined}
             onBox={(action, of) => {
               if (action === "add-parents" && of) requireEdit(() => go({ name: "edit", id: null, relation: { kind: "parent", of } }));
             }}
@@ -486,6 +500,19 @@ export function Tree({ hidden }: { hidden: boolean }) {
               Linia bezpośrednia
             </button>
           )}
+          {view === "descendants" && (
+            <button
+              className={`chip${partners ? " on" : ""}`}
+              onClick={() => {
+                setPartners(!partners);
+                saveDisplay("treePartners", partners ? "off" : "on");
+              }}
+              title="Pokaż małżonków i partnerów obok każdej osoby"
+            >
+              <Users size={14} />
+              Partnerzy
+            </button>
+          )}
           {/* Całe drzewo has no photos on its cards yet, so there is nothing to switch there. */}
           {view !== "overview" && (
             <Dropdown
@@ -506,7 +533,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
         </div>
         {view !== "overview" && scene && (
           <>
-            <Legend />
+            <Legend gutter={view === "descendants"} />
             <span className="zoom-h tree-zoom">
               <button title="Oddal" onClick={() => canvas.current?.zoomBy(0.8)}>
                 <Minus size={15} />
@@ -525,7 +552,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
           </>
         )}
         {colorMode === "side" && (view === "overview" ? overviewData : scene) && <SideKey view={view} />}
-        {colorMode === "archive" && (view === "overview" ? overviewData : scene) && <ArchiveKey overview={view === "overview"} />}
+        {colorMode === "archive" && (view === "overview" ? overviewData : scene) && <ArchiveKey overview={view === "overview"} gutter={view === "descendants"} />}
       </div>
       {showPanel && selected && (
         <SidePanel
@@ -633,10 +660,10 @@ function JumpBox({ onPick }: { onPick: (id: string) => void }) {
 const LINKED = 2;
 
 /** The key for „Koloruj wg: archiwum”, where the side key goes. */
-function ArchiveKey({ overview }: { overview: boolean }) {
+function ArchiveKey({ overview, gutter }: { overview: boolean; gutter: boolean }) {
   const archives = [...useArchives().values()];
   return (
-    <div className={`tree-legend side-key${overview ? " overview" : ""}`}>
+    <div className={`tree-legend side-key${overview ? " overview" : gutter ? " gutter" : ""}`}>
       <span className="label-caps">Archiwum</span>
       {archives.map((a) => (
         <span key={a.key} className="item">
@@ -660,7 +687,7 @@ function SideKey({ view }: { view: View }) {
     </span>
   );
   return (
-    <div className={`tree-legend side-key${view === "overview" ? " overview" : ""}`}>
+    <div className={`tree-legend side-key${view === "overview" ? " overview" : view === "descendants" ? " gutter" : ""}`}>
       <span className="label-caps">Strona</span>
       {view === "descendants" ? (
         // Everyone in Potomkowie descends from the centre person, so only they have a side colour.
@@ -676,15 +703,16 @@ function SideKey({ view }: { view: View }) {
   );
 }
 
-function Legend() {
+/** `gutter`: right of Potomkowie's column of generation names. */
+function Legend({ gutter }: { gutter: boolean }) {
   const sample = (style: React.CSSProperties, dot?: boolean) => (
     <svg width="24" height="10" style={{ flex: "none" }}>
-      <line x1="0" y1="5" x2="24" y2="5" style={{ stroke: "var(--line)", strokeWidth: 1.5, ...style }} />
+      <line x1="0" y1="5" x2="24" y2="5" style={{ stroke: "var(--line)", strokeWidth: 2, ...style }} />
       {dot && <circle cx="12" cy="5" r="3.5" style={{ fill: "var(--surface)", stroke: "var(--line)", strokeWidth: 1.5 }} />}
     </svg>
   );
   return (
-    <div className="tree-legend">
+    <div className={`tree-legend${gutter ? " gutter" : ""}`}>
       <span className="label-caps">Linie</span>
       <span className="item">
         {sample({}, true)}małżeństwo
@@ -699,7 +727,7 @@ function Legend() {
         {sample({ strokeDasharray: "1.5 3.5" })}niepewne
       </span>
       <span className="item">
-        {sample({ stroke: "var(--accent)", strokeWidth: 2.5 })}linia wybranej
+        {sample({ stroke: "var(--accent)", strokeWidth: 3 })}linia wybranej
       </span>
     </div>
   );
