@@ -448,25 +448,78 @@ fn fact_date(d: &Derived, f: &Fact) -> Option<String> {
     }
 }
 
+/// Tags whose line value is the fact itself (the occupation, the residence…), as the import writes them; other
+/// events keep their description in a NOTE.
+const VALUE_TAGS: &[&str] = &["OCCU", "RESI", "EDUC", "RELI", "TITL", "NATI", "DSCR", "PROP", "CAST", "IDNO", "NCHI", "NMR", "SSN", "FACT", "_MILT", "_MILI"];
+
+/// Whether a fact's description is its line value (the occupation) or its NOTE (a birth, an event).
+pub fn holds_value(tag: &str, value: Option<&str>) -> bool {
+    value.map(str::trim).is_some_and(|v| !v.is_empty() && v != "Y") || VALUE_TAGS.contains(&tag)
+}
+
+/// What the profile's in-place editors need to change one fact (`fact.update`, `fact.delete`): the record, the
+/// fact's place among the record's events, and its values as they can be typed back. `shared`: the partner who sees
+/// the same family event on their profile.
+fn fact_ref(record: &str, index: usize, f: &Fact, shared: Option<&str>) -> Value {
+    let value = holds_value(&f.tag, f.value.as_deref());
+    json!({
+        "record": record,
+        "index": index,
+        "tag": f.tag,
+        "kind": f.kind,
+        "label": event_name(&f.tag, f.kind.as_deref()),
+        "date": date_input(f),
+        "place": f.place.clone().unwrap_or_default(),
+        "text": if value { f.value.clone() } else { f.note.clone() }.unwrap_or_default(),
+        "textField": if value { "value" } else { "note" },
+        "shared": shared,
+    })
+}
+
+/// The fact at `index` of a person or a family, as `fact_ref` gives it (for checking a form against what it showed).
+pub fn fact_ref_at(d: &Derived, record: &str, index: usize) -> Option<Value> {
+    let facts = match d.index(record) {
+        Some(i) => &d.view.people[i].facts,
+        None => &d.view.family(record)?.1.facts,
+    };
+    facts.get(index).map(|f| fact_ref(record, index, f, None))
+}
+
+/// „syn Antoniego i Marianny”: the birth's description worked out from the parents.
+fn child_of(d: &Derived, i: usize) -> Option<String> {
+    let female = d.view.model.persons[i].sex == Sex::Female;
+    let parents: Vec<String> = d.info[i].parents.iter().map(|&p| polish::given_genitive(&d.info[p].given, d.view.model.persons[p].sex == Sex::Female)).collect();
+    (!parents.is_empty()).then(|| format!("{} {}", if female { "córka" } else { "syn" }, parents.join(" i ")))
+}
+
 pub fn profile(d: &Derived, id: &str, history: &[heirloom_core::history::Entry]) -> Result<Value, ApiError> {
     let i = d.index(id).ok_or_else(|| not_found(id))?;
     let (p, details, info) = d.person(i);
     let female = p.sex == Sex::Female;
     let mut sources = SourceNumbers { order: Vec::new(), numbers: HashMap::new(), pages: HashMap::new() };
 
-    // "W skrócie": the key facts grid.
+    // "W skrócie": the key facts grid. Each cell carries the facts behind it, for editing it in place.
+    let me = d.xref(i).to_string();
     let mut facts = Vec::new();
-    let mut fact_row = |key: String, value: String, uncertain: bool, cites: Vec<usize>| {
+    let mut fact_row = |key: String, value: String, uncertain: bool, cites: Vec<usize>, edit: Value| {
         if !value.is_empty() {
-            facts.push(json!({ "key": key, "value": value, "uncertain": uncertain, "sources": cites }));
+            facts.push(json!({ "key": key, "value": value, "uncertain": uncertain, "sources": cites, "edit": edit }));
         }
     };
     let dated = |f: &Fact| DateInfo::from_fact(f).is_some_and(|d| d.uncertain);
+    let one = |record: &str, n: usize, f: &Fact, shared: Option<&str>| json!({ "facts": [fact_ref(record, n, f, shared)], "add": null });
+    // An event kept without a date or a place ("BIRT Y", or one left with only its sources) still happened.
+    let happened = |value: String| if value.is_empty() { "tak (bez daty)".to_string() } else { value };
     for tag in ["BIRT", "CHR", "BAPM"] {
-        for f in details.facts.iter().filter(|f| f.tag == tag) {
-            let value = [fact_date(d, f), place_with_note(f)].into_iter().flatten().collect::<Vec<_>>().join(", ");
+        for (n, f) in details.facts.iter().enumerate().filter(|(_, f)| f.tag == tag) {
+            let value = happened([fact_date(d, f), place_with_note(f)].into_iter().flatten().collect::<Vec<_>>().join(", "));
             let cites = sources.cite(&f.citations);
-            fact_row(fact_key(tag, None, female), value, dated(f), cites);
+            let mut edit = one(&me, n, f, None);
+            // The same form as on the timeline: it says the „syn …” there comes from the parents.
+            if let (true, Some(text)) = (tag == "BIRT", child_of(d, i)) {
+                edit["facts"][0]["derived"] = json!(text);
+            }
+            fact_row(fact_key(tag, None, female), value, dated(f), cites, edit);
         }
     }
     let mut partner_list = info.partners.clone();
@@ -475,8 +528,8 @@ pub fn profile(d: &Derived, id: &str, history: &[heirloom_core::history::Entry])
         let (pa, pb) = (&d.view.model.persons[i], &d.view.model.persons[partner]);
         for fam in pa.fams.iter().filter(|f| pb.fams.contains(f)) {
             if let Some((_, fd)) = d.view.family(fam) {
-                for f in fd.facts.iter().filter(|f| f.tag == "MARR") {
-                    let value = [fact_date(d, f), f.place.clone()].into_iter().flatten().collect::<Vec<_>>().join(", ");
+                for (n, f) in fd.facts.iter().enumerate().filter(|(_, f)| f.tag == "MARR") {
+                    let value = happened([fact_date(d, f), f.place.clone()].into_iter().flatten().collect::<Vec<_>>().join(", "));
                     let key = if partner_list.len() > 1 {
                         let with = polish::given_instrumental(&d.info[partner].given, d.view.model.persons[partner].sex == Sex::Female);
                         format!("Ślub {} {with}", polish::z_or_ze(&with))
@@ -484,37 +537,34 @@ pub fn profile(d: &Derived, id: &str, history: &[heirloom_core::history::Entry])
                         "Ślub".into()
                     };
                     let cites = sources.cite(&f.citations);
-                    fact_row(key, value, dated(f), cites);
+                    fact_row(key, value, dated(f), cites, one(fam, n, f, Some(&d.info[partner].name)));
                 }
             }
         }
     }
     for tag in ["DEAT", "BURI", "CREM"] {
-        for f in details.facts.iter().filter(|f| f.tag == tag) {
-            let mut value = [fact_date(d, f), place_with_note(f)].into_iter().flatten().collect::<Vec<_>>().join(", ");
-            if value.is_empty() && f.only_happened {
-                value = "tak (bez daty)".into();
-            }
+        for (n, f) in details.facts.iter().enumerate().filter(|(_, f)| f.tag == tag) {
+            let mut value = happened([fact_date(d, f), place_with_note(f)].into_iter().flatten().collect::<Vec<_>>().join(", "));
             if let Some(cause) = &f.cause {
                 value.push_str(&format!(" — {cause}"));
             }
             let cites = sources.cite(&f.citations);
-            fact_row(fact_key(tag, None, female), value, dated(f), cites);
+            fact_row(fact_key(tag, None, female), value, dated(f), cites, one(&me, n, f, None));
         }
     }
-    let mut grouped: Vec<(String, Vec<&Fact>)> = Vec::new();
-    for f in details.facts.iter().filter(|f| !matches!(f.tag.as_str(), "BIRT" | "CHR" | "BAPM" | "DEAT" | "BURI" | "CREM")) {
+    let mut grouped: Vec<(String, Vec<(usize, &Fact)>)> = Vec::new();
+    for (n, f) in details.facts.iter().enumerate().filter(|(_, f)| !matches!(f.tag.as_str(), "BIRT" | "CHR" | "BAPM" | "DEAT" | "BURI" | "CREM")) {
         let key = fact_key(&f.tag, f.kind.as_deref(), female);
         match grouped.iter_mut().find(|(k, _)| *k == key) {
-            Some((_, list)) => list.push(f),
-            None => grouped.push((key, vec![f])),
+            Some((_, list)) => list.push((n, f)),
+            None => grouped.push((key, vec![(n, f)])),
         }
     }
     for (key, list) in grouped {
         let arrow = key == "Miejsca zamieszkania";
         let parts: Vec<String> = list
             .iter()
-            .map(|f| {
+            .map(|(_, f)| {
                 let what = f.value.clone().or_else(|| f.place.clone()).unwrap_or_default();
                 let when = DateInfo::from_fact(f).map(|d| d.text);
                 match (what.is_empty(), when) {
@@ -526,9 +576,17 @@ pub fn profile(d: &Derived, id: &str, history: &[heirloom_core::history::Entry])
             })
             .filter(|s| !s.is_empty())
             .collect();
-        let cites: Vec<usize> = list.iter().flat_map(|f| sources.cite(&f.citations)).collect();
-        let uncertain = list.iter().any(|f| dated(f) || matches!(f.certainty, Some(heirloom_core::gedcom::view::Certainty::Low)));
-        fact_row(key, parts.join(if arrow { " → " } else { "; " }), uncertain, cites);
+        let cites: Vec<usize> = list.iter().flat_map(|(_, f)| sources.cite(&f.citations)).collect();
+        let uncertain = list.iter().any(|(_, f)| dated(f) || matches!(f.certainty, Some(heirloom_core::gedcom::view::Certainty::Low)));
+        // A cell of several facts (two occupations) can take one more of the same kind, if `fact.add` makes that kind
+        // (not an imported confirmation or census, nor an event with no name to give the new one).
+        let first = list[0].1;
+        let addable = crate::edit::ADDABLE.contains(&first.tag.as_str()) && (first.tag != "EVEN" || first.kind.is_some());
+        let edit = json!({
+            "facts": list.iter().map(|(n, f)| fact_ref(&me, *n, f, None)).collect::<Vec<_>>(),
+            "add": addable.then(|| json!({ "record": me, "tag": first.tag, "kind": first.kind })),
+        });
+        fact_row(key, parts.join(if arrow { " → " } else { "; " }), uncertain, cites, edit);
     }
 
     // Texts, in the person's order.
@@ -692,8 +750,7 @@ pub fn profile(d: &Derived, id: &str, history: &[heirloom_core::history::Entry])
         "sources": source_list,
         "personSources": person_cites,
         "links": links,
-        "timeline": timeline.0,
-        "undated": timeline.1,
+        "timeline": timeline,
         "mentionedIn": mentioned,
         "history": crate::activity::person_history(d, history, p.xref.as_str()),
         "other": other,
@@ -704,7 +761,7 @@ pub fn profile(d: &Derived, id: &str, history: &[heirloom_core::history::Entry])
     }))
 }
 
-fn kind_word(kind: TextKind) -> &'static str {
+pub(crate) fn kind_word(kind: TextKind) -> &'static str {
     match kind {
         TextKind::Summary => "W skrócie",
         TextKind::Bio => "Życiorys",
@@ -756,21 +813,13 @@ pub fn domain(url: &str) -> String {
 /// Rodzice, Rodzeństwo, Małżonek i dzieci (per partner), Dziadkowie, Wnuki.
 fn family_groups(d: &Derived, i: usize) -> Vec<Value> {
     let info = &d.info[i];
+    // Two lines under the name, the same on every tile: who they are („żona · ślub 1904”), then the maiden name
+    // (`maiden`, already in the summary) and the years, which the screen never cuts off.
     let tile = |other: usize, extra: Option<String>| {
         let mut v = relative(d, i, other);
-        let years = card_years(d, other);
         let label = v["label"].as_str().unwrap_or("").to_string();
-        let mut parts = vec![label];
-        if let Some(extra) = extra {
-            parts.push(extra);
-        }
-        if let Some(m) = &d.info[other].maiden {
-            parts.push(format!("z d. {m}"));
-        }
-        if !years.is_empty() {
-            parts.push(years);
-        }
-        v["line"] = json!(parts.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "));
+        v["line"] = json!([Some(label), extra].into_iter().flatten().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "));
+        v["years"] = json!(card_years(d, other));
         v
     };
     let mut groups = Vec::new();
@@ -862,10 +911,12 @@ pub fn years_range(d: &Derived, i: usize) -> String {
     }
 }
 
-/// The person's own events plus the family's (births of children, deaths of parents…), in date order; and the
-/// facts without a date ("BEZ DATY").
-fn timeline(d: &Derived, i: usize, sources: &mut SourceNumbers) -> (Vec<Value>, Vec<Value>) {
+/// The person's own events plus the family's (births of children, deaths of parents…), in date order; then the
+/// facts with a date in words that can't be placed in time, and last the facts without a date („bez daty”). Each row
+/// says what it comes from: a fact to edit in place (`edit`), or another person's profile (`from`).
+fn timeline(d: &Derived, i: usize, sources: &mut SourceNumbers) -> Vec<Value> {
     let info = &d.info[i];
+    let me = d.xref(i);
     let female = d.view.model.persons[i].sex == Sex::Female;
     let mut rows: Vec<(i64, Value)> = Vec::new();
     let mut undated = Vec::new();
@@ -877,7 +928,8 @@ fn timeline(d: &Derived, i: usize, sources: &mut SourceNumbers) -> (Vec<Value>, 
         }
         Some(if approx { format!("ok. {years}") } else { format!("lat {years}") })
     };
-    let push = |date: Option<DateInfo>, kind: String, place: Option<String>, description: Option<String>, source: Vec<usize>, family: bool, rows: &mut Vec<(i64, Value)>| {
+    let from = |other: usize| json!({ "id": d.xref(other), "name": d.info[other].name });
+    let push = |date: Option<DateInfo>, kind: String, place: Option<String>, description: Option<String>, source: Vec<usize>, family: bool, source_of: (Value, Value), rows: &mut Vec<(i64, Value)>| {
         let Some(date_info) = date else { return };
         let sort = date_info.sort.unwrap_or(i64::MAX);
         let age = age_at(&Some(date_info.clone()));
@@ -892,32 +944,55 @@ fn timeline(d: &Derived, i: usize, sources: &mut SourceNumbers) -> (Vec<Value>, 
                 "description": description,
                 "sources": source,
                 "family": family,
+                "undated": false,
+                "edit": source_of.0,
+                "from": source_of.1,
             }),
         ));
     };
-    for f in &d.view.people[i].facts {
+    for (n, f) in d.view.people[i].facts.iter().enumerate() {
         let date = DateInfo::from_fact(f);
         let cites = sources.cite(&f.citations);
+        let mut edit = fact_ref(me, n, f, None);
         let description = match f.tag.as_str() {
+            // „syn Antoniego i Marianny” comes from the parents; a note of the birth's own goes after it.
             "BIRT" => {
-                let parents: Vec<String> = info.parents.iter().map(|&p| polish::given_genitive(&d.info[p].given, d.view.model.persons[p].sex == Sex::Female)).collect();
-                (!parents.is_empty()).then(|| format!("{} {}", if female { "córka" } else { "syn" }, parents.join(" i ")))
+                let derived = child_of(d, i);
+                if let Some(text) = &derived {
+                    edit["derived"] = json!(text);
+                }
+                match (derived, f.note.clone()) {
+                    (Some(who), Some(note)) => Some(format!("{who}{}{note}", if note.starts_with('(') { " " } else { " · " })),
+                    (who, note) => note.or(who),
+                }
             }
             _ => f.value.clone().or_else(|| f.note.clone()),
         };
         if date.is_none() {
-            if f.value.is_some() || f.place.is_some() {
-                undated.push(json!({ "type": event_name(&f.tag, f.kind.as_deref()), "value": f.value.clone().or_else(|| f.place.clone()) }));
+            if f.value.is_some() || f.place.is_some() || f.note.is_some() {
+                undated.push(json!({
+                    "date": "",
+                    "uncertain": false,
+                    "age": null,
+                    "type": event_name(&f.tag, f.kind.as_deref()),
+                    "place": f.place,
+                    "description": description,
+                    "sources": cites,
+                    "family": false,
+                    "undated": true,
+                    "edit": edit,
+                    "from": null,
+                }));
             }
             continue;
         }
-        push(date, event_name(&f.tag, f.kind.as_deref()), f.place.clone(), description, cites, false, &mut rows);
+        push(date, event_name(&f.tag, f.kind.as_deref()), f.place.clone(), description, cites, false, (edit, Value::Null), &mut rows);
     }
     for &partner in &info.partners {
         let (pa, pb) = (&d.view.model.persons[i], &d.view.model.persons[partner]);
         for fam in pa.fams.iter().filter(|f| pb.fams.contains(f)) {
             if let Some((_, fd)) = d.view.family(fam) {
-                for f in &fd.facts {
+                for (n, f) in fd.facts.iter().enumerate() {
                     let partner_female = pb.sex == Sex::Female;
                     let partner_birth_surname = pb.birth_name().map(|n| n.surname.clone()).unwrap_or_default();
                     let name = format!(
@@ -933,7 +1008,8 @@ fn timeline(d: &Derived, i: usize, sources: &mut SourceNumbers) -> (Vec<Value>, 
                         _ => fact_key(&f.tag, f.kind.as_deref(), female),
                     };
                     let cites = sources.cite(&f.citations);
-                    push(DateInfo::from_fact(f), kind, f.place.clone(), None, cites, false, &mut rows);
+                    let edit = fact_ref(fam, n, f, Some(&d.info[partner].name));
+                    push(DateInfo::from_fact(f), kind, f.place.clone(), None, cites, false, (edit, Value::Null), &mut rows);
                 }
             }
         }
@@ -952,25 +1028,26 @@ fn timeline(d: &Derived, i: usize, sources: &mut SourceNumbers) -> (Vec<Value>, 
                 Some(whose) => format!("Śmierć {whose}, {}", polish::given_genitive(given, d.view.model.persons[partner].sex == Sex::Female)),
                 None => format!("Śmierć: {word}, {given}"),
             };
-            push(Some(death.clone()), text, d.info[partner].death_place.clone(), None, Vec::new(), true, &mut rows);
+            push(Some(death.clone()), text, d.info[partner].death_place.clone(), None, Vec::new(), true, (Value::Null, from(partner)), &mut rows);
         }
     }
     for &c in &info.children {
         let son = d.view.model.persons[c].sex != Sex::Female;
         let label = if son { "syna" } else { "córki" };
         let given = polish::given_genitive(&d.info[c].given, !son);
-        push(d.info[c].birth.clone(), format!("Narodziny {label} {given}"), None, None, Vec::new(), true, &mut rows);
+        push(d.info[c].birth.clone(), format!("Narodziny {label} {given}"), None, None, Vec::new(), true, (Value::Null, from(c)), &mut rows);
     }
     for &p in &info.parents {
         let father = d.view.model.persons[p].sex == Sex::Male;
         let given = polish::given_genitive(&d.info[p].given, !father);
-        push(d.info[p].death.clone(), format!("Śmierć {}, {given}", if father { "ojca" } else { "matki" }), d.info[p].death_place.clone(), None, Vec::new(), true, &mut rows);
+        push(d.info[p].death.clone(), format!("Śmierć {}, {given}", if father { "ojca" } else { "matki" }), d.info[p].death_place.clone(), None, Vec::new(), true, (Value::Null, from(p)), &mut rows);
     }
     // Family events after the person's death are not part of their life.
     let end = info.death.as_ref().and_then(|dd| dd.sort).unwrap_or(i64::MAX);
     rows.retain(|(sort, v)| !v["family"].as_bool().unwrap_or(false) || *sort <= end);
+    // A stable sort: dates in words that can't be placed in time stay in the record's order, after the dated ones.
     rows.sort_by_key(|(sort, _)| *sort);
-    (rows.into_iter().map(|(_, v)| v).collect(), undated)
+    rows.into_iter().map(|(_, v)| v).chain(undated).collect()
 }
 
 /// A date as it can be typed back into the smart date field ("12.03.1878", "ok. 1850", "między 1850 a 1855"). The
@@ -1138,7 +1215,7 @@ mod tests {
 0 @I2@ INDI\n1 UID u2\n1 NAME Antoni /Kowalski/\n1 SEX M\n1 BIRT\n2 DATE ABT 1850\n1 DEAT\n2 DATE BEF 1910\n1 FAMS @F1@\n\
 0 @I3@ INDI\n1 UID u3\n1 NAME Marianna /Nowak/\n2 TYPE BIRTH\n1 NAME Marianna /Kowalska/\n2 TYPE MARRIED\n1 SEX F\n\
 1 BIRT\n2 DATE ABT 1882\n1 FAMS @F2@\n1 SNOTE @N4@\n\
-0 @I4@ INDI\n1 UID u4\n1 NAME Stanisław /Kowalski/\n1 SEX M\n1 BIRT\n2 DATE 1905\n1 FAMC @F2@\n\
+0 @I4@ INDI\n1 UID u4\n1 NAME Stanisław /Kowalski/\n1 SEX M\n1 BIRT\n2 DATE 1905\n1 CONF\n2 DATE 1917\n1 FAMC @F2@\n\
 0 @F1@ FAM\n1 HUSB @I2@\n1 CHIL @I1@\n\
 0 @F2@ FAM\n1 HUSB @I1@\n1 WIFE @I3@\n1 CHIL @I4@\n1 MARR\n2 DATE 14 FEB 1904\n2 PLAC Łęczna\n\
 0 @N1@ SNOTE Syn rolnika z Wólki.\n1 _HLM_KIND summary\n\
@@ -1170,14 +1247,29 @@ mod tests {
         assert_eq!(p["sayings"][0]["body"], "„Pociąg nie czeka.”");
         assert_eq!(p["sources"][0]["title"], "Akt urodzenia nr 45/1878");
         assert_eq!(p["family"][0]["title"], "Rodzice");
-        assert_eq!(p["family"][0]["people"][0]["line"], "ojciec · ok. 1850 † przed 1910");
+        assert_eq!(p["family"][0]["people"][0]["line"], "ojciec");
+        assert_eq!(p["family"][0]["people"][0]["years"], "ok. 1850 † przed 1910");
         assert_eq!(p["family"][1]["title"], "Żona i dzieci");
-        assert_eq!(p["family"][1]["people"][0]["line"], "żona · ślub 1904 · z d. Nowak · ok. 1882 † ?");
+        assert_eq!(p["family"][1]["people"][0]["line"], "żona · ślub 1904");
+        assert_eq!((p["family"][1]["people"][0]["maiden"].as_str(), p["family"][1]["people"][0]["years"].as_str()), (Some("Nowak"), Some("ok. 1882 † ?")));
         assert_eq!(p["mentionedIn"][0]["title"], "Ślub");
         assert_eq!(p["generationBranch"], "Pokolenie II · gałąź Kowalskich");
         let types: Vec<&str> = p["timeline"].as_array().unwrap().iter().map(|t| t["type"].as_str().unwrap()).collect();
-        assert_eq!(types, ["Urodzenie", "Ślub z Marianną Nowak", "Praca", "Narodziny syna Stanisława", "Śmierć ojca, Antoniego", "Zgon"]);
-        assert_eq!(p["undated"][0]["value"], "rolnik");
+        assert_eq!(types, ["Urodzenie", "Ślub z Marianną Nowak", "Praca", "Narodziny syna Stanisława", "Śmierć ojca, Antoniego", "Zgon", "Praca"]);
+        let last = &p["timeline"][6];
+        assert_eq!((last["undated"].as_bool(), last["description"].as_str()), (Some(true), Some("rolnik")), "the undated occupation comes last, as a row");
+        assert_eq!(last["edit"]["record"], "@I1@");
+        assert_eq!((last["edit"]["index"].as_u64(), last["edit"]["textField"].as_str()), (Some(2), Some("value")));
+        assert_eq!(p["timeline"][1]["edit"]["record"], "@F2@", "the wedding is edited in the family");
+        assert_eq!(p["timeline"][3]["from"]["id"], "@I4@", "a child's birth comes from the child's profile");
+        let occupations = p["facts"].as_array().unwrap().iter().find(|f| f["key"] == "Zawód").unwrap();
+        assert_eq!(occupations["edit"]["facts"].as_array().unwrap().len(), 2);
+        assert_eq!(occupations["edit"]["add"]["tag"], "OCCU");
+        let birth = p["facts"].as_array().unwrap().iter().find(|f| f["edit"]["facts"][0]["tag"] == "BIRT").unwrap();
+        assert_eq!(birth["edit"]["facts"][0]["derived"], p["timeline"][0]["edit"]["derived"], "the same birth form in „W skrócie” as on the timeline");
+        let son = profile(&d, "@I4@", &[]).unwrap();
+        let confirmation = son["facts"].as_array().unwrap().iter().find(|f| f["edit"]["facts"][0]["tag"] == "CONF").unwrap();
+        assert!(confirmation["edit"]["add"].is_null(), "no „Dodaj kolejny wpis” for a kind fact.add doesn't make");
     }
 
     #[test]

@@ -412,7 +412,7 @@ impl Api {
                 let id = str_arg(&args, "id")?;
                 lists::source(self.view()?, &id)
             }
-            m if ["person.", "relation.", "family.", "text.", "media.", "source.", "citation.", "place."].iter().any(|p| m.starts_with(p)) => {
+            m if ["person.", "relation.", "family.", "fact.", "text.", "media.", "source.", "citation.", "place."].iter().any(|p| m.starts_with(p)) => {
                 edit::call(self.session()?, m, &args)
             }
             _ => Err(ApiError::new("unknown_method", format!("Nieznane polecenie: {method}"))),

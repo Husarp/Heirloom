@@ -2,14 +2,39 @@
 
 import type { PersonSummary } from "../../api/types";
 
+/** One fact of a person or a family as the profile's in-place editors change it (`fact.update`, `fact.delete`). */
+export interface FactRef {
+  /** The person's or the family's record. */
+  record: string;
+  /** Its place among the record's events. */
+  index: number;
+  tag: string;
+  kind: string | null;
+  /** „Urodzenie”, „Praca”… */
+  label: string;
+  /** As it can be typed back into the date field. */
+  date: string;
+  place: string;
+  /** The occupation (OCCU), the residence…, or a note on a birth or an event. */
+  text: string;
+  textField: "value" | "note";
+  /** A family event: the partner who sees it on their profile too. */
+  shared: string | null;
+  /** A description worked out from elsewhere („syn Antoniego i Marianny”, from the parents). */
+  derived?: string;
+}
+
 export interface Fact {
   key: string;
   value: string;
   uncertain: boolean;
   sources: number[];
+  /** The facts behind the cell, and the kind it can take one more of (a second occupation). */
+  edit: { facts: FactRef[]; add: { record: string; tag: string; kind: string | null } | null };
 }
 
-export type Relative = PersonSummary & { label: string | null; line: string };
+/** `line`: who they are („żona · ślub 1904”); under it the maiden name and `years` („1882 † 1950”). */
+export type Relative = PersonSummary & { label: string | null; line: string; years: string };
 
 export interface FamilyGroup {
   title: string;
@@ -64,6 +89,7 @@ export interface LinkItem {
 }
 
 export interface TimelineRow {
+  /** Empty for a fact without a date („bez daty”, listed last). */
   date: string;
   uncertain: boolean;
   age: string | null;
@@ -72,6 +98,11 @@ export interface TimelineRow {
   description: string | null;
   sources: number[];
   family: boolean;
+  undated: boolean;
+  /** The fact behind the row, edited in place… */
+  edit: FactRef | null;
+  /** …or the relative whose profile it comes from (a child's birth, a parent's death). */
+  from: { id: string; name: string } | null;
 }
 
 export interface MentionItem {
@@ -149,7 +180,6 @@ export interface Profile {
   personSources: number[];
   links: LinkItem[];
   timeline: TimelineRow[];
-  undated: { type: string; value: string | null }[];
   mentionedIn: MentionItem[];
   history: { origin: { ts: string; batch: string | null; who: string } | null; groups: HistoryGroup[] };
   other: { tag: string; value: string; more: string; origin: string | null }[];
