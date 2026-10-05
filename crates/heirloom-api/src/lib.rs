@@ -357,7 +357,8 @@ impl Api {
                 let up = args.get("up").and_then(Value::as_u64).unwrap_or(2) as usize;
                 let down = args.get("down").and_then(Value::as_u64).unwrap_or(2) as usize;
                 let expand: Vec<String> = args.get("expand").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(|x| self.canonical(x.to_string())).collect()).unwrap_or_default();
-                tree::graph(self.view()?, &id, up.min(12), down.min(12), &expand)
+                // Przodkowie asks for the whole line (spec §4.2), so `up` may go further than `down`.
+                tree::graph(self.view()?, &id, up.min(64), down.min(12), &expand)
             }
             "tree.overview" => {
                 let focus = opt_str(&args, "focus").map(|f| self.canonical(f));

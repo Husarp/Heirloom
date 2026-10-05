@@ -348,7 +348,7 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
         if (pts.length >= 2) {
           directLine.moveTo(pts[0][0], pts[0][1]);
           for (const [x, y] of pts.slice(1)) directLine.lineTo(x, y);
-          directLine.stroke({ width: 2 / camera.zoom, color: accent, alpha: 0.85, join: "round" });
+          directLine.stroke({ width: 2.5 / camera.zoom, color: accent, alpha: 0.85, join: "round" });
         }
         const [, x, y] = data.people[start];
         directLine.roundRect(x - 6 / camera.zoom, y - 6 / camera.zoom, CARD_W + 12 / camera.zoom, CARD_H + 12 / camera.zoom, 10 / camera.zoom).stroke({ width: 2.5 / camera.zoom, color: accent });
