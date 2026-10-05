@@ -3,7 +3,7 @@
 // back and „Zapisz” in the bar saves it like any other edit.
 
 import { Pencil, Plus, Trash2 } from "lucide-react";
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { call } from "../../api/transport";
 import { afterChange, useStore } from "../../app/store";
 import { runEdit } from "../media/shared";
@@ -20,6 +20,25 @@ const KINDS: { tag: string; label: string }[] = [
   { tag: "EMIG", label: "Emigracja" },
   { tag: "EVEN", label: "Inne wydarzenie" },
 ];
+
+/** Events that say something even without a date or a place (born, died, married): emptied in the form they stay as
+ *  „tak (bez daty)”; any other fact emptied is deleted only through „Usuń wpis…” (edit.rs, `HAPPENED`). */
+const HAPPENED = ["BIRT", "CHR", "BAPM", "DEAT", "BURI", "CREM", "MARR"];
+
+/** A fact as the screen showed it: forms and open cells follow this, not a row's position, so an undo that puts
+ *  another fact in its place never leaves a form pointing at the wrong one. */
+export function factKey(f: FactRef): string {
+  return [f.record, f.index, f.tag, f.date, f.place, f.text].join("\u0001");
+}
+
+/** What deleting a fact changes besides the row itself. */
+function deleteNote(fact: FactRef): string {
+  if (fact.tag === "MARR")
+    return ` Bez ślubu ta para nie będzie już pokazywana jako małżeństwo: „żona” i „mąż” zmienią się w „partnerka” i „partner”, także na profilu: ${fact.shared ?? "partnera"}. Jeśli nie znasz tylko daty, wyczyść datę i miejsce — zostanie „tak (bez daty)”.`;
+  if (fact.tag === "DEAT")
+    return " Bez zgonu (i pogrzebu) osoba urodzona w ostatnich 100 latach będzie traktowana jako żyjąca. Jeśli nie znasz tylko daty, wyczyść datę i miejsce — zostanie „tak (bez daty)”.";
+  return fact.shared ? ` To wpis wspólny — zniknie też z profilu: ${fact.shared}.` : "";
+}
 
 /** What the description field is called for each kind. */
 function textLabel(tag: string, field: FactRef["textField"]): { label: string; placeholder: string } {
@@ -51,6 +70,7 @@ export function FactForm({
   onDone: () => void;
 }) {
   const setAsk = useStore((s) => s.setAsk);
+  const notify = useStore((s) => s.notify);
   const [tag, setTag] = useState(fact?.tag ?? add?.tag ?? "RESI");
   const [kind, setKind] = useState(fact?.kind ?? add?.kind ?? "");
   const [date, setDate] = useState(fact?.date ?? "");
@@ -62,9 +82,26 @@ export function FactForm({
   const field = fact?.textField ?? (["OCCU", "RESI", "EDUC", "RELI", "_MILT"].includes(tag) ? "value" : "note");
   const words = textLabel(tag, field);
   const choosing = !fact && !add?.tag;
+  // A description of several lines (a note with line breaks) is edited as such, never joined into one line.
+  const multiline = field === "note" || text.includes("\n");
+  // The fact this form was opened for. If an undo (Ctrl Z, „Cofnij”) changes it or puts another in its place, the
+  // form closes rather than write what was typed onto something else; the server checks the same (`was`).
+  const opened = useRef(fact && factKey(fact));
+  const typed = [date, place, text].join("\u0001");
+  const first = useRef(typed);
+  const closing = useRef(false);
+  useEffect(() => {
+    if (!fact || closing.current || factKey(fact) === opened.current) return;
+    closing.current = true;
+    if (typed !== first.current) notify("Ten wpis zmienił się w międzyczasie (cofnięta zmiana), więc formularz zamknięto. Otwórz go jeszcze raz.");
+    onDone();
+  });
+  const was = fact && { date: fact.date, place: fact.place, text: fact.text };
 
-  const save = () =>
-    runEdit(async () => {
+  const save = () => {
+    // Emptying a fact deletes it, which is asked first; a birth, death or wedding emptied stays „tak (bez daty)”.
+    if (fact && !HAPPENED.includes(fact.tag) && !date.trim() && !place.trim() && !text.trim()) return remove();
+    return runEdit(async () => {
       setBusy(true);
       try {
         if (fact) {
@@ -73,23 +110,25 @@ export function FactForm({
           if (date !== fact.date) changes.date = date;
           if (place !== fact.place) changes.place = place;
           if (text !== fact.text) changes.text = text;
-          if (Object.keys(changes).length) await call("fact.update", { record: fact.record, index: fact.index, tag: fact.tag, ...changes });
+          if (Object.keys(changes).length) await call("fact.update", { record: fact.record, index: fact.index, tag: fact.tag, was, ...changes });
         } else {
           await call("fact.add", { record: add?.record, tag, kind: tag === "EVEN" ? kind : add?.kind, date, place, text });
         }
+        closing.current = true;
         afterChange();
         onDone();
       } finally {
         setBusy(false);
       }
     });
+  };
 
   const remove = () => {
     if (!fact) return;
     const what = [fact.label, fact.text].filter(Boolean).join(": ");
     setAsk({
       title: "Usunąć ten wpis?",
-      text: `„${what}” zniknie z profilu: z osi życia i z „W skrócie”.${fact.shared ? ` To wpis wspólny — zniknie też z profilu: ${fact.shared}.` : ""} Do zapisu możesz to cofnąć (Ctrl Z).`,
+      text: `„${what}” zniknie z profilu: z osi życia i z „W skrócie”.${deleteNote(fact)} Do zapisu możesz to cofnąć (Ctrl Z).`,
       icon: "warn",
       buttons: [
         { label: "Anuluj", kind: "ghost" },
@@ -98,7 +137,8 @@ export function FactForm({
           kind: "danger",
           run: () =>
             runEdit(async () => {
-              await call("fact.delete", { record: fact.record, index: fact.index, tag: fact.tag });
+              await call("fact.delete", { record: fact.record, index: fact.index, tag: fact.tag, was });
+              closing.current = true;
               afterChange();
               onDone();
             }),
@@ -107,13 +147,15 @@ export function FactForm({
     });
   };
 
-  // Enter saves and Esc closes the form (not the whole section); the place list takes them first while it is open.
+  // Enter saves (Ctrl Enter in a description of several lines, where Enter starts a new line) and Esc closes the form
+  // (not the whole section); the place list takes them first while it is open.
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.defaultPrevented || e.ctrlKey || e.metaKey) return;
-    if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") {
+    if (e.defaultPrevented) return;
+    const ctrl = e.ctrlKey || e.metaKey;
+    if (e.key === "Enter" && ((e.target as HTMLElement).tagName === "INPUT" ? !ctrl : ctrl)) {
       e.preventDefault();
       save();
-    } else if (e.key === "Escape") {
+    } else if (e.key === "Escape" && !ctrl) {
       e.preventDefault();
       onDone();
     }
@@ -155,9 +197,13 @@ export function FactForm({
       </div>
       <label className="field">
         <span className="field-label">{words.label}</span>
-        <input className="input" value={text} placeholder={fact?.derived && !text ? `puste: „${fact.derived}”` : words.placeholder} onChange={(e) => setText(e.target.value)} />
+        {multiline ? (
+          <textarea className="input fact-form-text" rows={Math.max(1, text.split("\n").length)} value={text} placeholder={words.placeholder} onChange={(e) => setText(e.target.value)} />
+        ) : (
+          <input className="input" value={text} placeholder={words.placeholder} onChange={(e) => setText(e.target.value)} />
+        )}
       </label>
-      {fact?.derived && <span className="fact-form-note">„{fact.derived}” wynika z rodziców — zmienisz ich w sekcji Rodzina. Opis wpisany tutaj pokaże się zamiast tego.</span>}
+      {fact?.derived && <span className="fact-form-note">„{fact.derived}” wynika z rodziców — zmienisz ich w sekcji Rodzina. Opis wpisany tutaj pokaże się obok, np. „{fact.derived} (w domu dziadków)”.</span>}
       {fact?.shared && <span className="fact-form-note">To wpis wspólny z: {fact.shared} — zmiana pokaże się też na tamtym profilu.</span>}
       <div className="row" style={{ gap: 8 }}>
         {fact && (
@@ -182,16 +228,19 @@ export function FactForm({
  *  lists them, each with its pencil, and can take one more of its kind. */
 export function FactCellEditor({ cell, onClose }: { cell: Fact; onClose: () => void }) {
   const { facts, add } = cell.edit;
-  const [open, setOpen] = useState<number | "new" | null>(null);
+  // The fact open (its key, so a deleted or undone one closes rather than open its neighbour), or a new one.
+  const [chosen, setOpen] = useState<string | "new" | null>(null);
+  const open = chosen === "new" || facts.some((f) => factKey(f) === chosen) ? chosen : null;
+  if (chosen !== open) setOpen(open);
   if (!add && facts.length === 1) return <FactForm fact={facts[0]} onDone={onClose} />;
   return (
     <div className="col fact-cell-editor" style={{ gap: 8 }}>
       <span className="fact-key">{cell.key}</span>
-      {facts.map((f, i) =>
-        open === i ? (
-          <FactForm key={`${f.record}-${f.index}`} fact={f} onDone={() => setOpen(null)} />
+      {facts.map((f) =>
+        open === factKey(f) ? (
+          <FactForm key={factKey(f)} fact={f} onDone={() => setOpen(null)} />
         ) : (
-          <button key={`${f.record}-${f.index}`} className="row fact-line" disabled={open != null} onClick={() => setOpen(i)}>
+          <button key={factKey(f)} className="row fact-line" disabled={open != null} onClick={() => setOpen(factKey(f))}>
             <span className="grow" style={{ minWidth: 0 }}>
               {f.text || f.place || f.date || "—"}
               {(f.date || (f.text && f.place)) && <span style={{ color: "var(--text3)" }}> · {[f.text ? f.place : "", f.date].filter(Boolean).join(" · ")}</span>}

@@ -210,6 +210,12 @@
 .fact-form .pf-feedback {
   margin-bottom: 0;
 }
+/* A description of several lines: as tall as an input, growing with its lines. */
+.fact-form-text {
+  field-sizing: content;
+  padding-top: 7.5px;
+  padding-bottom: 7.5px;
+}
 .fact-form-note {
   font-size: 12px;
   color: var(--text3);
@@ -406,15 +412,13 @@
   gap: 2px;
   min-width: 0;
 }
-/* A fact without a date: „bez daty” where the date would be, a hollow dot, and the rail dashed from the first one. */
+/* A fact without a date: „bez daty” where the date would be, and the rail dashed from the first one. Its dot stays
+   filled: a hollow one is a relative's event (the legend). */
 .tl-undated {
   font-size: 12px;
   font-style: italic;
   color: var(--text3);
   padding-top: 13px;
-}
-.timeline-row.undated .tl-dot {
-  background: var(--surface);
 }
 .timeline-row.undated .tl-rail::before {
   background: none;
@@ -750,17 +754,34 @@
 .family-grid.editing {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+/* „z d. …” and the years: one line when they fit, else the years on a line of their own. Each part has the „·” in a
+   gap on its left; the inner row starts that gap's width early and the tile clips it, so a part that starts a line
+   shows no „·” and no line ends with one. */
 .family-tile-sub {
+  display: block;
+  overflow: hidden;
   font-size: 12px;
   color: var(--text3);
 }
 .family-tile-sub > span {
-  display: inline-block;
+  display: flex;
+  flex-wrap: wrap;
+  margin-left: -14px;
+}
+.family-tile-sub > span > span {
+  position: relative;
   max-width: 100%;
+  padding-left: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  vertical-align: bottom;
+}
+.family-tile-sub > span > span::before {
+  content: "·";
+  position: absolute;
+  left: 0;
+  width: 14px;
+  text-align: center;
 }
 .family-tile-tools {
   gap: 6px;
