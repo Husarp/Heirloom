@@ -42,6 +42,11 @@ X = major change, Y = feature / bigger change, Z = small change.
     their row under the toolbars.
 - **Lines in the tree** are a little thicker and stay visible at every zoom: never below 2 px when zoomed out, and
   growing with the cards when zoomed in. The canvas no longer jumps by itself when a control at its edge gets focus.
+- **Import: the AI instructions checked against the importer.** The copied text starts in Polish (no trial note), tells
+  how to bring the answer back, the M001 file numbering, date/age rules and that a person or file is listed once per
+  batch; IMPORT_FORMAT §6 says what is really checked. A new foldable box „Jak przygotować paczkę z pomocą AI” in
+  Import · Wczytaj walks through the 7 steps, open while the archive has no imports. Two importer fixes: a wedding
+  marked principal + spouse is no longer lost, and a link to a person outside the batch is an error, not dropped.
 
 ## 0.5.0 — 2026-10-04 16:41: „Otwórz razem…” — several archives as one tree, „To ta sama osoba?”, new windows
 - **„Otwórz razem…”** (in the archive picker and in the sidebar's archive menu): pick two or more archives and a
