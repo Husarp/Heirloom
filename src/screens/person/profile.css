@@ -158,6 +158,62 @@
   font-size: 15px;
   user-select: text;
 }
+/* In edit mode a fact is changed in place: the cell is a button, and an open one takes the whole row. */
+.fact-cell.editable {
+  cursor: pointer;
+}
+.fact-cell.editable:hover {
+  background: var(--surface2);
+}
+.fact-cell .fact-key {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.fact-pencil {
+  color: var(--text3);
+  opacity: 0;
+}
+.fact-cell.editable:hover .fact-pencil,
+.fact-cell.editable:focus-visible .fact-pencil {
+  opacity: 1;
+}
+.fact-cell.open {
+  grid-column: 1 / -1;
+  background: color-mix(in oklab, var(--surface) 70%, var(--bg));
+}
+.fact-line {
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  background: var(--surface);
+  font-size: 14px;
+  text-align: left;
+}
+.fact-line:hover:not(:disabled) {
+  border-color: var(--line);
+}
+.fact-form {
+  gap: 8px;
+}
+.fact-form-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.fact-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 10px;
+}
+.fact-form .pf-feedback {
+  margin-bottom: 0;
+}
+.fact-form-note {
+  font-size: 12px;
+  color: var(--text3);
+}
 .uncertain-strong {
   text-decoration: underline dotted var(--text3);
   text-underline-offset: 4px;
@@ -348,6 +404,45 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
+}
+/* A fact without a date: „bez daty” where the date would be, a hollow dot, and the rail dashed from the first one. */
+.tl-undated {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text3);
+  padding-top: 13px;
+}
+.timeline-row.undated .tl-dot {
+  background: var(--surface);
+}
+.timeline-row.undated .tl-rail::before {
+  background: none;
+  border-left: 2px dashed var(--border);
+  width: 0;
+}
+.timeline-row.first-undated {
+  margin-top: 6px;
+}
+.timeline-row.editable {
+  cursor: pointer;
+  border-radius: var(--r-ctl);
+}
+.timeline-row.editable:hover {
+  background: var(--surface2);
+}
+.tl-pencil {
+  margin-left: 8px;
+  color: var(--text3);
+  opacity: 0;
+  vertical-align: -1px;
+}
+.timeline-row.editable:hover .tl-pencil,
+.timeline-row.editable:focus-visible .tl-pencil {
+  opacity: 1;
+}
+.tl-content .text-form {
+  margin-top: 8px;
 }
 
 .collapse-head {
@@ -649,9 +744,23 @@
   gap: 10px;
   min-width: 0;
   text-align: left;
+  /* Names and relations line up across a row, whether the line under them wraps or not. */
+  align-items: flex-start;
 }
 .family-grid.editing {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.family-tile-sub {
+  font-size: 12px;
+  color: var(--text3);
+}
+.family-tile-sub > span {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 .family-tile-tools {
   gap: 6px;

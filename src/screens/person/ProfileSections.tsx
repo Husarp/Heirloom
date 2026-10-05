@@ -27,6 +27,7 @@ import {
   Trash2,
   TriangleAlert,
   Undo2,
+  Unlink,
   User,
   UserPlus,
   X,
@@ -44,7 +45,8 @@ import { openUrl, pickFiles } from "../../lib/native";
 import { Lightbox } from "../media/Lightbox";
 import { runEdit } from "../media/shared";
 import { RelativeTools } from "./RelativeTools";
-import { SectionEditButton, SectionFoot, useSection, type SectionEdit } from "./sectionEdit";
+import { FactCellEditor, FactForm } from "./FactEdit";
+import { SectionEditButton, SectionFoot, useDraftGuard, useSection, type SectionEdit } from "./sectionEdit";
 import type { Profile, TextItem } from "./types";
 
 type Props = { data: Profile };
@@ -76,24 +78,6 @@ function Sup({ sources }: { sources: number[] }) {
 
 function useEditing() {
   return useStore((s) => s.mode) === "edit";
-}
-
-const DRAFT_QUESTION = "Odrzucić wpisany tekst?";
-
-/** A text being typed and not yet added: closing its section, leaving the profile or switching the archive asks
- *  first (the leave guard). */
-function useDraftGuard(dirty: boolean) {
-  useEffect(() => {
-    const { leaveGuard, setLeaveGuard } = useStore.getState();
-    if (dirty) setLeaveGuard(DRAFT_QUESTION);
-    else if (leaveGuard === DRAFT_QUESTION) setLeaveGuard(null);
-  }, [dirty]);
-  useEffect(
-    () => () => {
-      if (useStore.getState().leaveGuard === DRAFT_QUESTION) useStore.getState().setLeaveGuard(null);
-    },
-    [],
-  );
 }
 
 /** Adds or edits one text (a biography section, story, saying, trivia, note or the summary). */
@@ -231,8 +215,13 @@ export function SummarySection({ data }: Props) {
   const editing = useEditing();
   const sec = useSection(`${data.person.id}:summary`, "W skrócie");
   const [edit, setEdit] = useState(false);
+  // The fact being changed in place (its cell), or a new one.
+  const [fact, setFact] = useState<number | "new" | null>(null);
   useEffect(() => {
-    if (!sec.open) setEdit(false);
+    if (!sec.open) {
+      setEdit(false);
+      setFact(null);
+    }
   }, [sec.open]);
   const uncertain = data.facts.some((f) => f.uncertain);
   if (!editing && !data.summary && data.facts.length === 0) return null;
@@ -248,15 +237,30 @@ export function SummarySection({ data }: Props) {
       )}
       {data.facts.length > 0 && (
         <div className="facts-grid">
-          {data.facts.map((f, i) => (
-            <div key={`${f.key}-${i}`} className="fact-cell">
-              <span className="fact-key">{f.key}</span>
-              <span className="fact-value">
-                <span className={f.uncertain ? "uncertain-strong" : undefined}>{f.value}</span>
-                <Sup sources={f.sources} />
-              </span>
-            </div>
-          ))}
+          {data.facts.map((f, i) =>
+            fact === i ? (
+              <div key={`${f.key}-${i}`} className="fact-cell open">
+                <FactCellEditor cell={f} onClose={() => setFact(null)} />
+              </div>
+            ) : (
+              // In edit mode a fact is changed where it is read: a click opens it in place.
+              <div
+                key={`${f.key}-${i}`}
+                className={`fact-cell${editing ? " editable" : ""}`}
+                {...(editing ? rowButton(() => sec.start(() => setFact(i))) : {})}
+                title={editing ? `Zmień: ${f.key}` : undefined}
+              >
+                <span className="fact-key">
+                  {f.key}
+                  {editing && <Pencil size={12} className="fact-pencil" />}
+                </span>
+                <span className="fact-value">
+                  <span className={f.uncertain ? "uncertain-strong" : undefined}>{f.value}</span>
+                  <Sup sources={f.sources} />
+                </span>
+              </div>
+            ),
+          )}
         </div>
       )}
       {uncertain && (
@@ -265,7 +269,8 @@ export function SummarySection({ data }: Props) {
           <span>= data przybliżona, niepotwierdzona lub sprzeczna</span>
         </div>
       )}
-      {sec.open && data.facts.length > 0 && <span style={{ fontSize: 12, color: "var(--text3)" }}>Daty i miejsca zmienisz w danych osobowych na górze profilu.</span>}
+      {editing && (fact === "new" ? <FactForm add={{ record: data.person.id }} onDone={() => setFact(null)} /> : sec.open && fact == null && <AddButton label="Dodaj fakt (zawód, zamieszkanie, wydarzenie…)" onClick={() => setFact("new")} />)}
+      {sec.open && data.facts.length > 0 && <span style={{ fontSize: 12, color: "var(--text3)" }}>Kliknij fakt, żeby go zmienić. Imiona, płeć i tagi zmienisz w danych osobowych na górze profilu.</span>}
       <Foot edit={sec} />
     </section>
   );
@@ -345,6 +350,14 @@ export function FamilySection({ data }: Props) {
                       <span className="ellipsis" style={{ fontSize: 12, color: "var(--text2)" }}>
                         {r.line}
                       </span>
+                      {(r.maiden || r.years) && (
+                        // „z d. …” and the years on their own line; if both don't fit, the years wrap whole.
+                        <span className="family-tile-sub">
+                          {r.maiden && <span>z d. {r.maiden}</span>}
+                          {r.maiden && r.years && " · "}
+                          {r.years && <span>{r.years}</span>}
+                        </span>
+                      )}
                     </span>
                   </button>
                   {rel && rel.role !== "associate" && (
@@ -927,7 +940,41 @@ export function DocumentsSection({ data }: Props) {
 
 export function SourcesSection({ data }: Props) {
   const go = useStore((s) => s.go);
+  const editing = useEditing();
   if (data.sources.length === 0) return null;
+  // „Odłącz źródło”: the person's citations of it go (it says which first); the source stays in the archive. One
+  // step on its own, like adding a photo: it needs no open section.
+  const detach = (source: string) =>
+    useStore.getState().outsideSection(() =>
+      runEdit(async () => {
+        const preview = await call<{ title: string; text: string; source: string }>("source.detachPreview", { person: data.person.id, source });
+        useStore.getState().setAsk({
+          title: preview.title,
+          text: preview.text,
+          icon: "warn",
+          buttons: [
+            { label: "Anuluj", kind: "ghost" },
+            {
+              label: "Odłącz źródło",
+              kind: "danger",
+              run: () =>
+                runEdit(async () => {
+                  await call("source.detach", { person: data.person.id, source });
+                  afterChange();
+                  // „Cofnij” on the message only while nothing else has changed since.
+                  const version = useStore.getState().dataVersion;
+                  const undo = () => {
+                    const st = useStore.getState();
+                    if (st.dataVersion === version) void st.undo();
+                    else st.notify("Ta wiadomość jest już nieaktualna: od tej zmiany było coś jeszcze. Cofaj przyciskiem „Cofnij” w pasku u góry (Ctrl Z).");
+                  };
+                  useStore.getState().notify(`Odłączono źródło: ${preview.source}.`, { action: { label: "Cofnij", run: undo } });
+                }),
+            },
+          ],
+        });
+      }),
+    );
   return (
     <section id="sec-sources" className="profile-section" style={{ gap: 12 }}>
       <SectionHead title="Źródła" count={data.sources.length} />
@@ -939,6 +986,19 @@ export function SourcesSection({ data }: Props) {
               <span style={{ fontSize: 14 }}>{s.title}</span>
               {(s.page || s.repository) && <span style={{ fontSize: 12, color: "var(--text3)" }}>{[s.page, s.repository].filter(Boolean).join(" · ")}</span>}
             </span>
+            {editing && (
+              <button
+                className="btn ghost sm"
+                title="Przypisy tej osoby do tego źródła znikną; samo źródło zostaje w archiwum"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  detach(s.id);
+                }}
+              >
+                <Unlink size={13} />
+                Odłącz źródło
+              </button>
+            )}
             <ArrowRight size={14} color="var(--text3)" />
           </div>
         ))}
@@ -1041,11 +1101,21 @@ export function LinksSection({ data }: Props) {
 // ---------- Oś życia, Wspomniany w ----------
 
 export function TimelineSection({ data }: Props) {
-  if (data.timeline.length === 0) return null;
+  const editing = useEditing();
+  const go = useStore((s) => s.go);
+  const sec = useSection(`${data.person.id}:timeline`, "Oś życia");
+  // The row being changed in place, or a new one.
+  const [open, setOpen] = useState<number | "new" | null>(null);
+  useEffect(() => {
+    if (!sec.open) setOpen(null);
+  }, [sec.open]);
+  if (!editing && data.timeline.length === 0) return null;
+  const firstUndated = data.timeline.findIndex((t) => t.undated);
   return (
-    <section id="sec-timeline" className="profile-section" style={{ gap: 12 }}>
+    <section id="sec-timeline" className={sectionClass(sec)} style={{ gap: 12 }}>
       <SectionHead
         title="Oś życia"
+        edit={sec}
         right={
           <span className="row" style={{ gap: 6, fontSize: 12, color: "var(--text3)" }}>
             <span style={{ width: 10, height: 10, borderRadius: "50%", border: "2px solid var(--line)" }} />
@@ -1055,8 +1125,13 @@ export function TimelineSection({ data }: Props) {
       />
       <div className="timeline">
         {data.timeline.map((t, i) => (
-          <div key={i} className={`timeline-row${t.family ? " family" : ""}`}>
-            <span className={`num tl-date${t.uncertain ? " uncertain" : ""}`}>{t.date}</span>
+          <div
+            key={i}
+            className={`timeline-row${t.family ? " family" : ""}${t.undated ? " undated" : ""}${i === firstUndated ? " first-undated" : ""}${editing && open !== i ? " editable" : ""}`}
+            {...(editing && open !== i ? rowButton(() => sec.start(() => setOpen(i))) : {})}
+          >
+            {/* A fact without a date says so where the date would be, on the same rail as the rest. */}
+            {t.undated ? <span className="tl-date tl-undated">bez daty</span> : <span className={`num tl-date${t.uncertain ? " uncertain" : ""}`}>{t.date}</span>}
             <span className="tl-age">{t.age}</span>
             <span className="tl-rail">
               <span className="tl-dot" />
@@ -1066,26 +1141,38 @@ export function TimelineSection({ data }: Props) {
                 {t.type}
                 {t.place && <span style={{ color: "var(--accent-text)", fontWeight: 400 }}> · {t.place}</span>}
                 <Sup sources={t.sources} />
+                {editing && open !== i && <Pencil size={12} className="tl-pencil" />}
               </span>
               {t.description && <span style={{ fontSize: 13, color: "var(--text2)" }}>{t.description}</span>}
+              {open === i &&
+                (t.edit ? (
+                  <FactForm fact={t.edit} onDone={() => setOpen(null)} />
+                ) : (
+                  t.from && (
+                    // Worked out from a relative's profile: changed there.
+                    <span className="text-form" onClick={(e) => e.stopPropagation()}>
+                      <span style={{ fontSize: 13 }}>
+                        To zdarzenie pochodzi z profilu: <b style={{ fontWeight: 600 }}>{t.from.name}</b>. Datę i miejsce zmienisz tam, w danych osobowych.
+                      </span>
+                      <span className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
+                        <button className="btn ghost sm" onClick={() => setOpen(null)}>
+                          Zamknij
+                        </button>
+                        <button className="btn secondary sm" onClick={() => t.from && go({ name: "person", id: t.from.id, open: "personal" })}>
+                          <ArrowRight size={13} />
+                          Otwórz profil: {t.from.name}
+                        </button>
+                      </span>
+                    </span>
+                  )
+                ))}
             </span>
           </div>
         ))}
       </div>
-      {data.undated.length > 0 && (
-        <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, display: "grid", gridTemplateColumns: "110px 1fr", columnGap: 10, rowGap: 4 }}>
-          <span className="label-caps" style={{ textAlign: "right" }}>
-            Bez daty
-          </span>
-          <span className="col" style={{ gap: 4 }}>
-            {data.undated.map((u, i) => (
-              <span key={i}>
-                <b style={{ fontWeight: 600 }}>{u.type}</b> · {u.value}
-              </span>
-            ))}
-          </span>
-        </div>
-      )}
+      {editing && (open === "new" ? <FactForm add={{ record: data.person.id }} onDone={() => setOpen(null)} /> : <AddButton label="Dodaj wydarzenie (zamieszkanie, praca, nauka…)" onClick={() => sec.start(() => setOpen("new"))} />)}
+      {sec.open && <span style={{ fontSize: 12, color: "var(--text3)" }}>Kliknij wpis, żeby zmienić datę, miejsce albo opis. Zdarzenia bliskich zmienisz na ich profilach.</span>}
+      <Foot edit={sec} />
     </section>
   );
 }

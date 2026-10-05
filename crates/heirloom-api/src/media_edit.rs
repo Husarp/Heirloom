@@ -33,6 +33,7 @@ pub fn call(s: &mut Session, method: &str, args: &Value) -> ApiResult {
         "media.delete" => delete(s, args),
         "source.save" => save_source(s, args),
         "source.delete" => delete_source(s, args),
+        "source.detach" => detach_source(s, args),
         "citation.add" => add_citation(s, args),
         _ => Err(ApiError::new("unknown_method", format!("Nieznane polecenie: {method}"))),
     }
@@ -417,20 +418,141 @@ fn delete_source(s: &mut Session, args: &Value) -> ApiResult {
     let id = req(args, "id")?;
     let doc = &s.archive.doc;
     let mut changes = Changes::new(doc);
-    fn cites(node: &Node, id: &str) -> bool {
-        node.children.iter().any(|c| (c.tag == "SOUR" && c.pointer() == Some(id)) || cites(c, id))
-    }
-    fn strip(node: &mut Node, id: &str) {
-        node.children.retain(|c| !(c.tag == "SOUR" && c.pointer() == Some(id)));
-        for c in &mut node.children {
-            strip(c, id);
-        }
-    }
     let users: Vec<String> = doc.records.iter().filter(|r| r.xref.as_deref() != Some(id.as_str()) && cites(r, &id)).filter_map(|r| r.xref.clone()).collect();
     for user in users {
-        strip(changes.get(&user)?, &id);
+        strip_citations(changes.get(&user)?, &id);
     }
     changes.remove(&id);
+    let edits = changes.into_edits();
+    commit(s, edits)?;
+    Ok(Value::Null)
+}
+
+/// Where a person's profile cites a source, record by record: the person (anywhere in it), the events of their
+/// families, and their texts. `what` says which entries, `others` who else sees that record on their profile.
+struct Citing {
+    record: String,
+    /// Strip only the family's events (a family's own citations are not on the profile).
+    events_only: bool,
+    what: Vec<String>,
+    others: Vec<String>,
+}
+
+fn cites(node: &Node, id: &str) -> bool {
+    node.children.iter().any(|c| (c.tag == "SOUR" && c.pointer() == Some(id)) || cites(c, id))
+}
+
+fn strip_citations(node: &mut Node, id: &str) {
+    node.children.retain(|c| !(c.tag == "SOUR" && c.pointer() == Some(id)));
+    for c in &mut node.children {
+        strip_citations(c, id);
+    }
+}
+
+fn citing(s: &mut Session, person: &str, source: &str) -> Result<Vec<Citing>, ApiError> {
+    use heirloom_core::gedcom::view::{FAM_EVENTS, INDI_EVENTS};
+    let doc = &s.archive.doc;
+    let indi = doc.record(person).ok_or_else(|| crate::people::not_found(person))?.clone();
+    let linked = |tags: &[&str]| -> Vec<Node> {
+        indi.children.iter().filter(|c| tags.contains(&c.tag.as_str())).filter_map(|c| c.pointer()).filter_map(|x| doc.record(x).cloned()).collect()
+    };
+    let families = linked(&["FAMS"]);
+    let texts = linked(&["SNOTE", "NOTE"]);
+    let d = s.derived();
+    let name = |x: &str| d.index(x).map(|i| d.info[i].name.clone()).unwrap_or_else(|| x.to_string());
+    let event = |c: &Node| crate::people::event_name(&c.tag, c.child_value("TYPE"));
+    let mut out = Vec::new();
+    let mut what: Vec<String> = Vec::new();
+    for c in indi.children.iter().filter(|c| (c.tag == "SOUR" && c.pointer() == Some(source)) || cites(c, source)) {
+        let word = match c.tag.as_str() {
+            "SOUR" => "Dane osoby (ogólnie)".to_string(),
+            tag if INDI_EVENTS.contains(&tag) => event(c),
+            "NAME" => "Imię i nazwisko".into(),
+            "NOTE" => "Notatka".into(),
+            "OBJE" => "Zdjęcie".into(),
+            _ => "Inne dane z pliku".into(),
+        };
+        if !what.contains(&word) {
+            what.push(word);
+        }
+    }
+    if !what.is_empty() {
+        out.push(Citing { record: person.to_string(), events_only: false, what, others: Vec::new() });
+    }
+    for fam in &families {
+        let what: Vec<String> = fam.children.iter().filter(|c| FAM_EVENTS.contains(&c.tag.as_str()) && cites(c, source)).map(event).collect();
+        if what.is_empty() {
+            continue;
+        }
+        let others = fam.children.iter().filter(|c| c.tag == "HUSB" || c.tag == "WIFE").filter_map(|c| c.pointer()).filter(|x| *x != person).map(name).collect();
+        out.push(Citing { record: fam.xref.clone().unwrap_or_default(), events_only: true, what, others });
+    }
+    for text in texts.iter().filter(|t| cites(t, source)) {
+        let xref = text.xref.clone().unwrap_or_default();
+        let label = match d.view.texts.get(&xref) {
+            Some(t) => match &t.title {
+                Some(title) => format!("{} „{title}”", crate::people::kind_word(t.kind)),
+                None => {
+                    let plain = crate::text::plain(&t.body).trim().trim_matches(['„', '”', '"']).to_string();
+                    let short: String = plain.chars().take(40).collect();
+                    let more = if plain.chars().count() > 40 { "…" } else { "" };
+                    format!("{} „{short}{more}”", crate::people::kind_word(t.kind))
+                }
+            },
+            None => "Tekst".into(),
+        };
+        let others = d
+            .view
+            .people
+            .iter()
+            .enumerate()
+            .filter(|(i, p)| d.xref(*i) != person && p.texts.iter().any(|r| matches!(r, heirloom_core::gedcom::view::TextRef::Shared(x) if *x == xref)))
+            .map(|(i, _)| d.info[i].name.clone())
+            .collect();
+        out.push(Citing { record: xref, events_only: false, what: vec![label], others });
+    }
+    Ok(out)
+}
+
+/// What „Odłącz źródło” would change, in words. Nothing is changed.
+pub fn detach_preview(s: &mut Session, args: &Value) -> ApiResult {
+    let person = req(args, "person")?;
+    let source = req(args, "source")?;
+    let plan = citing(s, &person, &source)?;
+    let d = s.derived();
+    let who = d.index(&person).map(|i| d.info[i].name.clone()).unwrap_or_else(|| person.clone());
+    let title = d.view.sources.get(&source).and_then(|x| x.title.clone()).unwrap_or_else(|| source.clone());
+    if plan.is_empty() {
+        return Err(ApiError::new("stale", "Ta osoba nie ma już przypisu do tego źródła. Odśwież profil."));
+    }
+    let what: Vec<String> = plan.iter().flat_map(|c| c.what.iter().cloned()).collect();
+    let gone = if what.len() == 1 { "Zniknie przypis przy" } else { "Znikną przypisy przy" };
+    let mut parts = vec![format!("„{title}” przestanie być źródłem dla: {who}. {gone}: {}.", what.join(", "))];
+    for c in plan.iter().filter(|c| !c.others.is_empty()) {
+        let also = if c.events_only { format!("{} to wpis wspólny z", c.what.join(", ")) } else { format!("Ten tekst ({}) jest też na profilu", c.what.join(", ")) };
+        parts.push(format!("{also}: {} — tam przypis też zniknie.", c.others.join(", ")));
+    }
+    parts.push("Samo źródło zostaje w archiwum (Źródła), razem z przypisami u innych osób. Do zapisu możesz to cofnąć (Ctrl Z).".into());
+    Ok(json!({ "title": "Odłączyć źródło od tej osoby?", "text": parts.join(" "), "source": title }))
+}
+
+/// „Odłącz źródło”: takes a source's citations off one person's profile (see [`citing`]); the source stays.
+fn detach_source(s: &mut Session, args: &Value) -> ApiResult {
+    use heirloom_core::gedcom::view::FAM_EVENTS;
+    let person = req(args, "person")?;
+    let source = req(args, "source")?;
+    let plan = citing(s, &person, &source)?;
+    let mut changes = Changes::new(&s.archive.doc);
+    for c in &plan {
+        let record = changes.get(&c.record)?;
+        if c.events_only {
+            for e in record.children.iter_mut().filter(|e| FAM_EVENTS.contains(&e.tag.as_str())) {
+                strip_citations(e, &source);
+            }
+        } else {
+            strip_citations(record, &source);
+        }
+    }
     let edits = changes.into_edits();
     commit(s, edits)?;
     Ok(Value::Null)
@@ -503,5 +625,32 @@ mod tests {
         let added = crate::edit::call(&mut s, "media.add", &json!({ "paths": [copy.to_string_lossy()], "person": "@I2@" })).unwrap();
         let link = s.archive.doc.record("@I2@").unwrap().child("OBJE").unwrap();
         assert!(link.pointer().is_some_and(|p| s.archive.doc.record(p).is_some()), "{link:?}, {added}");
+    }
+
+    #[test]
+    fn a_source_is_detached_from_one_person_and_stays_in_the_archive() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("a");
+        std::fs::create_dir_all(&root).unwrap();
+        let text = "0 HEAD\n1 SOUR HEIRLOOM\n1 GEDC\n2 VERS 7.0\n\
+0 @I1@ INDI\n1 NAME Józef /Kowalski/\n1 BIRT\n2 DATE 1878\n2 SOUR @S1@\n3 PAGE 45\n1 OCCU kolejarz\n2 SOUR @S2@\n1 SOUR @S1@\n1 FAMS @F1@\n1 SNOTE @N1@\n\
+0 @I2@ INDI\n1 NAME Marianna /Nowak/\n1 FAMS @F1@\n1 BIRT\n2 SOUR @S1@\n\
+0 @F1@ FAM\n1 HUSB @I1@\n1 WIFE @I2@\n1 MARR\n2 DATE 1904\n2 SOUR @S1@\n\
+0 @N1@ SNOTE Dzieciństwo w Wólce.\n1 _HLM_KIND bio\n1 _HLM_TITLE Dzieciństwo\n1 SOUR @S1@\n\
+0 @S1@ SOUR\n1 TITL Księga chrztów Łęczna\n0 @S2@ SOUR\n1 TITL Akta kolei\n0 TRLR\n";
+        std::fs::write(root.join("rodzina.ged"), text).unwrap();
+        let mut s = Session::new(Archive::open(&root).unwrap());
+        let preview = crate::edit::call(&mut s, "source.detachPreview", &json!({ "person": "@I1@", "source": "@S1@" })).unwrap();
+        let words = preview["text"].as_str().unwrap();
+        assert!(words.contains("Urodzenie, Dane osoby (ogólnie), Ślub, Życiorys „Dzieciństwo”"), "{words}");
+        assert!(words.contains("Marianna Nowak"), "the wedding is shared: {words}");
+        assert_eq!(s.archive.undo_depth(), 0, "the preview changes nothing");
+        crate::edit::call(&mut s, "source.detach", &json!({ "person": "@I1@", "source": "@S1@" })).unwrap();
+        let doc = &s.archive.doc;
+        assert!(!cites(doc.record("@I1@").unwrap(), "@S1@") && !cites(doc.record("@F1@").unwrap(), "@S1@") && !cites(doc.record("@N1@").unwrap(), "@S1@"));
+        assert!(cites(doc.record("@I1@").unwrap(), "@S2@"), "other sources stay");
+        assert!(cites(doc.record("@I2@").unwrap(), "@S1@"), "the wife's own citation stays");
+        assert!(doc.record("@S1@").is_some(), "the source stays in the archive");
+        assert_eq!(s.archive.undo_depth(), 1, "one undo step");
     }
 }

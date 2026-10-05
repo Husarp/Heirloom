@@ -105,7 +105,7 @@ export function Profile({ id, section, open }: { id: string; section?: string; o
     if (data.documents.length > 0) items.push({ id: "sec-documents", label: "Dokumenty" });
     if (data.sources.length > 0) items.push({ id: "sec-sources", label: "Źródła" });
     if (show(data.links.length > 0)) items.push({ id: "sec-links", label: "Linki" });
-    if (data.timeline.length > 0) items.push({ id: "sec-timeline", label: "Oś życia" });
+    if (show(data.timeline.length > 0)) items.push({ id: "sec-timeline", label: "Oś życia" });
     if (data.mentionedIn.length > 0) items.push({ id: "sec-mentioned", label: "Wspomniany w" });
     if (show(data.notes.length > 0)) items.push({ id: "sec-notes", label: "Uwagi badawcze" });
     if (data.history.groups.length > 0 || data.history.origin) items.push({ id: "sec-history", label: "Historia zmian" });

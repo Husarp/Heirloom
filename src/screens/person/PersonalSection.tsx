@@ -457,24 +457,30 @@ function NoDataBox({ field, form, set }: { field: string; form: Form; set: <K ex
   );
 }
 
-interface DateFeedback {
+export interface DateFeedback {
   qualifier: "empty" | "exact" | "month" | "year" | "about" | "before" | "after" | "range" | "text";
   text?: string;
 }
 
 const CERTAINTY_LABEL: Record<Certainty, string> = { "": "—", high: "pewne", medium: "prawdopodobne", low: "niepewne" };
 
-/** One event: the smart date (how it was read shows under it, spec §5.11), the place and how certain it is. */
-function EventRow({ label, value, onChange }: { label: string; value: EventForm; onChange: (part: Partial<EventForm>) => void }) {
+/** How a typed date is read („12 marca 1878”, „około 1850”), shown under the smart date field (spec §5.11). */
+export function useDateFeedback(text: string): DateFeedback | null {
   const [feedback, setFeedback] = useState<DateFeedback | null>(null);
   useEffect(() => {
     const handle = window.setTimeout(() => {
-      call<DateFeedback>("date.parse", { text: value.date })
+      call<DateFeedback>("date.parse", { text })
         .then(setFeedback)
         .catch(() => setFeedback(null));
     }, 180);
     return () => window.clearTimeout(handle);
-  }, [value.date]);
+  }, [text]);
+  return feedback;
+}
+
+/** One event: the smart date (how it was read shows under it, spec §5.11), the place and how certain it is. */
+function EventRow({ label, value, onChange }: { label: string; value: EventForm; onChange: (part: Partial<EventForm>) => void }) {
+  const feedback = useDateFeedback(value.date);
   const empty = !value.date.trim() && !value.place.trim();
   return (
     <>
@@ -511,7 +517,7 @@ interface PlaceRow {
 let placeCache: { version: number; rows: PlaceRow[] } | null = null;
 
 /** Place picker with the places already in the archive (spec §4.8), or a new one as typed. */
-function PlaceField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+export function PlaceField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   const dataVersion = useStore((s) => s.dataVersion);
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<PlaceRow[]>([]);
