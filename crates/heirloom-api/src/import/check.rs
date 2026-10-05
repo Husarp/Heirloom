@@ -405,6 +405,11 @@ pub fn check(parsed: Parsed, files: &[InputFile]) -> (Batch, Vec<Issue>) {
             check_ref(&mut issues, format!("Pytanie {}", q.id), p);
         }
     }
+    for l in &m.links {
+        if let Some(p) = &l.person {
+            check_ref(&mut issues, "Link".into(), p);
+        }
+    }
     // Unknown keys.
     for p in &m.persons {
         for key in p.extra.keys() {
@@ -746,6 +751,13 @@ mod tests {
         assert!(messages.contains(&"Identyfikator P2 występuje dwa razy."));
         assert!(messages.iter().any(|m| m.starts_with("Brakuje części: osoby P4")));
         assert_eq!(batch.merged.persons.len(), 4);
+    }
+
+    #[test]
+    fn a_link_to_a_person_not_in_the_batch_is_an_error() {
+        let json = example_json().replace("\"coverage\": [", "\"links\": [ { \"person\": \"P9\", \"url\": \"https://example.org\", \"kind\": \"other\" } ],\n  \"coverage\": [");
+        let (_, issues) = check(parse_blocks(&extract_blocks(&json, "x")), &[]);
+        assert!(issues.iter().any(|i| i.level == "error" && i.message == "Link wskazuje osobę P9, której nie ma w paczce."), "{issues:?}");
     }
 
     #[test]
