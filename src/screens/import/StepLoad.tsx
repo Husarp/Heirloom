@@ -4,6 +4,7 @@
 import {
   ArrowRight,
   ChevronDown,
+  ChevronRight,
   CircleAlert,
   CircleCheck,
   CircleX,
@@ -27,15 +28,20 @@ import { useApi } from "../../app/useApi";
 import { Spinner, useDismiss } from "../../components/bits";
 import { bytes, clock, count, people, shortWhen } from "../../lib/format";
 import { copyText, onFileDrop, pickFiles, pickFolder } from "../../lib/native";
+import { GUIDE_STEPS, guideOpenByDefault } from "./aiGuide";
 import { useWizard, type Act, type ImportInput, type ImportState, type PastImport } from "./types";
 
-const SAMPLE = `Oto paczka z aktami parafii Łęczna (1850–1890). Znalazłem 23 osoby.
-
-Część 1 z 2:
+const SAMPLE = `Oto część 1 z 2 pliku importu.
 \`\`\`json
-{ "format": "heirloom-import", "paczka": "Nowakowie z Ciechanek", "osoby": [ … ] }
-\`\`\`
-Pytania: 1) Czy Antoni Nowak ze świadków to brat Marianny?`;
+{
+  "format": "heirloom-import",
+  "batch": "Nowakowie-Ciechanki-2026-10-01",
+  "part": 1,
+  "persons": [ … ],
+  …
+  "end": { "part": 1, "final": false, …, "marker": "END-HEIRLOOM-IMPORT" }
+}
+\`\`\``;
 
 const KIND_LABEL: Record<ImportInput["kind"], string> = { answer: "Odpowiedź AI", photo: "Zdjęcie", document: "Dokument", note: "Notatka", other: "Nie rozpoznano" };
 
@@ -54,6 +60,9 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
   const [stale, setStale] = useState(false);
   const [over, setOver] = useState(false);
   const { data: history } = useApi<PastImport[]>("import.history");
+  // The guide is open at first while the archive has had no import; a click decides from then on.
+  const [guide, setGuide] = useState<boolean | null>(null);
+  const guideOpen = guide ?? guideOpenByDefault(history);
 
   // Reads what was pasted and dropped a moment after the last change. Coming back to this step with a batch already
   // loaded keeps it (and the decisions made in the later steps).
@@ -369,14 +378,7 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
           </span>
         </div>
 
-        <div className="imp-info">
-          <span style={{ fontSize: 14, fontWeight: 600 }}>Dla osoby, która szuka w aktach</span>
-          <span style={{ color: "var(--text2)" }}>Instrukcja mówi AI, w jakim formacie przygotować osoby, fakty i źródła. Wyślij ją razem z notatkami.</span>
-          <button className="btn secondary" style={{ height: 34, alignSelf: "flex-start", marginTop: 2 }} onClick={copyInstructions}>
-            <Copy size={14} />
-            Kopiuj instrukcję dla AI
-          </button>
-        </div>
+        <AiGuide open={guideOpen} onToggle={() => setGuide(!guideOpen)} onCopy={copyInstructions} />
 
         <div className="card">
           <div className="imp-list-label">Poprzednie importy</div>
@@ -398,6 +400,44 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** „Jak przygotować paczkę z pomocą AI”: the steps from the researcher's material to this screen, with the button
+ *  that copies the instructions. Folds away once imports are routine. */
+function AiGuide({ open, onToggle, onCopy }: { open: boolean; onToggle: () => void; onCopy: () => void }) {
+  return (
+    <div className="imp-info">
+      <button className="imp-guide-head" aria-expanded={open} onClick={onToggle}>
+        {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+        <span style={{ fontSize: 14, fontWeight: 600 }}>Jak przygotować paczkę z pomocą AI</span>
+      </button>
+      {open ? (
+        <ol className="imp-guide">
+          {GUIDE_STEPS.map((step) => (
+            <li key={step.title}>
+              <span>
+                <b>{step.title}</b> {step.text}
+              </span>
+              {step.copy && (
+                <button className="btn secondary" style={{ height: 34, alignSelf: "flex-start", marginTop: 6 }} onClick={onCopy}>
+                  <Copy size={14} />
+                  Kopiuj instrukcję dla AI
+                </button>
+              )}
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <>
+          <span style={{ color: "var(--text2)" }}>Instrukcja mówi AI, w jakim formacie przygotować osoby, fakty i źródła.</span>
+          <button className="btn secondary" style={{ height: 34, alignSelf: "flex-start", marginTop: 2 }} onClick={onCopy}>
+            <Copy size={14} />
+            Kopiuj instrukcję dla AI
+          </button>
+        </>
+      )}
     </div>
   );
 }
