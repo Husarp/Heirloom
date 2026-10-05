@@ -3,6 +3,46 @@
 Format: `X.Y.Z — YYYY-MM-DD HH:MM: description`. Newest on top.
 X = major change, Y = feature / bigger change, Z = small change.
 
+## 0.6.0 — 2026-10-05 12:45: Facts and the life timeline edited in place on the profile; Przodkowie and Potomkowie redrawn
+- **Profile: change a fact where you see it.** In edit mode:
+  - **„W skrócie”:** each fact cell opens a small form in place (date, place, description); a cell of several facts
+    (occupations, residences) lists them, each editable, with „Dodaj kolejny zawód” (only for kinds that can be
+    added); „Dodaj fakt” adds a new kind. The birth's form says the „syn …” line comes from the parents, and a note
+    typed there stands beside them („syn Ignacego i Anieli (w domu dziadków)”) instead of replacing them;
+  - **„Oś życia”** is a section of its own: each of the person's own facts (and the wedding) is changed, added
+    („Dodaj wydarzenie”) or deleted in place. Rows that come from a relative (a child's birth, a parent's death)
+    say which profile they come from and open it; a shared wedding says who else sees the change. A note of several
+    lines is edited in a growing box (Enter adds a line, Ctrl Enter saves);
+  - **a form never deletes anything by itself:** a birth, death or wedding with date and place cleared stays as
+    „tak (bez daty)”, so a wife stays „żona” and a deceased person isn't made living; any other fact emptied asks
+    „Usuń wpis…” first, and deleting a wedding or a death says what changes (partnerka / partner, may count as
+    living);
+  - **„Odłącz źródło”** in Źródła: the question names the source, the person and the facts that cite it, and says
+    the source stays in the archive;
+  - in browse mode a click on a fact or a timeline row asks who edits and then opens it („Kliknij, aby zmienić…”);
+    not in an archive opened together with others or read-only;
+  - every change is one step that Ctrl Z (or „Cofnij” in the edit bar) takes back. A form whose fact was changed
+    or removed by an undo closes, and one that only moved stays on its fact, so it can never write onto another.
+- **Profile, smaller fixes:** undated facts are rows of the same timeline with „bez daty” (before, a block of their
+  own off the rail, which made „Praca · kolejarz” look misplaced); the Rodzina tiles have the relation on one line,
+  then „z d. …” and the years on the next, without a „·” left at a line's end when the years wrap.
+- **Przodkowie:** the whole line back to the last known ancestor (no longer 3 generations), the person at the right
+  and the ancestors going left; a line that ends early leaves its rows to the others, a person met twice (cousins
+  who married) is drawn once with a „↻ … — już w drzewie” note, and the column names (Osoba, Rodzice, Dziadkowie,
+  Pradziadkowie) stay at the top when scrolled. The side panel no longer shifts the whole tree: it moves left only
+  as far as the chosen card needs, and back when the panel closes.
+- **Potomkowie:**
+  - „+N potomków” unfolds the next 3 generations of that branch in place: the clicked card keeps its place and the
+    view moves just enough (zooming out to 75 % at most) to show the person and their children. Double-click still
+    puts a person in the centre;
+  - **„Partnerzy”** (a toolbar switch, on by default, remembered like „Karty”): partners as greyed cards beside the
+    person, each marriage's children hanging from their own marriage; the lines of two marriages never cross, and a
+    third partner is joined by a line over the cards between;
+  - the generation names stand in a column at the screen's left edge that the tree scrolls under, and go away with
+    their row under the toolbars.
+- **Lines in the tree** are a little thicker and stay visible at every zoom: never below 2 px when zoomed out, and
+  growing with the cards when zoomed in. The canvas no longer jumps by itself when a control at its edge gets focus.
+
 ## 0.5.0 — 2026-10-04 16:41: „Otwórz razem…” — several archives as one tree, „To ta sama osoba?”, new windows
 - **„Otwórz razem…”** (in the archive picker and in the sidebar's archive menu): pick two or more archives and a
   name; Heirloom saves a **set file** next to them (`Rodzina razem.heirloom-zestaw`) and shows them as one: one tree
