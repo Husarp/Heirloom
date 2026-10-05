@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cameraOf, viewOf } from "./camera";
+import { cameraOf, unfoldView, viewOf } from "./camera";
 
 describe("tree camera", () => {
   it("comes back to the same place", () => {
@@ -21,5 +21,40 @@ describe("tree camera", () => {
   it("keeps the zoom within the canvas's limits", () => {
     expect(cameraOf({ zoom: 5, x: 0, y: 0 }, { w: 100, h: 100 }, { x: 0, y: 0 }, 0.06, 2).zoom).toBe(2);
     expect(cameraOf({ zoom: 0.001, x: 0, y: 0 }, { w: 100, h: 100 }, { x: 0, y: 0 }, 0.005, 1.6).zoom).toBe(0.005);
+  });
+
+  describe("a branch unfolded in Potomkowie", () => {
+    const view = { left: 136, top: 110, right: 1476, bottom: 876 };
+    const onScreen = (c: { x: number; y: number; zoom: number }, wx: number, wy: number) => ({ x: c.x + wx * c.zoom, y: c.y + wy * c.zoom });
+
+    it("stays put when the person and their children are already in view", () => {
+      const camera = { x: 300, y: 150, zoom: 1 };
+      expect(unfoldView(camera, { x: 0, y: 0, r: 600, b: 252 }, { x: 102, y: 0 }, view)).toBe(camera);
+    });
+
+    it("moves by the least amount to bring the row in from the right", () => {
+      // The person's card at screen x 1402, only 74 px of it showing; the row of children is 900 wide.
+      const camera = { x: 1402, y: 300, zoom: 1 };
+      const next = unfoldView(camera, { x: -300, y: 0, r: 600, b: 252 }, { x: 102, y: 0 }, view);
+      expect(next.zoom).toBe(1);
+      expect(next.y).toBe(300);
+      expect(onScreen(next, 600, 0).x).toBe(view.right);
+    });
+
+    it("zooms out a little for a wider row, but not below full cards, then centres on the person", () => {
+      const camera = { x: 1402, y: 300, zoom: 1 };
+      const slightly = unfoldView(camera, { x: -400, y: 0, r: 1200, b: 252 }, { x: 102, y: 0 }, view);
+      expect(slightly.zoom).toBeCloseTo(1340 / 1600);
+      expect(onScreen(slightly, -400, 0).x).toBeGreaterThanOrEqual(view.left - 0.01);
+      expect(onScreen(slightly, 1200, 0).x).toBeLessThanOrEqual(view.right + 0.01);
+      const wide = unfoldView(camera, { x: -3000, y: 0, r: 3204, b: 252 }, { x: 102, y: 0 }, view);
+      expect(wide.zoom).toBe(0.75);
+      expect(onScreen(wide, 102, 0).x).toBe((view.left + view.right) / 2);
+    });
+
+    it("comes up when the row is below the screen", () => {
+      const next = unfoldView({ x: 300, y: 700, zoom: 1 }, { x: 0, y: 0, r: 600, b: 252 }, { x: 102, y: 0 }, view);
+      expect(onScreen(next, 0, 252).y).toBe(view.bottom);
+    });
   });
 });

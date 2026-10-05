@@ -462,6 +462,27 @@ export function layoutAncestors(graph: Graph, focusId: string, rounded = false):
   return { ...scene, bounds: bounds(scene) };
 }
 
+/** Potomkowie with partners: how high each marriage's bar goes (0 the lowest, just above the children), so that no
+ *  marriage's line crosses another's bar. A bar above another must not have the lower one's drop (from its marker)
+ *  under it, nor its own children's lines over the lower bar; of two orders that both work, the marriage further out
+ *  from the person goes higher, around the nearer one. `from` is each marriage's marker, `kids` its children's
+ *  lines, both as x. */
+export function barLevels(groups: { from: number; kids: number[] }[], centre: number): number[] {
+  const span = groups.map((g) => [Math.min(g.from, ...g.kids), Math.max(g.from, ...g.kids)]);
+  const inside = (x: number, [a, b]: number[]) => x > a + 0.5 && x < b - 0.5;
+  const clash = (high: number, low: number) => inside(groups[low].from, span[high]) || groups[high].kids.some((x) => inside(x, span[low]));
+  const left = groups.map((_, i) => i);
+  const levels: number[] = [];
+  // From the lowest up: next, one that may go under all the others left (the nearest such), else the nearest.
+  for (let level = 0; left.length; level++) {
+    left.sort((a, b) => Math.abs(groups[a].from - centre) - Math.abs(groups[b].from - centre) || a - b);
+    const next = left.find((i) => left.every((j) => j === i || !clash(j, i))) ?? left[0];
+    levels[next] = level;
+    left.splice(left.indexOf(next), 1);
+  }
+  return levels;
+}
+
 /** Generations one click on „+N potomków” unfolds below that person (tree.rs `UNFOLD`). */
 export const UNFOLD = 3;
 
@@ -532,38 +553,41 @@ export function layoutDescendants(graph: Graph, focusId: string, options: { dept
     const px = left + (n.width - n.rowW) / 2 + n.left.length * (CARD_W + PARTNER_GAP);
     const p = graph.people[n.id];
     cards.push({ id: n.id, x: px, y, sub: partners ? subLine(p) : spouseLine(graph, p), focus: n.level === 0, ...(parent ? { rel: { of: parent, kind: "child" as const } } : {}) });
-    // A partner's card, their line to the person and the marriage's marker in the gap next to the partner.
-    const markers = new Map<string, number>();
-    const beside = (id: string, x: number, marker: number, from: number, to: number) => {
+    // A partner's card, their line to the person and the marriage's marker in the gap next to the partner. The first
+    // partner on each side is joined straight across; one further out by a line over the top of the cards between
+    // (from the person's top edge into the partner's), with the marker on it, so it never reads as the two partners'.
+    const markers = new Map<string, { x: number; y: number }>();
+    const beside = (id: string, x: number, k: number, side: 1 | -1) => {
       cards.push({ id, x, y, sub: subLine(graph.people[id]), partner: true, rel: { of: n.id, kind: "partner" } });
-      links.push({ key: `dp-${n.id}-${id}`, d: `M${from} ${y + CARD_H / 2} H${to}`, kind: "partner", people: [n.id, id] });
-      unions.push({ key: `du-${n.id}-${id}`, x: marker, y: y + CARD_H / 2, people: [n.id, id] });
+      const marker = { x: side > 0 ? x - PARTNER_GAP / 2 : x + CARD_W + PARTNER_GAP / 2, y: y + CARD_H / 2 };
+      if (!k) links.push({ key: `dp-${n.id}-${id}`, d: side > 0 ? `M${px + CARD_W} ${marker.y} H${x}` : `M${x + CARD_W} ${marker.y} H${px}`, kind: "partner", people: [n.id, id] });
+      else {
+        marker.y = y - 12 * k;
+        links.push({ key: `dp-${n.id}-${id}`, d: `M${side > 0 ? px + CARD_W - 20 * k : px + 20 * k} ${y} V${marker.y} H${x + CARD_W / 2} V${y}`, kind: "partner", people: [n.id, id] });
+      }
+      unions.push({ key: `du-${n.id}-${id}`, ...marker, people: [n.id, id] });
       markers.set(id, marker);
     };
-    n.right.forEach((id, k) => {
-      const x = px + (k + 1) * (CARD_W + PARTNER_GAP);
-      beside(id, x, x - PARTNER_GAP / 2, px + CARD_W, x);
-    });
-    n.left.forEach((id, k) => {
-      const x = px - (k + 1) * (CARD_W + PARTNER_GAP);
-      beside(id, x, x + CARD_W + PARTNER_GAP / 2, x + CARD_W, px);
-    });
+    n.right.forEach((id, k) => beside(id, px + (k + 1) * (CARD_W + PARTNER_GAP), k, 1));
+    n.left.forEach((id, k) => beside(id, px - (k + 1) * (CARD_W + PARTNER_GAP), k, -1));
     if (budget.get(n.id) === 0 && p.descendants > 0) {
       const count = p.descendants;
       pills.push({ key: `more-${n.id}`, x: px + 70, y: y + CARD_H + 12, label: `+${count} ${count === 1 ? "potomek" : "potomków"}`, target: n.id, direction: "down", unfold: true });
     }
     let cursor = left + (n.width - n.kidsW) / 2;
-    n.groups.forEach((g, gi) => {
+    const drawn = n.groups.map((g) => {
       const kids = g.kids.map((k) => {
         const x = place(k, cursor, n.id);
         cursor += k.width + SIBLING_GAP;
         return { id: k.id, x, y: y + DESCENDANT_PITCH, kind: linkKind(pediOf(graph, k.id), false) };
       });
       cursor += SIBLING_GAP;
-      const from = g.partner ? { x: markers.get(g.partner)!, y: y + CARD_H / 2, parents: [n.id, g.partner] } : { x: px + CARD_W / 2, y: y + CARD_H, parents: [n.id] };
-      // Each marriage's children have their own bar, a little higher than the one before, so two never share a stretch.
-      descent(links, gi ? `d-${n.id}-${gi}` : `d-${n.id}`, from.x, from.y, kids, 26 + 12 * gi, from.parents, rounded);
+      const from = g.partner ? { ...markers.get(g.partner)!, parents: [n.id, g.partner] } : { x: px + CARD_W / 2, y: y + CARD_H, parents: [n.id] };
+      return { kids, from };
     });
+    // Each marriage's children have their own bar, 12 apart, so two never share a stretch (barLevels).
+    const levels = barLevels(drawn.map((d) => ({ from: d.from.x, kids: d.kids.map((k) => k.x + CARD_W / 2) })), px + CARD_W / 2);
+    drawn.forEach((d, gi) => descent(links, gi ? `d-${n.id}-${gi}` : `d-${n.id}`, d.from.x, d.from.y, d.kids, 26 + 12 * levels[gi], d.from.parents, rounded));
     return px;
   };
   place(root, 0);
