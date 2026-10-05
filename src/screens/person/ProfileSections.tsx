@@ -45,9 +45,9 @@ import { openUrl, pickFiles } from "../../lib/native";
 import { Lightbox } from "../media/Lightbox";
 import { runEdit } from "../media/shared";
 import { RelativeTools } from "./RelativeTools";
-import { FactCellEditor, FactForm } from "./FactEdit";
+import { FactCellEditor, FactForm, factKey } from "./FactEdit";
 import { SectionEditButton, SectionFoot, useDraftGuard, useSection, type SectionEdit } from "./sectionEdit";
-import type { Profile, TextItem } from "./types";
+import type { Profile, TextItem, TimelineRow } from "./types";
 
 type Props = { data: Profile };
 
@@ -78,6 +78,12 @@ function Sup({ sources }: { sources: number[] }) {
 
 function useEditing() {
   return useStore((s) => s.mode) === "edit";
+}
+
+/** Facts can be clicked to change them in browse mode too: the click asks who edits, then opens the fact in place.
+ *  Not in an archive that can't be edited (opened together with others, or read-only). */
+function useCanEdit() {
+  return useStore((s) => s.mode === "edit" || !(s.archive?.combined || s.archive?.readOnly));
 }
 
 /** Adds or edits one text (a biography section, story, saying, trivia, note or the summary). */
@@ -215,8 +221,14 @@ export function SummarySection({ data }: Props) {
   const editing = useEditing();
   const sec = useSection(`${data.person.id}:summary`, "W skrócie");
   const [edit, setEdit] = useState(false);
-  // The fact being changed in place (its cell), or a new one.
-  const [fact, setFact] = useState<number | "new" | null>(null);
+  const canEdit = useCanEdit();
+  // The fact being changed in place (its cell, by name: a cell that goes, its last fact deleted or undone, closes
+  // rather than open the next one), or a new one.
+  const [chosen, setFact] = useState<string | "new" | null>(null);
+  const cells = data.facts.map((f, i) => `${f.key}#${data.facts.slice(0, i).filter((g) => g.key === f.key).length}`);
+  const fact = chosen === "new" || cells.includes(chosen ?? "") ? chosen : null;
+  // Forgotten, not just hidden: an undo that brings the cell back doesn't reopen it.
+  if (chosen !== fact) setFact(fact);
   useEffect(() => {
     if (!sec.open) {
       setEdit(false);
@@ -238,17 +250,17 @@ export function SummarySection({ data }: Props) {
       {data.facts.length > 0 && (
         <div className="facts-grid">
           {data.facts.map((f, i) =>
-            fact === i ? (
+            fact === cells[i] ? (
               <div key={`${f.key}-${i}`} className="fact-cell open">
                 <FactCellEditor cell={f} onClose={() => setFact(null)} />
               </div>
             ) : (
-              // In edit mode a fact is changed where it is read: a click opens it in place.
+              // A fact is changed where it is read: a click opens it in place (in browse mode, after „who edits”).
               <div
                 key={`${f.key}-${i}`}
-                className={`fact-cell${editing ? " editable" : ""}`}
-                {...(editing ? rowButton(() => sec.start(() => setFact(i))) : {})}
-                title={editing ? `Zmień: ${f.key}` : undefined}
+                className={`fact-cell${canEdit ? " editable" : ""}`}
+                {...(canEdit ? rowButton(() => sec.start(() => setFact(cells[i]))) : {})}
+                title={canEdit ? (editing ? `Zmień: ${f.key}` : `Kliknij, aby zmienić: ${f.key} (włącza edycję)`) : undefined}
               >
                 <span className="fact-key">
                   {f.key}
@@ -351,11 +363,13 @@ export function FamilySection({ data }: Props) {
                         {r.line}
                       </span>
                       {(r.maiden || r.years) && (
-                        // „z d. …” and the years on their own line; if both don't fit, the years wrap whole.
+                        // „z d. …” and the years on their own line; if both don't fit, the years wrap whole, and the
+                        // „·” between them goes with the wrap (profile.css), so no line ends with it.
                         <span className="family-tile-sub">
-                          {r.maiden && <span>z d. {r.maiden}</span>}
-                          {r.maiden && r.years && " · "}
-                          {r.years && <span>{r.years}</span>}
+                          <span>
+                            {r.maiden && <span>z d. {r.maiden}</span>}
+                            {r.years && <span>{r.years}</span>}
+                          </span>
                         </span>
                       )}
                     </span>
@@ -1100,12 +1114,25 @@ export function LinksSection({ data }: Props) {
 
 // ---------- Oś życia, Wspomniany w ----------
 
+/** What a timeline row shows, as the open row is followed (and its React key, so a row keeps a half-typed form when
+ *  an undo adds or takes away a row above it): the fact behind it, or the relative it comes from. */
+function rowKey(t: TimelineRow, i: number, rows: TimelineRow[]): string {
+  const key = (r: TimelineRow) => (r.edit ? factKey(r.edit) : `${r.from?.id ?? ""}\u0001${r.type}\u0001${r.date}`);
+  const same = rows.slice(0, i).filter((r) => key(r) === key(t)).length;
+  return `${key(t)}#${same}`;
+}
+
 export function TimelineSection({ data }: Props) {
   const editing = useEditing();
   const go = useStore((s) => s.go);
   const sec = useSection(`${data.person.id}:timeline`, "Oś życia");
-  // The row being changed in place, or a new one.
-  const [open, setOpen] = useState<number | "new" | null>(null);
+  const canEdit = useCanEdit();
+  // The row being changed in place (by the fact behind it, so an undo that shifts the rows closes it rather than
+  // point it at another), or a new one.
+  const [chosen, setOpen] = useState<string | "new" | null>(null);
+  const keys = data.timeline.map(rowKey);
+  const open = chosen === "new" || keys.includes(chosen ?? "") ? chosen : null;
+  if (chosen !== open) setOpen(open);
   useEffect(() => {
     if (!sec.open) setOpen(null);
   }, [sec.open]);
@@ -1124,51 +1151,56 @@ export function TimelineSection({ data }: Props) {
         }
       />
       <div className="timeline">
-        {data.timeline.map((t, i) => (
-          <div
-            key={i}
-            className={`timeline-row${t.family ? " family" : ""}${t.undated ? " undated" : ""}${i === firstUndated ? " first-undated" : ""}${editing && open !== i ? " editable" : ""}`}
-            {...(editing && open !== i ? rowButton(() => sec.start(() => setOpen(i))) : {})}
-          >
-            {/* A fact without a date says so where the date would be, on the same rail as the rest. */}
-            {t.undated ? <span className="tl-date tl-undated">bez daty</span> : <span className={`num tl-date${t.uncertain ? " uncertain" : ""}`}>{t.date}</span>}
-            <span className="tl-age">{t.age}</span>
-            <span className="tl-rail">
-              <span className="tl-dot" />
-            </span>
-            <span className="tl-content">
-              <span style={{ fontSize: 15, fontWeight: t.family ? 400 : 600 }}>
-                {t.type}
-                {t.place && <span style={{ color: "var(--accent-text)", fontWeight: 400 }}> · {t.place}</span>}
-                <Sup sources={t.sources} />
-                {editing && open !== i && <Pencil size={12} className="tl-pencil" />}
+        {data.timeline.map((t, i) => {
+          const key = keys[i];
+          const here = open === key;
+          return (
+            <div
+              key={key}
+              className={`timeline-row${t.family ? " family" : ""}${t.undated ? " undated" : ""}${i === firstUndated ? " first-undated" : ""}${canEdit && !here ? " editable" : ""}`}
+              title={canEdit && !here && !editing ? "Kliknij, aby zmienić (włącza edycję)" : undefined}
+              {...(canEdit && !here ? rowButton(() => sec.start(() => setOpen(key))) : {})}
+            >
+              {/* A fact without a date says so where the date would be, on the same rail as the rest. */}
+              {t.undated ? <span className="tl-date tl-undated">bez daty</span> : <span className={`num tl-date${t.uncertain ? " uncertain" : ""}`}>{t.date}</span>}
+              <span className="tl-age">{t.age}</span>
+              <span className="tl-rail">
+                <span className="tl-dot" />
               </span>
-              {t.description && <span style={{ fontSize: 13, color: "var(--text2)" }}>{t.description}</span>}
-              {open === i &&
-                (t.edit ? (
-                  <FactForm fact={t.edit} onDone={() => setOpen(null)} />
-                ) : (
-                  t.from && (
-                    // Worked out from a relative's profile: changed there.
-                    <span className="text-form" onClick={(e) => e.stopPropagation()}>
-                      <span style={{ fontSize: 13 }}>
-                        To zdarzenie pochodzi z profilu: <b style={{ fontWeight: 600 }}>{t.from.name}</b>. Datę i miejsce zmienisz tam, w danych osobowych.
+              <span className="tl-content">
+                <span style={{ fontSize: 15, fontWeight: t.family ? 400 : 600 }}>
+                  {t.type}
+                  {t.place && <span style={{ color: "var(--accent-text)", fontWeight: 400 }}> · {t.place}</span>}
+                  <Sup sources={t.sources} />
+                  {editing && !here && <Pencil size={12} className="tl-pencil" />}
+                </span>
+                {t.description && <span style={{ fontSize: 13, color: "var(--text2)" }}>{t.description}</span>}
+                {here &&
+                  (t.edit ? (
+                    <FactForm fact={t.edit} onDone={() => setOpen(null)} />
+                  ) : (
+                    t.from && (
+                      // Worked out from a relative's profile: changed there.
+                      <span className="text-form" onClick={(e) => e.stopPropagation()}>
+                        <span style={{ fontSize: 13 }}>
+                          To zdarzenie pochodzi z profilu: <b style={{ fontWeight: 600 }}>{t.from.name}</b>. Datę i miejsce zmienisz tam, w danych osobowych.
+                        </span>
+                        <span className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
+                          <button className="btn ghost sm" onClick={() => setOpen(null)}>
+                            Zamknij
+                          </button>
+                          <button className="btn secondary sm" onClick={() => t.from && go({ name: "person", id: t.from.id, open: "personal" })}>
+                            <ArrowRight size={13} />
+                            Otwórz profil: {t.from.name}
+                          </button>
+                        </span>
                       </span>
-                      <span className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
-                        <button className="btn ghost sm" onClick={() => setOpen(null)}>
-                          Zamknij
-                        </button>
-                        <button className="btn secondary sm" onClick={() => t.from && go({ name: "person", id: t.from.id, open: "personal" })}>
-                          <ArrowRight size={13} />
-                          Otwórz profil: {t.from.name}
-                        </button>
-                      </span>
-                    </span>
-                  )
-                ))}
-            </span>
-          </div>
-        ))}
+                    )
+                  ))}
+              </span>
+            </div>
+          );
+        })}
       </div>
       {editing && (open === "new" ? <FactForm add={{ record: data.person.id }} onDone={() => setOpen(null)} /> : <AddButton label="Dodaj wydarzenie (zamieszkanie, praca, nauka…)" onClick={() => sec.start(() => setOpen("new"))} />)}
       {sec.open && <span style={{ fontSize: 12, color: "var(--text3)" }}>Kliknij wpis, żeby zmienić datę, miejsce albo opis. Zdarzenia bliskich zmienisz na ich profilach.</span>}

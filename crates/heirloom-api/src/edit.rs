@@ -1080,12 +1080,17 @@ fn fact_position(record: &Node, index: usize, tag: &str) -> Result<usize, ApiErr
         .nth(index)
         .filter(|(_, c)| c.tag == tag)
         .map(|(p, _)| p)
-        .ok_or_else(|| ApiError::new("stale", "Ten wpis zmienił się w międzyczasie. Odśwież profil i spróbuj jeszcze raz."))
+        .ok_or_else(stale)
 }
 
+/// Events whose being there says something even without a date or a place (born, died, married): emptied in place,
+/// they stay as "DEAT Y" („tak, bez daty”). Only „Usuń wpis…” takes them away. Other facts emptied in place are
+/// refused (the screen offers „Usuń wpis…” instead), so nothing goes as a side effect of a form.
+pub(crate) const HAPPENED: &[&str] = &["BIRT", "CHR", "BAPM", "DEAT", "BURI", "CREM", "MARR"];
+
 /// Sets a fact's date, place and description (`text`: the occupation for OCCU, a note for a birth or an event).
-/// Keys left out stay as they are; a fact left with nothing in it goes.
-fn apply_fact(record: &mut Node, pos: usize, args: &Value) {
+/// Keys left out stay as they are.
+fn apply_fact(record: &mut Node, pos: usize, args: &Value) -> Result<(), ApiError> {
     let mut wrapper = Node::new("X");
     wrapper.children.push(record.children.remove(pos));
     let tag = wrapper.children[0].tag.clone();
@@ -1099,10 +1104,29 @@ fn apply_fact(record: &mut Node, pos: usize, args: &Value) {
         }
     }
     apply_event(&mut wrapper, &[tag.as_str()], args);
-    let empty = wrapper.children.first().is_some_and(|e| e.value.is_none() && e.children.iter().all(|c| matches!(c.tag.as_str(), "_HLM_CERT" | "_HLM_BASIS")));
-    if let Some(event) = wrapper.children.pop().filter(|_| !empty) {
-        record.children.insert(pos, event);
+    // apply_event drops an event left with nothing in it; a birth, a death or a wedding stays as one that happened.
+    let mut event = wrapper.children.pop().unwrap_or_else(|| Node::new(&tag));
+    let bare = event.value.is_none() && event.child("DATE").is_none() && event.child("PLAC").is_none();
+    if bare && HAPPENED.contains(&tag.as_str()) {
+        event.value = Some("Y".into());
+    } else if bare && event.child("NOTE").is_none() {
+        return Err(ApiError::new("bad_args", "Wpis byłby pusty. Żeby go usunąć, użyj „Usuń wpis…”."));
     }
+    record.children.insert(pos, event);
+    Ok(())
+}
+
+/// The fact as its form showed it when it opened (`was`: date, place, text, as `person.get` gave them). A form left
+/// open over an undo would otherwise write onto whatever fact now has its place.
+fn check_was(s: &mut Session, record: &str, index: usize, args: &Value) -> Result<(), ApiError> {
+    let Some(was) = args.get("was") else { return Ok(()) };
+    let now = crate::people::fact_ref_at(s.derived(), record, index);
+    let same = now.is_some_and(|now| ["date", "place", "text"].iter().all(|k| was.get(k).is_none_or(|w| *w == now[k])));
+    if same { Ok(()) } else { Err(stale()) }
+}
+
+fn stale() -> ApiError {
+    ApiError::new("stale", "Ten wpis zmienił się w międzyczasie. Odśwież profil i spróbuj jeszcze raz.")
 }
 
 /// `fact.update`: one fact of a person or a family, edited in place on the profile („W skrócie”, „Oś życia”).
@@ -1110,17 +1134,18 @@ fn update_fact(s: &mut Session, args: &Value) -> ApiResult {
     let record = req(args, "record")?;
     let index = args.get("index").and_then(Value::as_u64).ok_or_else(|| ApiError::bad_args("index"))? as usize;
     let tag = req(args, "tag")?;
+    check_was(s, &record, index, args)?;
     let mut changes = Changes::new(&s.archive.doc);
     let node = changes.get(&record)?;
     let pos = fact_position(node, index, &tag)?;
-    apply_fact(node, pos, args);
+    apply_fact(node, pos, args)?;
     let edits = changes.into_edits();
     commit(s, edits)?;
     Ok(Value::Null)
 }
 
 /// The kinds of facts the profile can add, with the event name an "EVEN" needs.
-const ADDABLE: &[&str] = &["OCCU", "RESI", "EDUC", "_MILT", "EMIG", "IMMI", "RELI", "EVEN"];
+pub(crate) const ADDABLE: &[&str] = &["OCCU", "RESI", "EDUC", "_MILT", "EMIG", "IMMI", "RELI", "EVEN"];
 
 /// `fact.add`: a new fact for a person (a second occupation, a place they lived, an event), after the facts of its
 /// kind. Returns its index.
@@ -1157,7 +1182,7 @@ fn add_fact(s: &mut Session, args: &Value) -> ApiResult {
         .map_or(node.children.len(), |p| p + 1);
     node.children.insert(at, fact);
     let index = node.children[..at].iter().filter(|c| INDI_EVENTS.contains(&c.tag.as_str())).count();
-    apply_fact(node, at, args);
+    apply_fact(node, at, args)?;
     let edits = changes.into_edits();
     commit(s, edits)?;
     Ok(json!({ "index": index }))
@@ -1168,6 +1193,7 @@ fn delete_fact(s: &mut Session, args: &Value) -> ApiResult {
     let record = req(args, "record")?;
     let index = args.get("index").and_then(Value::as_u64).ok_or_else(|| ApiError::bad_args("index"))? as usize;
     let tag = req(args, "tag")?;
+    check_was(s, &record, index, args)?;
     let mut changes = Changes::new(&s.archive.doc);
     let node = changes.get(&record)?;
     let pos = fact_position(node, index, &tag)?;
@@ -1388,10 +1414,26 @@ mod tests {
         s.archive.undo();
         s.changed();
         assert_eq!(facts(&mut s).len(), 3);
-        // Clearing everything of a fact removes it.
-        run(&mut s, "fact.update", json!({ "record": a, "index": 2, "tag": "OCCU", "text": "", "date": "", "place": "" }));
-        assert_eq!(facts(&mut s).len(), 2);
+        // A fact is never removed as a side effect of its form: an emptied occupation is refused ("Usuń wpis…" is the
+        // way), an emptied wedding or death stays as one that happened ("MARR Y", "DEAT Y").
+        assert!(call(&mut s, "fact.update", &json!({ "record": a, "index": 2, "tag": "OCCU", "text": "", "date": "", "place": "" })).is_err());
+        assert_eq!(facts(&mut s).len(), 3);
         assert!(call(&mut s, "fact.add", &json!({ "record": a, "tag": "OCCU", "text": " " })).is_err(), "nothing typed, nothing added");
+        run(&mut s, "fact.update", json!({ "record": fam, "index": 0, "tag": "MARR", "date": "", "place": "" }));
+        let d = s.derived();
+        assert_eq!(crate::kin::marriage(d, d.index(&a).unwrap(), d.index(&b).unwrap()), (true, None), "still married, date unknown");
+        run(&mut s, "person.update", json!({ "id": a, "events": { "death": { "date": "1950", "place": "Lublin" } } }));
+        let at = facts(&mut s).iter().position(|f| f.0 == "DEAT").unwrap();
+        run(&mut s, "fact.update", json!({ "record": a, "index": at, "tag": "DEAT", "date": "", "place": "" }));
+        let deat = s.archive.doc.record(&a).unwrap().children.iter().find(|c| c.tag == "DEAT").unwrap().clone();
+        assert_eq!(deat.value.as_deref(), Some("Y"));
+        // A form opened before an undo (`was`: what it showed) changes nothing once its fact is another.
+        let at = facts(&mut s).iter().position(|f| f.1.as_deref() == Some("kolejarz")).unwrap();
+        let was = json!({ "date": "", "place": "Lublin", "text": "kolejarz" });
+        assert!(call(&mut s, "fact.update", &json!({ "record": a, "index": at, "tag": "OCCU", "place": "Kraków", "was": was })).is_ok());
+        let err = call(&mut s, "fact.update", &json!({ "record": a, "index": at, "tag": "OCCU", "place": "Kraków", "was": was })).unwrap_err();
+        assert_eq!(err.code, "stale");
+        assert!(call(&mut s, "fact.delete", &json!({ "record": a, "index": at, "tag": "OCCU", "was": { "text": "dróżnik" } })).is_err());
     }
 
     /// Every FAM has at least two people and every link is written on both sides (CHIL ↔ FAMC, HUSB/WIFE ↔ FAMS).

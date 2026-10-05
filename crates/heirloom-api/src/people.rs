@@ -476,6 +476,22 @@ fn fact_ref(record: &str, index: usize, f: &Fact, shared: Option<&str>) -> Value
     })
 }
 
+/// The fact at `index` of a person or a family, as `fact_ref` gives it (for checking a form against what it showed).
+pub fn fact_ref_at(d: &Derived, record: &str, index: usize) -> Option<Value> {
+    let facts = match d.index(record) {
+        Some(i) => &d.view.people[i].facts,
+        None => &d.view.family(record)?.1.facts,
+    };
+    facts.get(index).map(|f| fact_ref(record, index, f, None))
+}
+
+/// „syn Antoniego i Marianny”: the birth's description worked out from the parents.
+fn child_of(d: &Derived, i: usize) -> Option<String> {
+    let female = d.view.model.persons[i].sex == Sex::Female;
+    let parents: Vec<String> = d.info[i].parents.iter().map(|&p| polish::given_genitive(&d.info[p].given, d.view.model.persons[p].sex == Sex::Female)).collect();
+    (!parents.is_empty()).then(|| format!("{} {}", if female { "córka" } else { "syn" }, parents.join(" i ")))
+}
+
 pub fn profile(d: &Derived, id: &str, history: &[heirloom_core::history::Entry]) -> Result<Value, ApiError> {
     let i = d.index(id).ok_or_else(|| not_found(id))?;
     let (p, details, info) = d.person(i);
@@ -492,11 +508,18 @@ pub fn profile(d: &Derived, id: &str, history: &[heirloom_core::history::Entry])
     };
     let dated = |f: &Fact| DateInfo::from_fact(f).is_some_and(|d| d.uncertain);
     let one = |record: &str, n: usize, f: &Fact, shared: Option<&str>| json!({ "facts": [fact_ref(record, n, f, shared)], "add": null });
+    // An event kept without a date or a place ("BIRT Y", or one left with only its sources) still happened.
+    let happened = |value: String| if value.is_empty() { "tak (bez daty)".to_string() } else { value };
     for tag in ["BIRT", "CHR", "BAPM"] {
         for (n, f) in details.facts.iter().enumerate().filter(|(_, f)| f.tag == tag) {
-            let value = [fact_date(d, f), place_with_note(f)].into_iter().flatten().collect::<Vec<_>>().join(", ");
+            let value = happened([fact_date(d, f), place_with_note(f)].into_iter().flatten().collect::<Vec<_>>().join(", "));
             let cites = sources.cite(&f.citations);
-            fact_row(fact_key(tag, None, female), value, dated(f), cites, one(&me, n, f, None));
+            let mut edit = one(&me, n, f, None);
+            // The same form as on the timeline: it says the „syn …” there comes from the parents.
+            if let (true, Some(text)) = (tag == "BIRT", child_of(d, i)) {
+                edit["facts"][0]["derived"] = json!(text);
+            }
+            fact_row(fact_key(tag, None, female), value, dated(f), cites, edit);
         }
     }
     let mut partner_list = info.partners.clone();
@@ -506,7 +529,7 @@ pub fn profile(d: &Derived, id: &str, history: &[heirloom_core::history::Entry])
         for fam in pa.fams.iter().filter(|f| pb.fams.contains(f)) {
             if let Some((_, fd)) = d.view.family(fam) {
                 for (n, f) in fd.facts.iter().enumerate().filter(|(_, f)| f.tag == "MARR") {
-                    let value = [fact_date(d, f), f.place.clone()].into_iter().flatten().collect::<Vec<_>>().join(", ");
+                    let value = happened([fact_date(d, f), f.place.clone()].into_iter().flatten().collect::<Vec<_>>().join(", "));
                     let key = if partner_list.len() > 1 {
                         let with = polish::given_instrumental(&d.info[partner].given, d.view.model.persons[partner].sex == Sex::Female);
                         format!("Ślub {} {with}", polish::z_or_ze(&with))
@@ -521,10 +544,7 @@ pub fn profile(d: &Derived, id: &str, history: &[heirloom_core::history::Entry])
     }
     for tag in ["DEAT", "BURI", "CREM"] {
         for (n, f) in details.facts.iter().enumerate().filter(|(_, f)| f.tag == tag) {
-            let mut value = [fact_date(d, f), place_with_note(f)].into_iter().flatten().collect::<Vec<_>>().join(", ");
-            if value.is_empty() && f.only_happened {
-                value = "tak (bez daty)".into();
-            }
+            let mut value = happened([fact_date(d, f), place_with_note(f)].into_iter().flatten().collect::<Vec<_>>().join(", "));
             if let Some(cause) = &f.cause {
                 value.push_str(&format!(" — {cause}"));
             }
@@ -558,11 +578,13 @@ pub fn profile(d: &Derived, id: &str, history: &[heirloom_core::history::Entry])
             .collect();
         let cites: Vec<usize> = list.iter().flat_map(|(_, f)| sources.cite(&f.citations)).collect();
         let uncertain = list.iter().any(|(_, f)| dated(f) || matches!(f.certainty, Some(heirloom_core::gedcom::view::Certainty::Low)));
-        // A cell of several facts (two occupations) can take one more of the same kind.
+        // A cell of several facts (two occupations) can take one more of the same kind, if `fact.add` makes that kind
+        // (not an imported confirmation or census, nor an event with no name to give the new one).
         let first = list[0].1;
+        let addable = crate::edit::ADDABLE.contains(&first.tag.as_str()) && (first.tag != "EVEN" || first.kind.is_some());
         let edit = json!({
             "facts": list.iter().map(|(n, f)| fact_ref(&me, *n, f, None)).collect::<Vec<_>>(),
-            "add": { "record": me, "tag": first.tag, "kind": first.kind },
+            "add": addable.then(|| json!({ "record": me, "tag": first.tag, "kind": first.kind })),
         });
         fact_row(key, parts.join(if arrow { " → " } else { "; " }), uncertain, cites, edit);
     }
@@ -933,14 +955,16 @@ fn timeline(d: &Derived, i: usize, sources: &mut SourceNumbers) -> Vec<Value> {
         let cites = sources.cite(&f.citations);
         let mut edit = fact_ref(me, n, f, None);
         let description = match f.tag.as_str() {
-            // „syn Antoniego i Marianny” comes from the parents; a note of the birth's own goes in its place.
+            // „syn Antoniego i Marianny” comes from the parents; a note of the birth's own goes after it.
             "BIRT" => {
-                let parents: Vec<String> = info.parents.iter().map(|&p| polish::given_genitive(&d.info[p].given, d.view.model.persons[p].sex == Sex::Female)).collect();
-                let derived = (!parents.is_empty()).then(|| format!("{} {}", if female { "córka" } else { "syn" }, parents.join(" i ")));
+                let derived = child_of(d, i);
                 if let Some(text) = &derived {
                     edit["derived"] = json!(text);
                 }
-                f.note.clone().or(derived)
+                match (derived, f.note.clone()) {
+                    (Some(who), Some(note)) => Some(format!("{who}{}{note}", if note.starts_with('(') { " " } else { " · " })),
+                    (who, note) => note.or(who),
+                }
             }
             _ => f.value.clone().or_else(|| f.note.clone()),
         };
@@ -1191,7 +1215,7 @@ mod tests {
 0 @I2@ INDI\n1 UID u2\n1 NAME Antoni /Kowalski/\n1 SEX M\n1 BIRT\n2 DATE ABT 1850\n1 DEAT\n2 DATE BEF 1910\n1 FAMS @F1@\n\
 0 @I3@ INDI\n1 UID u3\n1 NAME Marianna /Nowak/\n2 TYPE BIRTH\n1 NAME Marianna /Kowalska/\n2 TYPE MARRIED\n1 SEX F\n\
 1 BIRT\n2 DATE ABT 1882\n1 FAMS @F2@\n1 SNOTE @N4@\n\
-0 @I4@ INDI\n1 UID u4\n1 NAME Stanisław /Kowalski/\n1 SEX M\n1 BIRT\n2 DATE 1905\n1 FAMC @F2@\n\
+0 @I4@ INDI\n1 UID u4\n1 NAME Stanisław /Kowalski/\n1 SEX M\n1 BIRT\n2 DATE 1905\n1 CONF\n2 DATE 1917\n1 FAMC @F2@\n\
 0 @F1@ FAM\n1 HUSB @I2@\n1 CHIL @I1@\n\
 0 @F2@ FAM\n1 HUSB @I1@\n1 WIFE @I3@\n1 CHIL @I4@\n1 MARR\n2 DATE 14 FEB 1904\n2 PLAC Łęczna\n\
 0 @N1@ SNOTE Syn rolnika z Wólki.\n1 _HLM_KIND summary\n\
@@ -1241,6 +1265,11 @@ mod tests {
         let occupations = p["facts"].as_array().unwrap().iter().find(|f| f["key"] == "Zawód").unwrap();
         assert_eq!(occupations["edit"]["facts"].as_array().unwrap().len(), 2);
         assert_eq!(occupations["edit"]["add"]["tag"], "OCCU");
+        let birth = p["facts"].as_array().unwrap().iter().find(|f| f["edit"]["facts"][0]["tag"] == "BIRT").unwrap();
+        assert_eq!(birth["edit"]["facts"][0]["derived"], p["timeline"][0]["edit"]["derived"], "the same birth form in „W skrócie” as on the timeline");
+        let son = profile(&d, "@I4@", &[]).unwrap();
+        let confirmation = son["facts"].as_array().unwrap().iter().find(|f| f["edit"]["facts"][0]["tag"] == "CONF").unwrap();
+        assert!(confirmation["edit"]["add"].is_null(), "no „Dodaj kolejny wpis” for a kind fact.add doesn't make");
     }
 
     #[test]
