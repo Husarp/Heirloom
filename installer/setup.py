@@ -583,8 +583,9 @@ def install(log, at, file, copied: Copied):
     at(2)
     shortcuts(log)
     at(3)
-    register_file_type(log)
     uninstall_entry(log)
+    # Last before committing: it never raises, so nothing after it can roll back the files its icon points at.
+    register_file_type(log)
     copied.committed = True   # (the new version is in place: nothing to put back any more)
     shutil.rmtree(BACKUP, ignore_errors=True)
     at(4)
