@@ -39,6 +39,24 @@ function afterDraft(then: () => void) {
   });
 }
 
+const DRAFT_QUESTION = "Odrzucić wpisany tekst?";
+
+/** A text being typed and not yet added: closing its section, leaving the profile or switching the archive asks
+ *  first (the leave guard). */
+export function useDraftGuard(dirty: boolean) {
+  useEffect(() => {
+    const { leaveGuard, setLeaveGuard } = useStore.getState();
+    if (dirty) setLeaveGuard(DRAFT_QUESTION);
+    else if (leaveGuard === DRAFT_QUESTION) setLeaveGuard(null);
+  }, [dirty]);
+  useEffect(
+    () => () => {
+      if (useStore.getState().leaveGuard === DRAFT_QUESTION) useStore.getState().setLeaveGuard(null);
+    },
+    [],
+  );
+}
+
 /** `key` is unique on the page (the person's id and the section). */
 export function useSection(key: string, label: string): SectionEdit {
   const section = useStore((s) => s.section);
