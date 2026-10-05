@@ -8,7 +8,7 @@ import type { TreeCamera } from "../../app/store";
 import { ArchiveDot, Avatar, CardYears } from "../../components/bits";
 import { cardName, cardYears } from "../../lib/format";
 import { RelativeTools } from "../person/RelativeTools";
-import { cameraOf, viewOf, type Camera2D } from "./camera";
+import { cameraOf, unfoldView, viewOf, type Camera2D } from "./camera";
 import type { Graph, GraphPerson } from "./graph";
 import { CARD_H, CARD_W, type Scene, type SceneCard } from "./layout";
 import { fitName, forgetNameWidths, nameWidth } from "./nameFit";
@@ -185,10 +185,14 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
   const lastScene = useRef<Scene | null>(null);
   // The first placement needs the canvas size; a window that isn't shown yet (minimised) reports 0 × 0.
   const [hasSize, setHasSize] = useState(false);
-  // Przodkowie: the tree hangs from the right edge, so when the canvas narrows (the side panel opens) the person at
-  // the right stays in view.
+  // Przodkowie: the tree hangs from the right edge, so when the canvas narrows (the side panel opens) the chosen card,
+  // or else the person at the right, stays in view: the tree moves left only as far as that card needs, so a card
+  // clicked further left stays under the pointer. Widening again (the panel closed) moves it back as far.
   const rightAnchored = useRef(anchor === "right");
   rightAnchored.current = anchor === "right";
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const panelShift = useRef(0);
   useEffect(() => {
     const el = host.current;
     if (!el) return;
@@ -196,7 +200,18 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
     const observer = new ResizeObserver(() => {
       setHasSize(el.clientWidth > 0 && el.clientHeight > 0);
       const change = el.clientWidth - width;
-      if (change && width > 0 && el.clientWidth > 0 && rightAnchored.current && lastFocus.current) setCamera((c) => ({ ...c, x: c.x + change }));
+      if (change && width > 0 && el.clientWidth > 0 && rightAnchored.current && lastFocus.current) {
+        const c = cameraRef.current;
+        let shift = 0;
+        if (change > 0) shift = Math.min(change, panelShift.current);
+        else {
+          const id = selectedRef.current ?? lastFocus.current;
+          const card = lastScene.current?.cards.find((k) => k.id === id);
+          if (card) shift = -Math.min(-change, Math.max(0, c.x + (card.x + (card.w ?? CARD_W)) * c.zoom - (el.clientWidth - 24)));
+        }
+        panelShift.current -= shift;
+        if (shift) setCamera({ ...c, x: c.x + shift });
+      }
       width = el.clientWidth;
     });
     observer.observe(el);
@@ -211,12 +226,15 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
     // the column of names.
     const placeX = (zoom: number) => (anchor === "right" ? w - 80 - (card.x + CARD_W) * zoom : gutter + (w - gutter) / 2 - (card.x + CARD_W / 2) * zoom);
     if (restore && w > 0 && h > 0) {
+      panelShift.current = 0;
       apply(cameraOf(restore, { w, h }, { x: card.x + CARD_W / 2, y: card.y + CARD_H / 2 }, MIN_ZOOM, MAX_ZOOM));
       onRestored?.();
     } else if (lastFocus.current === null) {
+      panelShift.current = 0;
       const y = anchor === "top" ? 150 - card.y : h / 2 - (card.y + CARD_H / 2) + (anchor === "center" && scene.bounds.minY < -100 ? 40 : 0);
       apply({ zoom: 1, x: placeX(1), y });
     } else if (lastFocus.current !== focusId) {
+      panelShift.current = 0;
       const zoom = Math.max(cameraRef.current.zoom, 0.8);
       const y = anchor === "top" ? 150 - card.y * zoom : h / 2 - (card.y + CARD_H / 2) * zoom;
       apply({ zoom, x: placeX(zoom), y }, true);
@@ -225,10 +243,18 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
       const id = pin && old?.some((c) => c.id === pin) && scene.cards.some((c) => c.id === pin) ? pin : focusId;
       const before = old?.find((c) => c.id === id);
       const now = scene.cards.find((c) => c.id === id);
-      if (before && now && (before.x !== now.x || before.y !== now.y)) {
-        const c = cameraRef.current;
-        apply({ zoom: c.zoom, x: c.x - (now.x - before.x) * c.zoom, y: c.y - (now.y - before.y) * c.zoom }, true);
+      const c = cameraRef.current;
+      let next = before && now && (before.x !== now.x || before.y !== now.y) ? { zoom: c.zoom, x: c.x - (now.x - before.x) * c.zoom, y: c.y - (now.y - before.y) * c.zoom } : c;
+      // A branch just unfolded: its card and the row of children below come into view, by the least move (and a
+      // little less zoom where the row is wider than the screen, as far as full cards).
+      const fresh = id === pin && now ? scene.cards.filter((k) => k.rel?.of === id && !old?.some((o) => o.id === k.id)) : [];
+      if (now && fresh.length) {
+        const row = [now, ...fresh];
+        const box = { x: Math.min(...row.map((k) => k.x)), y: Math.min(...row.map((k) => k.y)), r: Math.max(...row.map((k) => k.x + (k.w ?? CARD_W))), b: Math.max(...row.map((k) => k.y + CARD_H)) };
+        // The toolbars cover the top 110 px.
+        next = unfoldView(next, box, { x: now.x + (now.w ?? CARD_W) / 2, y: now.y }, { left: gutter + 24, top: 110, right: w - 24, bottom: h - 24 });
       }
+      if (next !== c) apply(next, true);
     }
     lastFocus.current = focusId;
     lastScene.current = scene;
@@ -408,11 +434,17 @@ function StickyLabels({ labels, camera, lod, smooth }: { labels: Scene["labels"]
       {left.length > 0 && (
         <div className="tree-gutter">
           {pitch >= 24 &&
-            left.map((l) => (
-              <span key={l.key} className="tree-label sticky left" style={{ top: camera.y + (l.y + CARD_H / 2) * camera.zoom, transition }}>
-                {l.text}
-              </span>
-            ))}
+            left.map((l) => {
+              // A row gone up under the toolbars takes its name with it (none of it peeks out beside them).
+              const top = camera.y + (l.y + CARD_H / 2) * camera.zoom;
+              return (
+                top >= STICKY_TOP + 8 && (
+                  <span key={l.key} className="tree-label sticky left" style={{ top, transition }}>
+                    {l.text}
+                  </span>
+                )
+              );
+            })}
         </div>
       )}
     </>

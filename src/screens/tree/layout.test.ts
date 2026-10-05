@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Graph, GraphPerson } from "./graph";
-import { CARD_W, CARD_H, layoutAncestors, layoutDescendants, layoutFamily, NARROW_W } from "./layout";
+import { barLevels, CARD_W, CARD_H, layoutAncestors, layoutDescendants, layoutFamily, NARROW_W } from "./layout";
 
 // father+mother → older, me, younger (+ extra children); father+other → half; me+wife, me+second (2nd partner, left).
 function family(extra = 0): Graph {
@@ -285,6 +285,106 @@ describe("Potomkowie", () => {
   it("draws rounded lines too (Ustawienia › Drzewo › Linie)", () => {
     const scenes = [layoutDescendants(graph, "root", { depth: 2, partners: true, rounded: true, unfolded: ["g1"] }), layoutAncestors(graph, "ggggg1", true)];
     for (const scene of scenes) for (const l of scene.links) expect(l.d, l.key).not.toMatch(/NaN|Infinity/);
+  });
+
+  // Straight lines as segments; a vertical crossing a horizontal anywhere but at an end of either is a crossing.
+  function crossings(scene: ReturnType<typeof layoutFamily>): string[] {
+    type Seg = { key: string; x1: number; y1: number; x2: number; y2: number };
+    const segs: Seg[] = [];
+    for (const l of scene.links) {
+      let x = 0;
+      let y = 0;
+      for (const [, op, a, b] of l.d.matchAll(/([MVH])(-?[\d.]+)(?: (-?[\d.]+))?/g)) {
+        if (op === "M") [x, y] = [+a, +b];
+        else if (op === "V") (segs.push({ key: l.key, x1: x, y1: Math.min(y, +a), x2: x, y2: Math.max(y, +a) }), (y = +a));
+        else (segs.push({ key: l.key, x1: Math.min(x, +a), y1: y, x2: Math.max(x, +a), y2: y }), (x = +a));
+      }
+    }
+    const out: string[] = [];
+    for (const v of segs.filter((s) => s.x1 === s.x2))
+      for (const h of segs.filter((s) => s.y1 === s.y2 && s.x1 !== s.x2))
+        if (v.x1 > h.x1 && v.x1 < h.x2 && h.y1 > v.y1 && h.y1 < v.y2) out.push(`${v.key} × ${h.key}`);
+    return out;
+  }
+
+  it("keeps two marriages' lines apart: no child's line crosses the other marriage's bar", () => {
+    // E ∞ R (first, right) → r1; E ∞ L (second, left) → l1…l4; E alone → k1, k2. L's children reach right past the
+    // markers, so a bar above them must not be crossed by the later drops.
+    const graph = graphOf(
+      [
+        ["E", "M", null, null, 1800],
+        ["R", "F", null, null, 1801],
+        ["L", "F", null, null, 1802],
+        ["r1", "M", "E", "R", 1830],
+        ["l1", "M", "E", "L", 1831],
+        ["l2", "M", "E", "L", 1832],
+        ["l3", "M", "E", "L", 1833],
+        ["l4", "M", "E", "L", 1834],
+        ["k1", "M", "E", null, 1835],
+        ["k2", "M", "E", null, 1836],
+      ],
+      "E",
+      [["E", "R"]],
+    );
+    const scene = layoutDescendants(graph, "E", { depth: 2, partners: true });
+    expect(card(scene, "L").x).toBeLessThan(card(scene, "E").x);
+    expect(card(scene, "R").x).toBeGreaterThan(card(scene, "E").x);
+    expect(crossings(scene)).toEqual([]);
+    // The other way round: one child each with R and L, five with no other parent, reaching left past L's marker.
+    const rows2: [string, string, string | null, string | null, number][] = [
+      ["E", "M", null, null, 1800],
+      ["R", "F", null, null, 1801],
+      ["L", "F", null, null, 1802],
+      ["r1", "M", "E", "R", 1830],
+      ["l1", "M", "E", "L", 1831],
+      ...[1, 2, 3, 4, 5].map((k): [string, string, string, null, number] => [`k${k}`, "M", "E", null, 1835 + k]),
+    ];
+    const pair = layoutDescendants(graphOf(rows2, "E"), "E", { depth: 2, partners: true });
+    expect(card(pair, "L").x).toBeLessThan(card(pair, "E").x);
+    expect(card(pair, "k1").x + CARD_W / 2).toBeLessThan(card(pair, "L").x + CARD_W);
+    expect(crossings(pair)).toEqual([]);
+    // Partners on or off, rounded or not, nothing else in the test families crosses either.
+    expect(crossings(layoutDescendants(graph, "E", { depth: 2 }))).toEqual([]);
+    expect(crossings(layoutDescendants(graphOf(rows, "root"), "root", { depth: 2, partners: true, unfolded: ["g1"] }))).toEqual([]);
+  });
+
+  it("puts the outer marriage's bar higher where either order would do, and the lower one where only that works", () => {
+    // Two markers in the middle, children spread out to either side: around each other, outer higher.
+    expect(barLevels([{ from: 0, kids: [-300, -100] }, { from: 300, kids: [400, 600] }], 100)).toEqual([0, 1]);
+    expect(barLevels([{ from: 0, kids: [-300, -100] }, { from: 300, kids: [400, 600] }], 250)).toEqual([1, 0]);
+    // The left marriage's children reach past the right marker: the right bar must be the higher.
+    expect(barLevels([{ from: -24, kids: [-300, 400] }, { from: 300, kids: [600] }], 102)).toEqual([0, 1]);
+    // The right marriage's children start left of the left marker: the left bar must be the higher.
+    expect(barLevels([{ from: 0, kids: [-600] }, { from: 300, kids: [-300, 400] }], 102)).toEqual([1, 0]);
+  });
+
+  it("joins a partner further out by a line over the cards between, with the marker on it", () => {
+    // T ∞ I (right), O (left), A (right, outside I), each with a child.
+    const graph = graphOf(
+      [
+        ["T", "M", null, null, 1800],
+        ["I", "F", null, null, 1801],
+        ["O", "F", null, null, 1802],
+        ["A", "F", null, null, 1803],
+        ["i1", "M", "T", "I", 1830],
+        ["o1", "M", "T", "O", 1831],
+        ["a1", "M", "T", "A", 1832],
+      ],
+      "T",
+    );
+    const scene = layoutDescendants(graph, "T", { depth: 2, partners: true });
+    const [t, i, a] = ["T", "I", "A"].map((id) => card(scene, id));
+    expect(t.x < i.x && i.x < a.x).toBe(true);
+    // I's line straight across at the cards' middle, A's over the top of I's card from T's top edge into A's.
+    expect(scene.links.find((l) => l.key === "dp-T-I")!.d).toBe(`M${t.x + CARD_W} ${t.y + CARD_H / 2} H${i.x}`);
+    const over = scene.links.find((l) => l.key === "dp-T-A")!.d;
+    expect(over).toBe(`M${t.x + CARD_W - 20} ${t.y} V${t.y - 12} H${a.x + CARD_W / 2} V${a.y}`);
+    // A's marker sits on that line, above the gap before A's card, and A's children's line comes down from it.
+    const marker = scene.unions.find((u) => u.people.includes("A"))!;
+    expect(marker).toMatchObject({ x: a.x - 24, y: t.y - 12 });
+    expect(scene.links.some((l) => l.d.startsWith(`M${marker.x} ${marker.y} V`))).toBe(true);
+    expect(crossings(scene)).toEqual([]);
+    noOverlaps(scene);
   });
 
   it("without partners, names the spouse in the sub-line instead", () => {
