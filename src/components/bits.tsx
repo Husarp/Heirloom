@@ -2,9 +2,15 @@
 
 import { Check, ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import markUrl from "../../src-tauri/icons/source.svg";
 import { mediaUrl } from "../api/transport";
 import type { CombinedArchive, DateText } from "../api/types";
 import { useStore } from "../app/store";
+
+/** Heirloom's icon, the tree on its green square (src-tauri/icons/source.svg, the same picture as the exe's icon). */
+export function BrandMark({ size }: { size: number }) {
+  return <img className="brand-mark" src={markUrl} width={size} height={size} alt="" draggable={false} />;
+}
 
 /** Avatar: a photo, or initials on the branch colour's soft tint (spec §5.6). `from`: in archives opened together,
  *  the archive's dot in the corner (nothing in a single archive). */

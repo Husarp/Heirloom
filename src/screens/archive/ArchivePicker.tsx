@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { call } from "../../api/transport";
 import type { RecentArchive } from "../../api/types";
 import { isSetPath, useStore } from "../../app/store";
-import { rowButton } from "../../components/bits";
+import { BrandMark, rowButton } from "../../components/bits";
 import { Dialog } from "../../components/Dialog";
 import { count, people as peopleCount, shortWhen } from "../../lib/format";
 import { pickFolder, pickGedcom } from "../../lib/native";
@@ -46,9 +46,7 @@ export function ArchivePicker() {
       <div className="picker">
         <div className="col" style={{ gap: 18, minWidth: 0 }}>
           <div className="row" style={{ gap: 12 }}>
-            <div className="logo-tile" style={{ width: 44, height: 44, fontSize: 24, borderRadius: "var(--r-card)" }}>
-              H
-            </div>
+            <BrandMark size={48} />
             <span className="serif" style={{ fontSize: 24, fontWeight: 500 }}>
               Heirloom
             </span>

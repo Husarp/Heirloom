@@ -7,7 +7,7 @@ import type { AppState, ArchiveStatus } from "../../api/types";
 import { useStore } from "../../app/store";
 import { applyUpdate, checkNow, downloadText, refreshUpdateStatus, useUpdates } from "../../app/updates";
 import { useApi } from "../../app/useApi";
-import { SettingRow, Spinner, Toggle } from "../../components/bits";
+import { BrandMark, SettingRow, Spinner, Toggle } from "../../components/bits";
 import { count, dayMonth, shortWhen } from "../../lib/format";
 import { copyText, openUrl } from "../../lib/native";
 import { ShortcutsDialog, WhatsNewDialog } from "./dialogs";
@@ -193,7 +193,14 @@ export function AboutSection() {
   const built = about ? new Date(`${about.buildDate}T12:00:00`) : null;
   return (
     <Section id="about" title="O programie">
-      <SettingRow label={`Heirloom ${version}`} note={built ? `${dayMonth(built)} ${built.getFullYear()}` : "…"}>
+      <SettingRow
+        label={
+          <>
+            <BrandMark size={22} />
+            Heirloom {version}
+          </>
+        }
+        note={built ? `${dayMonth(built)} ${built.getFullYear()}` : "…"}>
         <button className="btn secondary set-btn" onClick={() => setOpen("whatsNew")}>
           Co nowego
         </button>

@@ -1,7 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-  <!-- Heirloom's icon: a light-green tree on the app's deep green (#2F5D50) rounded square. Redrawn from
-       heirloom-5a.ico (the icon itself, used as is up to 256 px) for the sizes above 256 px. -->
-  <defs>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- The set file (*.heirloom-zestaw) as a document: a page with a folded corner and Heirloom's tree icon (source.svg). heirloom-zestaw.ico is drawn from this, each size on whole pixels. -->
+  <path d="M35.0 7.0 H159 L221.0 69 V249.0 H35.0 Z" fill="#FBF9F4" stroke="#7A7266" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M159 7.0 V67.0 H221.0 Z" fill="#E4DDD1" stroke="#7A7266" stroke-width="4" stroke-linejoin="round"/>
+  <svg x="51" y="77" width="154" height="154" viewBox="0 0 1024 1024">
+    <defs>
     <radialGradient id="ground">
       <stop offset="0" stop-color="#4A7F6D" stop-opacity="1"/>
       <stop offset="0.4" stop-color="#4A7F6D" stop-opacity="0.8"/>
@@ -39,4 +41,5 @@
     <circle cx="584" cy="232" r="24"/>
     <circle cx="312" cy="472" r="24"/>
   </g>
+  </svg>
 </svg>

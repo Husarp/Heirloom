@@ -1,5 +1,6 @@
 import { ArrowRight, Files, UserPlus } from "lucide-react";
 import { useStore } from "../../app/store";
+import { BrandMark } from "../../components/bits";
 
 /** Nowe, puste archiwum (spec §4.22, design 17c): the files the family already has come first, adding by hand second. */
 export function EmptyArchive() {
@@ -10,9 +11,7 @@ export function EmptyArchive() {
   return (
     <div className="page empty-start">
       <div className="col" style={{ maxWidth: 760, gap: 24, alignItems: "center", textAlign: "center" }}>
-        <div className="logo-tile" style={{ width: 64, height: 64, fontSize: 34, borderRadius: "var(--r-card)" }}>
-          H
-        </div>
+        <BrandMark size={72} />
         <div className="col" style={{ gap: 10 }}>
           <h1 className="serif" style={{ fontSize: 44, lineHeight: 1.1, fontWeight: 500 }}>
             Zacznij archiwum rodziny

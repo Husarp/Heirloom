@@ -4,6 +4,12 @@ Built by scripts/build.ps1, after the Reckless Driving installer: per-user into 
 no administrator rights. Install or update is not a separate build: the exe reads DisplayVersion from its uninstall
 key and, if Heirloom is already there, says Aktualizuj instead of Zainstaluj.
 
+It also makes the set file of „Otwórz razem…” (*.heirloom-zestaw) Heirloom's own file type, for this user only: its
+name „Zestaw archiwów Heirloom”, a document icon with the tree (heirloom-zestaw.ico next to heirloom.exe) and a
+double-click that opens it in Heirloom (`heirloom.exe --open "<file>"`; with Heirloom already open, in a new window).
+An update registers it again, an uninstall removes it. Never .ged or folders: other programs own GEDCOM files, and an
+archive is a folder.
+
 What it never touches: the family archives. They are ordinary folders the family chose (rodzina.ged, media/,
 .heirloom/), anywhere on the disk, and neither an update nor an uninstall goes near them - nor near
 %LOCALAPPDATA%\\Heirloom\\archives, where an archive in a read-only folder keeps its history and backup copies.
@@ -65,6 +71,12 @@ NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)   # (the name ex
 UNINSTALL_KEY = rf"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{FOLDER}"
 # The Microsoft Edge WebView2 runtime draws Heirloom's window (it comes with Windows 11 and current Windows 10).
 WEBVIEW2 = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+# The set file type (see the docstring), under HKEY_CURRENT_USER\Software\Classes: no administrator rights.
+CLASSES = r"Software\Classes"
+SET_EXT = ".heirloom-zestaw"   # crates/heirloom-api/src/combined/setfile.rs
+SET_PROGID = "Heirloom.Zestaw"
+SET_NAME = "Zestaw archiwów Heirloom"
+SET_ICON = "heirloom-zestaw.ico"   # in the program folder (scripts/build.ps1 puts it into the payload)
 CLOSE_WAIT = 15   # seconds a closing Heirloom gets before the window says it is still open
 WATCH_EVERY = 0.8   # seconds between two looks at a running Heirloom (the "running" page)
 
@@ -411,9 +423,9 @@ def copy_files(log, each, copied: Copied):
 
 
 def put_back(copied: Copied, log) -> str | None:
-    """A step failed: the files this install wrote go, the ones it replaced come back (shortcuts too, for a first
-    install). "restored" (the old version is in place), "removed" (it was a first install, nothing is left), "partial"
-    or None (nothing had been changed yet)."""
+    """A step failed: the files this install wrote go, the ones it replaced come back (shortcuts and the set file
+    type too, for a first install). "restored" (the old version is in place), "removed" (it was a first install,
+    nothing is left), "partial" or None (nothing had been changed yet)."""
     if copied.committed or not (copied.written or copied.moved):
         return None
     log("Przywracam poprzedni stan…")
@@ -438,6 +450,10 @@ def put_back(copied: Copied, log) -> str | None:
     for folder in (START_MENU, DESKTOP):
         if folder:
             (folder / SHORTCUT).unlink(missing_ok=True)
+    try:
+        unregister_file_type()   # (it was a first install: the file type, if registered, was this install's)
+    except OSError:
+        pass
     try:
         INSTALL_DIR.rmdir()   # (only if empty)
     except OSError:
@@ -469,6 +485,73 @@ def shortcuts(log):
         log("Dodano skróty w menu Start i na pulpicie.")
 
 
+def file_type_entries(install_dir: Path) -> list:
+    """The set file type: (key under HKEY_CURRENT_USER\\Software\\Classes, value name ("" = the key's default), text)."""
+    exe = install_dir / EXE_NAME
+    return [(SET_EXT, "", SET_PROGID),
+            (SET_EXT + r"\OpenWithProgids", SET_PROGID, ""),
+            (SET_PROGID, "", SET_NAME),
+            (SET_PROGID, "FriendlyTypeName", SET_NAME),
+            (SET_PROGID + r"\DefaultIcon", "", str(install_dir / SET_ICON)),
+            (SET_PROGID + r"\shell", "", "open"),
+            (SET_PROGID + r"\shell\open\command", "", f'"{exe}" --open "%1"')]
+
+
+def notify_shell():
+    """Explorer shows the new type's icon and name at once, without a restart (SHCNE_ASSOCCHANGED)."""
+    try:
+        ctypes.windll.shell32.SHChangeNotify(0x08000000, 0, None, None)
+    except Exception:
+        pass
+
+
+def register_file_type(log):
+    """Not a reason to fail the install: without it Heirloom works, only a double-click on a set file doesn't."""
+    log(f"Rejestruję pliki zestawów ({SET_EXT})…")
+    try:
+        for path, name, value in file_type_entries(INSTALL_DIR):
+            with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, rf"{CLASSES}\{path}", 0, winreg.KEY_WRITE) as key:
+                winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
+    except OSError as e:
+        log(f"Nie udało się zarejestrować plików {SET_EXT} ({e}) — zestaw otworzysz z listy ostatnich w Heirloom.")
+    notify_shell()
+
+
+def delete_tree(path: str):
+    """A key under HKEY_CURRENT_USER with everything in it (winreg.DeleteKey takes only a key with no subkeys)."""
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as key:
+            subkeys = []
+            while True:
+                try:
+                    subkeys.append(winreg.EnumKey(key, len(subkeys)))
+                except OSError:
+                    break
+    except OSError:
+        return
+    for sub in subkeys:
+        delete_tree(rf"{path}\{sub}")
+    winreg.DeleteKey(winreg.HKEY_CURRENT_USER, path)
+
+
+def unregister_file_type():
+    """Only what is Heirloom's: its ProgID, and the extension's link to it (a key left empty goes too). If another
+    program has since taken .heirloom-zestaw over, its link stays."""
+    delete_tree(rf"{CLASSES}\{SET_PROGID}")
+    ext = rf"{CLASSES}\{SET_EXT}"
+    for path, name in ((ext + r"\OpenWithProgids", SET_PROGID), (ext, "")):
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
+                if name or winreg.QueryValueEx(key, "")[0] == SET_PROGID:
+                    winreg.DeleteValue(key, name)
+                empty = winreg.QueryInfoKey(key)[:2] == (0, 0)
+        except OSError:
+            continue
+        if empty:
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, path)
+    notify_shell()
+
+
 def uninstall_entry(log):
     log("Rejestruję Heirloom w „Aplikacjach i funkcjach”…")
     size_kb = sum(f.stat().st_size for f in INSTALL_DIR.rglob("*") if f.is_file()) // 1024
@@ -486,7 +569,8 @@ def uninstall_entry(log):
             winreg.SetValueEx(key, name, 0, winreg.REG_DWORD, value)
 
 
-# Each step's share of the bar. Install: closing Heirloom, copying, shortcuts, registering, finishing.
+# Each step's share of the bar. Install: closing Heirloom, copying, shortcuts, registering (the set file type and the
+# uninstall entry), finishing.
 INSTALL_WEIGHTS = (6, 70, 16, 4, 4)
 # Uninstall: closing Heirloom, shortcuts, registry entry, own data (the Recycle Bin can take a while), finishing.
 UNINSTALL_WEIGHTS = (10, 15, 10, 60, 5)
@@ -499,6 +583,7 @@ def install(log, at, file, copied: Copied):
     at(2)
     shortcuts(log)
     at(3)
+    register_file_type(log)
     uninstall_entry(log)
     copied.committed = True   # (the new version is in place: nothing to put back any more)
     shutil.rmtree(BACKUP, ignore_errors=True)
@@ -537,6 +622,11 @@ def uninstall(log, remove_own_data: bool, at) -> list:
         winreg.DeleteKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY)
     except OSError:
         pass
+    log(f"Usuwam typ pliku {SET_EXT}…")
+    try:
+        unregister_file_type()
+    except OSError as e:
+        log(f"Nie udało się usunąć typu pliku {SET_EXT} ({e}).")
     at(3)
     left = []
     if remove_own_data:
@@ -557,11 +647,11 @@ def uninstall(log, remove_own_data: bool, at) -> list:
 
 
 def remove_program_folder(folder: Path):
-    """The uninstaller runs FROM the program folder, so it goes a moment after we quit: our two files, then the
+    """The uninstaller runs FROM the program folder, so it goes a moment after we quit: our three files, then the
     folder itself only if it is empty (rmdir without /s never takes anything else with it)."""
     ping = SYSTEM32 / "PING.EXE"
     inner = (f'"{ping}" 127.0.0.1 -n 3 >nul & del /f /q "{folder / EXE_NAME}" & del /f /q "{folder / UNINSTALLER}" '
-             f'& rmdir "{folder}"')
+             f'& del /f /q "{folder / SET_ICON}" & rmdir "{folder}"')
     # The whole command in one more pair of quotes: cmd /c drops the first and the last quote of what follows.
     subprocess.Popen(f'"{tool("cmd")}" /d /c "{inner}"', creationflags=NO_WINDOW, cwd=str(SYSTEM32))
 
@@ -1115,7 +1205,7 @@ class SetupWindow(tk.Tk):
             points = ["Windows nie podał folderu na programy tego konta (AppData\\Local)."]
         elif self.uninstalling:
             head = "Odinstaluj Heirloom"
-            points = ["Usuwa program, skróty i wpis w „Aplikacjach i funkcjach”.",
+            points = [f"Usuwa program, skróty, typ pliku {SET_EXT} i wpis w „Aplikacjach i funkcjach”.",
                       "Archiwa rodzinne (Twoje foldery z plikiem .ged i zdjęciami) zostają zawsze.",
                       "Ustawienia programu i miniatury zostają, chyba że zaznaczysz pole poniżej."]
         elif self.current == VERSION:

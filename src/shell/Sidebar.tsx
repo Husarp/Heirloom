@@ -2,7 +2,7 @@ import { AppWindow, Archive, BookOpen, ChevronsUpDown, FolderOpen, GitMerge, Hou
 import { useState, type ComponentType } from "react";
 import type { CombinedArchive } from "../api/types";
 import { useStore, type Route, type TreeView } from "../app/store";
-import { ArchiveDot, useDismiss } from "../components/bits";
+import { ArchiveDot, BrandMark, useDismiss } from "../components/bits";
 import { displayPath, num, people as peopleCount, relativeTime } from "../lib/format";
 import { OpenTogether } from "../screens/archive/OpenTogether";
 
@@ -108,7 +108,7 @@ function Switcher() {
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button className="sidebar-head" title="Zmień archiwum" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <div className="logo-tile">H</div>
+        <BrandMark size={36} />
         <div className="grow" style={{ minWidth: 0 }}>
           <div className="wordmark">Heirloom</div>
           <div className="archive-name ellipsis">{archive?.name || "Nowe archiwum"}</div>
