@@ -171,6 +171,19 @@ class SetFileType(unittest.TestCase):
             registry.CreateKeyEx = create
         self.assertIn("Odmowa dostępu", self.log[-1])
 
+    def test_a_failed_update_leaves_no_file_type(self):
+        """The step after it would roll the files back (the type's icon among them), so it comes last of all."""
+        def fail(log):
+            raise OSError("Odmowa dostępu")
+        saved = setup.copy_files, setup.shortcuts, setup.uninstall_entry
+        setup.copy_files, setup.shortcuts, setup.uninstall_entry = (lambda *a: None), (lambda log: None), fail
+        try:
+            with self.assertRaises(OSError):
+                setup.install(self.log.append, lambda *a: None, lambda name: None, setup.Copied())
+        finally:
+            setup.copy_files, setup.shortcuts, setup.uninstall_entry = saved
+        self.assertEqual([k for k in registry.keys if "heirloom" in k], [])
+
 
 if __name__ == "__main__":
     unittest.main()
