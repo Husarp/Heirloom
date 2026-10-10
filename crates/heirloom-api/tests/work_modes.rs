@@ -362,7 +362,7 @@ fn a_changed_original_is_taken_in_and_merged() {
     assert!(run(&mut again, "people.list", json!({}))["people"].as_array().unwrap().iter().any(|p| p["given"] == "Jan Paweł"));
     // Both changed: merged, a clash reported and chosen.
     let jan = run(&mut again, "people.list", json!({}))["people"][0]["id"].as_str().unwrap().to_string();
-    run(&mut again, "person.update", json!({ "id": jan, "given": "Jan Piotr", "surname": "Kowalski" }));
+    run(&mut again, "person.update", json!({ "id": jan, "given": "Jan Piotr", "surname": "Kowalski", "occupation": "Kowal" }));
     run(&mut again, "person.create", json!({ "given": "Anna" }));
     run(&mut again, "archive.save", json!({ "author": "Ewa" }));
     their_edit(dir.path(), &original, "Janek");
@@ -385,6 +385,9 @@ fn a_changed_original_is_taken_in_and_merged() {
     let people = run(&mut again, "people.list", json!({}))["people"].clone();
     let names: Vec<&str> = people.as_array().unwrap().iter().map(|p| p["given"].as_str().unwrap()).collect();
     assert!(names.contains(&"Janek") && names.contains(&"Anna"), "{names:?}");
+    // Choosing the archive's name does not drop the user's separate edit of the same person (the trade).
+    let jan_now = people.as_array().unwrap().iter().find(|p| p["given"] == "Janek").unwrap()["id"].as_str().unwrap().to_string();
+    assert!(run(&mut again, "person.get", json!({ "id": jan_now })).to_string().contains("Kowal\""), "my non-clashing edit survives choosing theirs");
     // The merge is one change of its own, from the archive.
     let history = fs::read_to_string(PathBuf::from(result["status"]["sidecar"].as_str().unwrap()).join("historia.jsonl")).unwrap();
     assert!(history.lines().last().unwrap().contains("\"kind\":\"fromArchive\""));
@@ -918,6 +921,8 @@ fn scenario_conflict_merge_write_back_and_undo() {
     assert_eq!(conflicts[0]["theirChanges"][0]["new"].as_str().unwrap().contains("Janek"), true);
     let theirs: Vec<String> = conflicts[0]["theirChanges"].as_array().unwrap().iter().map(|c| c["new"].as_str().unwrap_or("").to_string()).collect();
     assert!(theirs.iter().any(|v| v.contains("Stolarz")), "their other change is listed too: {theirs:?}");
+    let fields: Vec<&str> = conflicts[0]["fields"].as_array().unwrap().iter().map(|f| f.as_str().unwrap()).collect();
+    assert!(!fields.is_empty() && fields.iter().all(|f| !f.contains("Stolarz")), "the clashing fields are named: {preview}");
     let key = conflicts[0]["key"].as_str().unwrap().to_string();
     let merged = run(&mut api, "archive.rebase", json!({ "choices": { key: "mine" } }));
     assert_eq!(merged["result"]["merged"], true);
@@ -929,7 +934,9 @@ fn scenario_conflict_merge_write_back_and_undo() {
     assert_eq!(done["status"]["overlay"]["canUndoWriteBack"], true);
     let data = fs::read_to_string(original.join("rodzina.ged")).unwrap();
     // The record is kept whole from the side chosen (A.9): the user's name; their trade shows in „Pokaż różnice” only.
+    // The choice covers the clashing name only; the archive's separate edit of the same record (the trade) survives.
     assert!(data.contains("Jan Piotr /Kowalski/") && !data.contains("Janek /"), "{data}");
+    assert!(data.contains("1 OCCU Stolarz"), "the archive's non-clashing edit survives choosing mine: {data}");
     run(&mut api, "archive.undoWriteBack", Value::Null);
     let after = contents(&original);
     // The data, the history and every photo are byte for byte as before. (The copy the write-back made in kopie\ stays
