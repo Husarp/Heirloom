@@ -115,7 +115,7 @@ fn commit(s: &mut Session, edits: Vec<Edit>) -> Result<(), ApiError> {
 }
 
 /// Before the first change: read-only archives refuse, and 5.5.1 files become GEDCOM 7.
-fn prepare(s: &mut Session) -> Result<(), ApiError> {
+pub(crate) fn prepare(s: &mut Session) -> Result<(), ApiError> {
     if s.archive.settings().read_only {
         return Err(ApiError::new("read_only", "To archiwum jest tylko do odczytu (Ustawienia › Archiwum)."));
     }

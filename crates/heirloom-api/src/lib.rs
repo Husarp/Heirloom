@@ -12,6 +12,7 @@ pub mod media_edit;
 pub mod derive;
 pub mod fsx;
 pub mod kin;
+pub mod layout;
 pub mod lists;
 pub mod tree;
 pub mod media;
@@ -114,11 +115,16 @@ pub struct Session {
     pub opened: String,
     /// Heirloom saved into it before, or it was in the recent list before this open („Do tej pory…”).
     used_before: bool,
+    /// Files someone moved in Explorer, found by the last `media.scan`: served after the folders miss (Part B).
+    pub(crate) moved: media::Moved,
+    /// A „Uporządkuj” run that was cut off (`{ journal, done, total }`), found at open and after each run.
+    pub(crate) layout_interrupted: Option<Value>,
 }
 
 impl Session {
     pub(crate) fn new(archive: Archive) -> Session {
-        Session { archive, derived: None, display_seen: None, last_saved: None, work_mode: None, overlay: None, opened: String::new(), used_before: false }
+        let layout_interrupted = layout::engine::interrupted(archive.sidecar_path());
+        Session { archive, derived: None, display_seen: None, last_saved: None, work_mode: None, overlay: None, opened: String::new(), used_before: false, moved: media::Moved::default(), layout_interrupted }
     }
 
     /// Where the archive's files are, the one written into first: the folder of the user's changes and the original,
@@ -132,7 +138,7 @@ impl Session {
     }
 
     pub fn file_roots(&self) -> media_edit::FileRoots {
-        media_edit::FileRoots::Layers(self.layers())
+        media_edit::FileRoots::Layers(self.layers(), self.moved.clone())
     }
 
     pub(crate) fn ensure(&mut self) {
@@ -562,6 +568,13 @@ impl Api {
                     _ => Ok(lists::find_missing(d, &roots, Path::new(&str_arg(&args, "folder")?))),
                 }
             }
+            // Part B: where the photos lie in media/. The scan and the preview only read.
+            "media.scan" => Ok(layout::run_scan(self.session()?)),
+            "media.restructurePreview" => layout::engine::preview(self.session()?, &args),
+            "media.fixMoved" | "media.assign" | "media.leaveAlone" | "media.setLayout" | "media.restructure" | "media.finishRestructure" | "media.undoRestructure" | "media.tidySeen" => {
+                self.mode_chosen()?;
+                self.layout_command(method, &args)
+            }
             "sources.list" => Ok(lists::sources(self.view()?)),
             "source.get" => {
                 let id = str_arg(&args, "id")?;
@@ -576,6 +589,51 @@ impl Api {
             }
             _ => Err(ApiError::new("unknown_method", format!("Nieznane polecenie: {method}"))),
         }
+    }
+
+    /// The Part B commands that change something (the files in `media/`, or what the data says about them).
+    fn layout_command(&mut self, method: &str, args: &Value) -> ApiResult {
+        if method == "media.tidySeen" {
+            // „Nie teraz”: the banner stays away until the findings change (per computer).
+            let fingerprint = str_arg(args, "fingerprint")?;
+            let s = self.session()?;
+            let key = match &s.overlay {
+                Some(info) => info.manifest.original.data_path.to_lowercase(),
+                None => data_key(&s.archive.data_path()),
+            };
+            self.update_config(|c| {
+                if let Some(record) = c.archives.get_mut(&key) {
+                    record.tidy_seen = Some(fingerprint);
+                }
+            });
+            return Ok(Value::Null);
+        }
+        let progress = self.progress.clone();
+        let s = self.session()?;
+        let moves_files = matches!(method, "media.restructure" | "media.finishRestructure" | "media.undoRestructure");
+        let mut result = match method {
+            "media.fixMoved" => layout::fix_moved(s)?,
+            "media.assign" => layout::assign(s, args)?,
+            "media.leaveAlone" => layout::leave_alone(s, args)?,
+            "media.setLayout" => layout::set_layout(s, args)?,
+            "media.restructure" => layout::engine::restructure(s, &progress, args)?,
+            "media.finishRestructure" => layout::engine::finish(s, &progress, args)?,
+            _ => layout::engine::undo(s, &progress, args)?,
+        };
+        if moves_files {
+            // The data file was saved: the registry's hash follows (A.2), and the moved map is looked up again.
+            let author = str_arg(args, "author")?;
+            let record = s.overlay.is_none().then(|| (data_key(&s.archive.data_path()), s.archive.fingerprint_hex()));
+            result["report"] = layout::run_scan(s);
+            self.update_config(|c| {
+                c.last_editor = Some(author);
+                if let Some((u, hash)) = record.and_then(|(key, hash)| c.archives.get_mut(&key).filter(|u| u.mode == IN_PLACE).map(|u| (u, hash))) {
+                    u.hash = Some(hash);
+                }
+            });
+            result["status"] = self.archive_status()?;
+        }
+        Ok(result)
     }
 
     /// "Cofnij" in the history: the record goes back to how it was before that change (or a whole import batch
@@ -771,11 +829,13 @@ impl Api {
                 });
             }
         }
+        let moved = media::Moved::default();
         self.media.set(Some(media::Roots {
             archive: archive.root().to_path_buf(),
             fallback: None,
             thumbs: self.cache_root.as_ref().map(|c| c.join(&archive.settings().archive_id).join("miniatury")),
             key: None,
+            moved: moved.clone(),
         }));
         let used_before = archive.history_path().is_file() || self.config.seen(opened_path);
         let entry = RecentArchive {
@@ -789,6 +849,7 @@ impl Api {
         self.update_config(|c| c.remember(entry));
         let mut session = Session::new(archive);
         session.work_mode = mode;
+        session.moved = moved;
         session.opened = opened_path.to_string();
         session.used_before = used_before;
         self.session = Some(session);
@@ -817,11 +878,13 @@ impl Api {
                 record.decided_at = heirloom_core::history::now();
             }
         });
+        let moved = media::Moved::default();
         self.media.set(Some(media::Roots {
             archive: root.clone(),
             fallback: Some(PathBuf::from(&original.root)),
             thumbs: self.cache_root.as_ref().map(|c| c.join(&archive.settings().archive_id).join("miniatury")),
             key: None,
+            moved: moved.clone(),
         }));
         // One entry in the recent list, the original's, whichever folder was opened.
         let entry = RecentArchive {
@@ -835,6 +898,7 @@ impl Api {
         self.update_config(|c| c.remember(entry));
         let mut session = Session::new(archive);
         session.work_mode = Some(OVERLAY);
+        session.moved = moved;
         session.opened = original.opened.clone();
         session.overlay = Some(overlay::OverlayInfo::new(&root, manifest, original_missing));
         self.session = Some(session);
@@ -1275,6 +1339,7 @@ fn status_of(s: &Session, documents: Option<&Path>) -> Value {
         "foreign": archive.is_foreign(),
         "foreignConfirmed": settings.foreign_save_confirmed,
         "readOnly": settings.read_only,
+        "layoutInterrupted": s.layout_interrupted,
         "unsavedChanges": archive.unsaved_records(),
         "canUndo": archive.can_undo(),
         "undoDepth": archive.undo_depth(),
