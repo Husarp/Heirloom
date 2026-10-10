@@ -39,7 +39,10 @@ export function useBackupBlock(scope: "archive" | "original"): BackupBlockState 
   const [result, setResult] = useState<BackupResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const alive = useRef(true);
-  useEffect(() => () => void (alive.current = false), []);
+  useEffect(() => {
+    alive.current = true;
+    return () => void (alive.current = false);
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -148,7 +151,7 @@ export function BackupBlock({ bb }: { bb: BackupBlockState }) {
           <button className="link" onClick={bb.chooseFolder}>
             Zmień…
           </button>{" "}
-          · {backupSizeText(info)}
+          <span style={{ whiteSpace: "nowrap" }}>· {backupSizeText(info)}</span>
         </span>
       )}
       {bb.error && (

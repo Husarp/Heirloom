@@ -256,7 +256,7 @@ export function ForeignConfirmDialog() {
   };
 
   return (
-    <Dialog width={560} onClose={running ? undefined : close} labelledBy="foreign-title">
+    <Dialog width={640} onClose={running ? undefined : close} labelledBy="foreign-title">
       <div style={{ padding: "22px 24px 16px", display: "flex", gap: 14 }}>
         <div className="dialog-icon" style={{ flex: "none" }}>
           <FileInput size={19} />

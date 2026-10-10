@@ -47,7 +47,7 @@ function Body({ kind, run, extra }: FinalChange) {
   };
 
   return (
-    <Dialog width={580} onClose={running ? undefined : close} labelledBy="final-title">
+    <Dialog width={foreign ? 680 : 580} onClose={running ? undefined : close} labelledBy="final-title">
       <div className="col" style={{ padding: "22px 24px 14px", gap: 8, overflow: "auto" }}>
         <div className="row" style={{ gap: 14, alignItems: "flex-start" }}>
           <div className="dialog-icon" style={{ flex: "none" }}>
