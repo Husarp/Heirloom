@@ -5,6 +5,7 @@ import { create } from "zustand";
 import { call, ApiError } from "../api/transport";
 import type { AppState, ArchiveStatus, PersonSummary, SaveResult } from "../api/types";
 import { count } from "../lib/format";
+import { savesWhere, type FinalFacts, type FinalKind } from "../screens/archive/workModes";
 import { openInNewWindow } from "../lib/native";
 
 export type TreeView = "family" | "ancestors" | "descendants" | "overview";
@@ -53,7 +54,7 @@ export interface PaletteOptions {
 }
 
 /** Full-window states before an archive is ready. */
-export type Phase = "boot" | "picker" | "loading" | "firstOpen" | "ready";
+export type Phase = "boot" | "picker" | "loading" | "chooseMode" | "firstOpen" | "ready";
 
 export interface ViewedPerson {
   id: string;
@@ -91,6 +92,8 @@ export interface OpenSection {
 /** A question with buttons (e.g. unsaved changes before leaving edit mode). */
 export interface Ask {
   title: string;
+  /** A wider window, for three buttons with long names. */
+  wide?: boolean;
   text?: string;
   icon?: "warn" | "info";
   buttons: { label: string; kind?: "primary" | "secondary" | "ghost" | "danger"; run?: () => void | Promise<void> }[];
@@ -126,6 +129,12 @@ interface Store {
   /** The last part of the breadcrumb, set by the screen (e.g. the person's name). */
   crumb: string | null;
   ask: Ask | null;
+  /** „Jak chcesz pracować z tym archiwum?” is answered: where to go on (the first-open page, or the archive). */
+  afterMode: "firstOpen" | "ready";
+  /** A job the whole window waits for („Przygotowuję folder na Twoje zmiany…”). */
+  busy: { text: string; note?: string } | null;
+  /** Start banners the user closed with ✕ (a kind of banner each); they come back at the next start. */
+  hiddenBanners: string[];
   /** Set by the tree: its camera and selection, added to its route when the tree is left. */
   treeSnapshot: (() => Pick<TreeRoute, "person" | "cam" | "sel">) | null;
   setTreeSnapshot: (take: (() => Pick<TreeRoute, "person" | "cam" | "sel">) | null) => void;
@@ -146,6 +155,23 @@ interface Store {
   createArchive: (folder: string, name: string) => Promise<boolean>;
   closeArchive: () => Promise<void>;
   finishFirstOpen: () => void;
+  /** The answer to the mode question is in `status`: go on to the first-open page or the archive. */
+  finishChooseMode: (status: ArchiveStatus) => void;
+  /** A status that replaced the archive's state as a whole (mode switched, changes discarded, original found again):
+   *  every screen reads again, editing ends, and a notice of the status is said. */
+  adoptStatus: (status: ArchiveStatus) => Promise<void>;
+  hideBanner: (kind: string) => void;
+  /** TODO(L02c): „Przenieś zmiany do archiwum…” — the preview, the final-change dialog and the write-back. `then`
+   *  runs once the changes are in the archive (switching to „Pracuj na archiwum” continues there). Until then it
+   *  only shows where the changes wait. */
+  startWriteBack: (then?: () => void) => void;
+  /** TODO(L02c): „Wczytaj zmiany” — takes in what someone changed in the archive (the rebase dialog). */
+  startRebase: () => void;
+  /** TODO(L02c): [Cofnij] after a write-back (archive.undoWriteBack with its confirmation). */
+  undoWriteBack: () => void;
+  /** TODO(L02b): the final-change dialog (src/shell/FinalChangeDialog.tsx) with the backup of the archive; until then
+   *  `run` is simply done. */
+  confirmFinal: (kind: FinalKind, run: () => void | Promise<void>, extra?: Partial<FinalFacts>) => void;
   setArchive: (status: ArchiveStatus) => void;
   go: (route: Route) => void;
   goBack: () => void;
@@ -256,6 +282,9 @@ export const useStore = create<Store>((set, get) => ({
   palette: null,
   crumb: null,
   ask: null,
+  afterMode: "ready",
+  busy: null,
+  hiddenBanners: [],
   treeSnapshot: null,
   setTreeSnapshot: (take) => set({ treeSnapshot: take }),
   treePlace: null,
@@ -337,6 +366,33 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   finishFirstOpen: () => set({ phase: "ready" }),
+
+  finishChooseMode: (status) => {
+    set({ archive: status, phase: get().afterMode, dataVersion: get().dataVersion + 1 });
+    sayNotice(status);
+    get().refreshApp().catch(() => {});
+  },
+
+  adoptStatus: async (status) => {
+    set({ archive: status, mode: "browse", editor: null, lastSave: null, section: null, leaveGuard: null, dataVersion: get().dataVersion + 1 });
+    sayNotice(status);
+    await get().refreshApp().catch(() => {});
+  },
+
+  hideBanner: (kind) => set({ hiddenBanners: [...get().hiddenBanners, kind] }),
+
+  startWriteBack: () => {
+    get().go({ name: "settings", section: "overlay" });
+  },
+  startRebase: () => {
+    get().go({ name: "settings", section: "overlay" });
+  },
+  undoWriteBack: () => {
+    get().go({ name: "settings", section: "overlay" });
+  },
+  confirmFinal: (_kind, run) => {
+    void run();
+  },
 
   setArchive: (status) => set({ archive: status }),
 
@@ -563,7 +619,7 @@ export const useStore = create<Store>((set, get) => ({
     set({
       ask: {
         title: `Masz ${changes}`,
-        text: `${what}: zapisać je w pliku ${get().archive?.dataFile ?? ""}?`,
+        text: `${what}: zapisać je ${get().archive ? savesWhere(get().archive!) : ""}?`,
         icon: "warn",
         buttons: [
           { label: "Anuluj", kind: "ghost" },
@@ -607,12 +663,15 @@ async function opened(path: string, open: () => Promise<ArchiveStatus>): Promise
     const app = await call<AppState>("app.state");
     // „Pierwsze otwarcie” is about one archive; archives opened together go straight to Start.
     const firstTime = status.people > 0 && !seenBefore && !status.combined;
+    // Not asked yet how to work with it: the question comes first, and nothing is written before the answer.
+    const needsMode = status.workMode == null && !status.combined;
     const [route, recentlyViewed] = await Promise.all([firstTime ? ({ name: "start" } as Route) : firstRoute(app), viewedBefore(app)]);
     set({
       app,
       archive: status,
       opening: null,
-      phase: firstTime ? "firstOpen" : "ready",
+      phase: needsMode ? "chooseMode" : firstTime ? "firstOpen" : "ready",
+      afterMode: firstTime ? "firstOpen" : "ready",
       route,
       back: [],
       forward: [],
@@ -626,11 +685,17 @@ async function opened(path: string, open: () => Promise<ArchiveStatus>): Promise
       treePlace: treePlaceOf(app),
     });
     if (status.combined) lookForPairs();
+    if (!needsMode) sayNotice(status);
     return true;
   } catch (e) {
     set({ opening: null, openError: e as ApiError, phase: "picker" });
     return false;
   }
+}
+
+/** What the backend says once after a status (changes found again, the archive's changes taken in …). */
+export function sayNotice(status: ArchiveStatus) {
+  if (status.notice) useStore.getState().notify(status.notice);
 }
 
 /** The pairs „Do sprawdzenia” of archives opened together, looked for once the view is on screen; the sidebar shows

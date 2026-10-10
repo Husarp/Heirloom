@@ -15,6 +15,8 @@ import { Screen } from "./Screen";
 import { ArchivePicker } from "../screens/archive/ArchivePicker";
 import { LoadingArchive } from "../screens/archive/LoadingArchive";
 import { FirstOpen } from "../screens/archive/FirstOpen";
+import { ChooseMode } from "../screens/archive/ChooseMode";
+import { BusyDialog } from "../screens/settings/dialogs";
 
 export function App() {
   const phase = useStore((s) => s.phase);
@@ -26,6 +28,7 @@ export function App() {
   const conflictOpen = useStore((s) => s.conflictOpen);
   const foreignConfirmOpen = useStore((s) => s.foreignConfirmOpen);
   const paletteOpen = useStore((s) => s.paletteOpen);
+  const busy = useStore((s) => s.busy);
   useAppearance();
   useShortcuts();
   useCloseGuard();
@@ -55,12 +58,14 @@ export function App() {
       )}
       {phase === "picker" && <ArchivePicker />}
       {phase === "loading" && <LoadingArchive />}
+      {phase === "chooseMode" && <ChooseMode />}
       {phase === "firstOpen" && <FirstOpen />}
       {whoEditsOpen && <WhoEditsDialog />}
       {conflictOpen && <ConflictDialog />}
       {foreignConfirmOpen && <ForeignConfirmDialog />}
       {paletteOpen && phase === "ready" && <CommandPalette />}
       <AskDialog />
+      {busy && <BusyDialog text={busy.text} note={busy.note} />}
       <Toasts />
     </>
   );

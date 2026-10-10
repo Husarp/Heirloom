@@ -6,6 +6,7 @@ import { useApi } from "../../app/useApi";
 import { Checkbox, EmptyState, Spinner, useDismiss } from "../../components/bits";
 import { count, num, plural } from "../../lib/format";
 import { pickFiles, pickFolder } from "../../lib/native";
+import { OriginalMissingBanner } from "../start/OverlayBanners";
 import { filtersLike, runEdit } from "./shared";
 import "./media.css";
 
@@ -31,6 +32,8 @@ export function MissingFiles() {
   const notify = useStore((s) => s.notify);
   const { data, error, loading } = useApi<{ rows: MissingRow[] }>("media.missing");
   const rows = data?.rows ?? [];
+  // The archive can't be reached (a pendrive unplugged): its photos are not lost, so there is nothing to look for.
+  const originalMissing = useStore((s) => s.archive?.overlay?.originalMissing ?? false);
 
   /** Files with the same name found by the searches, per record. */
   const [candidates, setCandidates] = useState<Record<string, string[]>>({});
@@ -139,6 +142,18 @@ export function MissingFiles() {
       <b style={{ color: "var(--text)", fontWeight: 600 }}>Brakujące pliki</b>
     </div>
   );
+
+  if (originalMissing) {
+    return (
+      <div className="page">
+        <div className="missing-page">
+          {crumb}
+          <h1 className="page-title">Brakujące pliki</h1>
+          <OriginalMissingBanner />
+        </div>
+      </div>
+    );
+  }
 
   if (!data) {
     return (

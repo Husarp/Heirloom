@@ -9,6 +9,7 @@ import { pickFiles } from "../../lib/native";
 import { UpdateBanner } from "../../shell/UpdateBanner";
 import { runEdit } from "../media/shared";
 import { EmptyArchive } from "./EmptyArchive";
+import { OverlayBanners } from "./OverlayBanners";
 import { SetCard } from "./SetCard";
 import "./start.css";
 
@@ -44,6 +45,7 @@ export function Start() {
     <div className="page">
       <div className="start">
         <UpdateBanner />
+        <OverlayBanners />
         <div className="col" style={{ gap: 4 }}>
           <span style={{ fontSize: 13, color: "var(--text3)" }}>{todayLong()}</span>
           <h1 className="serif" style={{ fontSize: 38, lineHeight: 1.1, fontWeight: 500 }}>

@@ -300,7 +300,7 @@ export function AskDialog() {
   const [busy, setBusy] = useState(false);
   if (!ask) return null;
   return (
-    <Dialog width={480} onClose={() => setAsk(null)}>
+    <Dialog width={ask.wide ? 600 : 480} onClose={() => setAsk(null)}>
       <div className="dialog-body">
         {ask.icon && (
           <div className="dialog-icon" style={ask.icon === "info" ? { background: "var(--accent-soft)", color: "var(--accent-text)" } : undefined}>

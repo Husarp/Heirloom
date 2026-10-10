@@ -197,6 +197,21 @@
   white-space: nowrap;
 }
 
+.media-mine {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  z-index: 1;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+.media-mine-text {
+  color: var(--accent-text);
+}
 .media-star {
   position: absolute;
   right: 6px;

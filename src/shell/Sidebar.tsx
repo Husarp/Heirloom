@@ -5,6 +5,7 @@ import { useStore, type Route, type TreeView } from "../app/store";
 import { ArchiveDot, BrandMark, useDismiss } from "../components/bits";
 import { displayPath, num, people as peopleCount, relativeTime } from "../lib/format";
 import { OpenTogether } from "../screens/archive/OpenTogether";
+import { sidebarTip } from "../screens/archive/workModes";
 
 interface NavItem {
   icon: ComponentType<{ size?: number }>;
@@ -80,7 +81,7 @@ export function Sidebar() {
           </button>
         );
       })}
-      <div className="sidebar-foot" title={archive ? displayPath(archive.dataPath) : undefined}>
+      <div className="sidebar-foot" title={archive ? sidebarTip(archive) : undefined}>
         <Archive size={15} style={{ flex: "none" }} />
         <span className="ellipsis">{status}</span>
       </div>

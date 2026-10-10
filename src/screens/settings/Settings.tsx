@@ -20,7 +20,7 @@ const NAV = [
 ];
 
 /** Sections without their own nav item belong to Archiwum. */
-const NAV_OF: Record<string, string> = { settingsFiles: "archive", backup: "archive", export: "archive", tools: "archive" };
+const NAV_OF: Record<string, string> = { overlay: "archive", settingsFiles: "archive", backup: "archive", export: "archive", tools: "archive" };
 
 /** Ustawienia (spec §4.34): a sticky nav that follows the scroll, and sections of rows. `section` (from the route)
  *  is scrolled to on open: a nav id or `settingsFiles`, `backup`, `export`, `tools`. */

@@ -45,6 +45,8 @@ export interface MediaItem {
   /** People whose profile photo this is. */
   profileOf: string[];
   format: string | null;
+  /** „Nie ruszaj oryginału”: the file is in the user's folder („mine”) or in the archive. */
+  layer?: "mine" | "archive";
   sources: { id: string; title: string | null }[];
 }
 

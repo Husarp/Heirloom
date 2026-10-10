@@ -530,6 +530,7 @@ function Tile({ item, selected, thumbSize, onSelect, onOpen }: { item: MediaItem
       <span className={`media-thumb${item.missing || !item.path ? " missing" : ""}`}>
         <Preview item={item} size={thumbSize} />
         {tag && <span className="media-tag">{tag}</span>}
+        {item.layer === "mine" && <span className="media-mine">u Ciebie</span>}
         {item.profileOf.length > 0 && (
           <span className="media-star" title={`Zdjęcie profilowe: ${profileOf.join(", ")}`}>
             <Star size={11} fill="currentColor" />
@@ -576,6 +577,7 @@ function ListRow({
       {!narrow && (
         <span className="ellipsis" style={{ color: "var(--text2)" }}>
           {kindText(item)}
+          {item.layer === "mine" && <span className="media-mine-text"> · u Ciebie</span>}
         </span>
       )}
       {!narrow && (

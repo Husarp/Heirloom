@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { inTauri } from "../api/transport";
 import { count } from "../lib/format";
+import { closeReminder, savesWhere } from "../screens/archive/workModes";
 import { useStore } from "./store";
 
 /** Closing the window with unsaved changes asks first (saving is manual): „Zapisz i zamknij”, „Zamknij bez zapisu”
@@ -34,7 +35,7 @@ export function useCloseGuard() {
       return win
         .onCloseRequested((event) => {
           const s = useStore.getState();
-          if ((s.archive?.unsavedChanges ?? 0) === 0 && !s.leaveGuard) return;
+          if ((s.archive?.unsavedChanges ?? 0) === 0 && !s.leaveGuard && !closeReminder(s.archive, reminded)) return;
           event.preventDefault();
           closeWhenSaved(() => void win.destroy());
         })
@@ -50,6 +51,27 @@ export function useCloseGuard() {
   }, []);
 }
 
+/** The archives already reminded about changes the archive doesn't have (once for each in a session). */
+const reminded = new Set<string>();
+
+/** „Twoich zmian nie ma jeszcze w archiwum” (DESIGN A.6): closing with changes only this computer has, when the archive
+ *  is on another drive and may be handed back without them. */
+function closeRemindingToo(close: () => void, update?: string) {
+  const s = useStore.getState();
+  const reminder = update ? null : closeReminder(s.archive, reminded);
+  if (!reminder) return close();
+  reminded.add(reminder.key);
+  s.setAsk({
+    title: reminder.title,
+    text: reminder.text,
+    icon: "warn",
+    buttons: [
+      { label: "Zamknij mimo to", kind: "secondary", run: close },
+      { label: "Przenieś do archiwum…", kind: "primary", run: () => s.startWriteBack() },
+    ],
+  });
+}
+
 /** Runs `close` at once when closing loses nothing; otherwise asks first. `update`: Heirloom closes to install
  *  version `update`, and only „Zapisz i zamknij” or „Anuluj” are offered (with an open section's draft, only „Wróć”)
  *  — an update never drops work. */
@@ -59,7 +81,7 @@ export function closeWhenSaved(close: () => void, update?: string) {
   // A section's draft (the personal data being typed) isn't a change in the archive yet, but it is work.
   const draft = s.leaveGuard;
   if (unsaved === 0 && !draft) {
-    close();
+    closeRemindingToo(close, update);
     return;
   }
   const closing = update ? `Heirloom zamknie się, żeby zainstalować wersję ${update}.` : "Zamykasz Heirloom.";
@@ -77,7 +99,7 @@ export function closeWhenSaved(close: () => void, update?: string) {
     title: unsaved > 0 ? `Masz ${count(unsaved, "niezapisaną zmianę", "niezapisane zmiany", "niezapisanych zmian")}` : "Otwarta sekcja ma niezatwierdzone zmiany",
     text:
       unsaved > 0
-        ? `${closing} Zapisać zmiany w pliku ${s.archive?.dataFile ?? ""}?${draft ? " To, co wpisano w otwartej sekcji, a nie zatwierdzono przyciskiem „Gotowe”, nie zostanie zapisane." : ""}`
+        ? `${closing} Zapisać zmiany ${s.archive ? savesWhere(s.archive) : ""}?${draft ? " To, co wpisano w otwartej sekcji, a nie zatwierdzono przyciskiem „Gotowe”, nie zostanie zapisane." : ""}`
         : `${closing} To, co wpisano w otwartej sekcji, nie zostanie zapamiętane.`,
     icon: "warn",
     buttons: [
@@ -89,7 +111,7 @@ export function closeWhenSaved(close: () => void, update?: string) {
               label: "Zapisz i zamknij",
               kind: "primary" as const,
               run: async () => {
-                if (await useStore.getState().save()) close();
+                if (await useStore.getState().save()) closeRemindingToo(close, update);
               },
             },
           ]

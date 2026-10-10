@@ -3,12 +3,14 @@
 import { FolderOpen, HardDriveDownload } from "lucide-react";
 import { useEffect, useState } from "react";
 import { call } from "../../api/transport";
-import type { AppState, ArchiveStatus } from "../../api/types";
+import type { AppState, ArchiveStatus, OverlayInfo } from "../../api/types";
 import { useStore } from "../../app/store";
 import { useApi } from "../../app/useApi";
 import { Segmented, SettingRow, Spinner, Toggle } from "../../components/bits";
 import { bytes, count, displayPath } from "../../lib/format";
 import { openPath, pickFiles, pickSavePath } from "../../lib/native";
+import { discardMine, switchToInPlace, switchToOverlay } from "../../app/workMode";
+import { lastWriteBackText, waitingText } from "../archive/workModes";
 import { BusyDialog, CheckDialog, type CheckProblem } from "./dialogs";
 import { failed, fileSafe, Keycap, saveSettings, Section, Select, showInFolder, today, whenDone } from "./parts";
 
@@ -31,6 +33,7 @@ export function ArchiveSections({ archive }: { archive: ArchiveStatus }) {
   return (
     <>
       <ArchiveSection archive={archive} measured={measured} />
+      {archive.overlay && <OverlaySection archive={archive} />}
       <SettingsFilesSection archive={archive} />
       <BackupSection archive={archive} setBusy={setBusy} />
       <ExportSection archive={archive} setBusy={setBusy} />
@@ -68,6 +71,24 @@ function ArchiveSection({ archive, measured }: { archive: ArchiveStatus; measure
 
   return (
     <Section id="archive" title="Archiwum">
+      <SettingRow
+        label="Sposób pracy"
+        note={archive.workMode === "overlay" ? "Zmiany zapisują się u Ciebie, archiwum zostaje bez zmian." : "Zmiany zapisują się w tym archiwum."}
+      >
+        <Segmented
+          size={28}
+          value={archive.workMode === "overlay" ? "overlay" : "inPlace"}
+          onChange={(mode) => {
+            if (mode === (archive.workMode === "overlay" ? "overlay" : "inPlace")) return;
+            if (mode === "overlay") switchToOverlay();
+            else switchToInPlace();
+          }}
+          options={[
+            { value: "inPlace", label: "Pracuj na archiwum" },
+            { value: "overlay", label: "Nie ruszaj oryginału" },
+          ]}
+        />
+      </SettingRow>
       <SettingRow label="Po otwarciu archiwum" note="Ekran, widok drzewa i powiększenie zapamiętane osobno dla każdego archiwum, na tym komputerze">
         <Segmented
           size={28}
@@ -88,18 +109,83 @@ function ArchiveSection({ archive, measured }: { archive: ArchiveStatus; measure
       <SettingRow label="Plik danych" note={archive.dataBytes != null ? `${archive.dataFile} · ${bytes(archive.dataBytes)}` : archive.dataFile}>
         <Keycap>{version?.startsWith("7") ? "GEDCOM 7" : version ? `GEDCOM ${version}` : "GEDCOM"}</Keycap>
       </SettingRow>
-      <SettingRow label="Tryb" note={archive.readOnly ? "Nic w tym archiwum nie zostanie zmienione" : undefined}>
-        <Segmented
-          size={28}
-          value={archive.readOnly ? "readOnly" : "edit"}
-          onChange={setMode}
-          options={[
-            { value: "edit", label: "Edycja" },
-            { value: "readOnly", label: "Tylko do odczytu" },
-          ]}
-        />
-      </SettingRow>
+      {/* „Nie ruszaj oryginału”: the user's folder starts unlocked, and a lock on the archive stops the write-back. */}
+      {!archive.overlay && (
+        <SettingRow label="Tylko do odczytu" note="Nikt nie zmieni niczego w tym archiwum (ustawienie zapisane w archiwum)">
+          <Toggle on={archive.readOnly} onChange={(on) => setMode(on ? "readOnly" : "edit")} />
+        </SettingRow>
+      )}
       <StorageBlock dataFile={archive.dataFile} measured={measured} />
+    </Section>
+  );
+}
+
+/** „Twoje zmiany” (only with „Nie ruszaj oryginału”): where they are, what waits to go into the archive. */
+function OverlaySection({ archive }: { archive: ArchiveStatus }) {
+  const startWriteBack = useStore((s) => s.startWriteBack);
+  const startRebase = useStore((s) => s.startRebase);
+  const undoWriteBack = useStore((s) => s.undoWriteBack);
+  const { data: info, error } = useApi<OverlayInfo>("archive.overlayInfo");
+  useEffect(() => {
+    if (error) failed(error);
+  }, [error]);
+  const overlay = archive.overlay!;
+  const nothing = info != null && info.pending === 0 && info.newFiles === 0;
+  // Why moving the changes into the archive isn't possible now (the changes stay here).
+  const blocked = !info
+    ? null
+    : info.originalMissing
+      ? "Archiwum jest teraz niedostępne — przenieść zmiany można, gdy będzie dostępne."
+      : info.lockedOriginal
+        ? "Właściciel archiwum zablokował zmiany (Tylko do odczytu). Twoje zmiany zostają u Ciebie."
+        : !info.writable
+          ? "W archiwum nie da się nic zapisać (np. płyta lub zablokowany pendrive). Twoje zmiany zostają u Ciebie."
+          : null;
+  return (
+    <Section id="overlay" title="Twoje zmiany">
+      <SettingRow label="Folder" note={<span className="selectable">{displayPath(overlay.folder)}</span>}>
+        <button className="btn secondary set-btn" onClick={() => openPath(overlay.folder).catch(failed)}>
+          <FolderOpen size={15} />
+          Otwórz folder
+        </button>
+      </SettingRow>
+      <SettingRow
+        label="Czeka na przeniesienie"
+        note={
+          <>
+            {info ? waitingText(info) : "Sprawdzam…"}
+            {blocked && (
+              <>
+                <br />
+                {blocked}
+              </>
+            )}
+          </>
+        }
+      >
+        <button className="btn primary set-btn" disabled={!info || nothing || !!blocked} onClick={() => startWriteBack()}>
+          Przenieś zmiany do archiwum…
+        </button>
+      </SettingRow>
+      {overlay.originalChanged && !overlay.originalMissing && (
+        <SettingRow label="Ktoś zmienił archiwum" note="Od ostatniego razu — wczytaj te zmiany, zanim przeniesiesz swoje.">
+          <button className="btn secondary set-btn" onClick={startRebase}>
+            Wczytaj zmiany
+          </button>
+        </SettingRow>
+      )}
+      <SettingRow label="Ostatnie przeniesienie" note={info ? lastWriteBackText(info.lastWriteBack) : "…"}>
+        {info?.canUndoWriteBack && (
+          <button className="btn secondary set-btn" onClick={undoWriteBack}>
+            Cofnij
+          </button>
+        )}
+      </SettingRow>
+      <SettingRow label="Zacznij od nowa" note="Twoja wersja wraca do tego, co jest teraz w archiwum. Stary folder zostaje, tylko pod inną nazwą." last>
+        <button className="btn secondary set-btn" disabled={!!overlay.originalMissing} onClick={discardMine}>
+          Porzuć moje zmiany…
+        </button>
+      </SettingRow>
     </Section>
   );
 }
@@ -154,7 +240,6 @@ function StorageBlock({ dataFile, measured }: { dataFile: string; measured: numb
 
 function SettingsFilesSection({ archive }: { archive: ArchiveStatus }) {
   const notify = useStore((s) => s.notify);
-  const nextToData = archive.sidecar.startsWith(archive.root);
 
   const exportSettings = async () => {
     const path = await pickSavePath(`Heirloom-ustawienia-${fileSafe(archive.name)}.json`, [{ name: "Ustawienia Heirlooma", extensions: ["json"] }]);
@@ -181,27 +266,6 @@ function SettingsFilesSection({ archive }: { archive: ArchiveStatus }) {
 
   return (
     <Section id="settingsFiles" title="Pliki ustawień Heirlooma">
-      <SettingRow
-        label="Gdzie trzymać"
-        soon
-        note={
-          <>
-            Wygląd i układ drzewa, osobno od danych rodziny
-            <br />
-            <span className="selectable">Teraz: {archive.sidecar}</span>
-          </>
-        }
-      >
-        <Segmented
-          size={28}
-          value={nextToData ? "data" : "app"}
-          onChange={() => {}}
-          options={[
-            { value: "data", label: "Obok danych" },
-            { value: "app", label: "W programie" },
-          ]}
-        />
-      </SettingRow>
       <SettingRow label="Ustawienia wyglądu" note="Wygląd programu i wybory z tej strony w jednym pliku">
         <button className="btn secondary set-btn" onClick={exportSettings}>
           Eksportuj do pliku
