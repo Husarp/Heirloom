@@ -1,0 +1,218 @@
+// Part B texts and decisions (DESIGN B.5–B.7): the Settings section, the switch dialogs, the Start banner and the
+// tidy dialog. Pure, so they are tested on their own. Everything is Polish and calm: nothing here says "scan" or "layout".
+
+import type { LayoutInterrupted, MediaLayout, MediaScan, RestructurePlan, RestructureResult, ScanFolder, ScanUnknown, UndoRestructureResult } from "../../api/types";
+import { count, dayMonth, num, plural } from "../../lib/format";
+
+export const filesWord = (n: number) => count(n, "plik", "pliki", "plików");
+const foldersWord = (n: number) => count(n, "folder", "foldery", "folderów");
+
+// ---- Settings › Archiwum › Zdjęcia i pliki (B.7, B.8) ----
+
+export const LAYOUT_OPTIONS: { value: MediaLayout; label: string }[] = [
+  { value: "flat", label: "Wszystkie razem" },
+  { value: "perPerson", label: "W folderach osób" },
+];
+
+/** „Teraz: 312 plików w folderach osób, 12 luzem”. */
+export function layoutNow(scan: Pick<MediaScan, "layout">): string {
+  const { folderOwned, rootOwned } = scan.layout;
+  if (folderOwned === 0 && rootOwned === 0) return "Teraz: w folderze media nie ma jeszcze zdjęć osób";
+  return `Teraz: ${filesWord(folderOwned)} w folderach osób, ${num(rootOwned)} luzem`;
+}
+
+/** A1: the layout is the original's, read-only. */
+export function layoutAsInArchive(layout: MediaLayout): string {
+  return `Jak w archiwum: ${layout === "perPerson" ? "w folderach osób" : "wszystkie razem"}. Pliki w archiwum przeniesiesz w trybie „Pracuj na archiwum”.`;
+}
+
+/** Files (not folders) waiting to be tidied. */
+export function tidyFiles(scan: Pick<MediaScan, "counts">): number {
+  const c = scan.counts;
+  return c.moved + c.looseLinked + c.unknown + c.outside;
+}
+
+/** „Do uporządkowania: 14 plików” (+ „, 1 folder”), or „nic”. */
+export function tidyNote(scan: Pick<MediaScan, "counts">): string {
+  const files = tidyFiles(scan);
+  const folders = scan.counts.folders;
+  const parts = [files > 0 ? filesWord(files) : null, folders > 0 ? foldersWord(folders) : null].filter(Boolean);
+  return `Do uporządkowania: ${parts.length ? parts.join(", ") : "nic"}`;
+}
+
+/** „3 października (1 198 plików)”; the Settings row says „Ostatnie porządkowanie: …”. */
+export function lastRunText(journal: NonNullable<MediaScan["journal"]>): string {
+  const d = new Date(journal.ts);
+  const when = Number.isNaN(d.getTime()) ? "" : `${dayMonth(d)} `;
+  return `${when}(${filesWord(journal.moved)})`;
+}
+
+// ---- The switch dialogs (B.7) ----
+
+export function switchTitle(to: MediaLayout): string {
+  return to === "perPerson" ? "Ułożyć pliki w folderach osób?" : "Wyjąć pliki z folderów osób?";
+}
+
+/** „1 204 pliki, które już są” / „1 plik, który już jest”. */
+function filesAlreadyThere(n: number): string {
+  return `${plural(n, `${num(n)} plik, który już jest`, `${num(n)} pliki, które już są`, `${num(n)} plików, które już są`)}`;
+}
+
+export function switchText(to: MediaLayout, plan: Pick<RestructurePlan, "count" | "newFolders">): string {
+  const n = plan.count;
+  if (to === "perPerson") {
+    const example = plan.newFolders[0] ? plan.newFolders[0].replace(/^media[\\/]/, "") : "Kowalski Józef";
+    const lead = `Nowe zdjęcia i dokumenty będą trafiać do folderów osób, np. media\\${example}.`;
+    return n > 0 ? `${lead} Heirloom może też od razu przenieść tam ${filesAlreadyThere(n)} w archiwum.` : lead;
+  }
+  if (n === 0) return "Nowe zdjęcia i dokumenty będą trafiać prosto do folderu media. Żadne pliki nie leżą teraz w folderach osób, więc nic nie trzeba przenosić.";
+  return `Heirloom przeniesie ${filesWord(n)} z folderów osób prosto do folderu media, a puste foldery usunie. Gdy dwa pliki mają tę samą nazwę, drugi dostanie numer, np. „ślub (2).jpg”. Foldery z plikami, których Heirloom nie zna, zostaną.`;
+}
+
+/** The bullets under the text; only to B2 has any. */
+export function switchBullets(to: MediaLayout, plan: Pick<RestructurePlan, "groupFiles" | "unassigned" | "longPaths">, dataFile: string): string[] {
+  if (to !== "perPerson") return [];
+  const out: string[] = [];
+  if (plan.groupFiles > 0) out.push("Zdjęcie kilku osób trafi do folderu jednej z nich — w programie widać je u wszystkich.");
+  if (plan.unassigned > 0) out.push(`${filesWord(plan.unassigned)} bez przypisanej osoby ${plural(plan.unassigned, "zostanie", "zostaną", "zostanie")} w folderze media.`);
+  if (plan.longPaths > 0) out.push("Część folderów dostanie krótsze nazwy, bo pełna ścieżka byłaby za długa dla Windows.");
+  out.push(`Ścieżki w pliku ${dataFile} zmienią się razem z plikami. Nic nie zostanie usunięte, a przeniesienie można cofnąć.`);
+  out.push("Ten układ zobaczą wszyscy, którzy korzystają z tego archiwum.");
+  return out;
+}
+
+// ---- Results: toasts ----
+
+export const MOVING_LABEL = "Przenoszę pliki…";
+export const MOVING_BACK_LABEL = "Przenoszę pliki z powrotem…";
+
+/** „6 plików było otwartych w innym programie — zostały na miejscu. Spróbuj ponownie później.” */
+export function heldText(held: number): string {
+  const were = plural(held, "był otwarty", "były otwarte", "było otwartych");
+  const stayed = plural(held, "został", "zostały", "zostały");
+  return `${filesWord(held)} ${were} w innym programie — ${stayed} na miejscu. Spróbuj ponownie później.`;
+}
+
+export function movedToast(r: Pick<RestructureResult, "moved" | "held">): { text: string; detail?: string } {
+  const text = r.moved > 0 ? `Przeniesiono ${filesWord(r.moved)}.` : "Żaden plik nie został przeniesiony.";
+  return { text, detail: r.held > 0 ? heldText(r.held) : undefined };
+}
+
+export function undoneToast(r: Pick<UndoRestructureResult, "movedBack" | "notBack">): { text: string; detail?: string } {
+  const text = r.movedBack > 0 ? `Cofnięto porządkowanie: ${filesWord(r.movedBack)} ${plural(r.movedBack, "wrócił", "wróciły", "wróciło")} na dawne miejsce.` : "Cofnięto porządkowanie.";
+  const detail = r.notBack > 0 ? `${filesWord(r.notBack)} ${plural(r.notBack, "został", "zostały", "zostało")} na nowym miejscu, bo na dawnym leży już inny plik.` : undefined;
+  return { text, detail };
+}
+
+export const UNDO_ASK = {
+  title: "Cofnąć porządkowanie?",
+  text: "Heirloom przeniesie pliki z powrotem na dawne miejsca. Zdjęcia będą widoczne przez cały czas.",
+};
+
+// ---- Interrupted run (B.6) ----
+
+export function interruptedText(i: Pick<LayoutInterrupted, "done" | "total">): string {
+  return `Przenoszenie plików zostało przerwane (przeniesiono ${num(i.done)} z ${num(i.total)}). Wszystkie zdjęcia są widoczne.`;
+}
+
+// ---- Start banner (B.5) ----
+
+/** „5 plików bez przypisania, 1 folder”. */
+export function bannerParts(scan: Pick<MediaScan, "counts">): string {
+  const c = scan.counts;
+  const parts: string[] = [];
+  if (c.unknown > 0) parts.push(`${filesWord(c.unknown)} bez przypisania`);
+  if (c.looseLinked > 0) parts.push(`${filesWord(c.looseLinked)} luzem`);
+  if (c.moved > 0) parts.push(`${filesWord(c.moved)} w innym miejscu`);
+  if (c.outside > 0) parts.push(`${filesWord(c.outside)} poza archiwum`);
+  if (c.folders > 0) parts.push(foldersWord(c.folders));
+  return parts.join(", ");
+}
+
+export function bannerText(scan: Pick<MediaScan, "counts">): string {
+  return `W folderze media jest coś do uporządkowania: ${bannerParts(scan)}.`;
+}
+
+/** Calm: only when something is found, and "Nie teraz" wasn't said to exactly these findings; never for sets. */
+export function bannerShows(scan: Pick<MediaScan, "total" | "seen"> | null, combined: boolean): boolean {
+  return !!scan && !combined && scan.total > 0 && !scan.seen;
+}
+
+// ---- Brakujące pliki ----
+
+export const foundElsewhereText = (n: number) => `Znaleziono w innym folderze archiwum (${num(n)})`;
+
+// ---- The tidy dialog (B.5) ----
+
+export const TIDY_TITLE = "Porządek w zdjęciach";
+export const A1_NOTE = "W trybie „Nie ruszaj oryginału” pliki w archiwum zostają na miejscu — możesz je tylko przypisać do osób.";
+export const UNKNOWN_FOOTER = "Pliki zostawione w folderze nie pojawią się w programie. O te same pliki nie zapytamy ponownie.";
+
+export const movedSection = (n: number) =>
+  `${filesWord(n)} ${plural(n, "jest", "są", "jest")} w innym miejscu, niż zapisano (np. ktoś ${plural(n, "go", "je", "je")} przeniósł w Eksploratorze). Zdjęcia są widoczne, ale inne programy ${plural(n, "go", "ich", "ich")} nie znajdą.`;
+export const looseSection = (n: number) => `${count(n, "zdjęcie", "zdjęcia", "zdjęć")} ${plural(n, "osoby leży", "osób leżą", "osób leży")} luzem w folderze media.`;
+export const unknownSection = (n: number) =>
+  `${filesWord(n)} w folderze media nie ${plural(n, "jest przypisany", "są przypisane", "jest przypisanych")} do nikogo — Heirloom ${plural(n, "go", "ich", "ich")} nie pokazuje.`;
+export const outsideSection = (n: number) =>
+  `${filesWord(n)} ${plural(n, "leży", "leżą", "leży")} poza folderem archiwum (np. C:\\Users\\…). Heirloom ${plural(n, "go", "ich", "ich")} nie pokazuje.`;
+
+/** „W folderze media jest folder „Kowalski Józef” (23 pliki, w tym 5 nieznanych programowi). Może ktoś odłożył go tam na chwilę.” */
+export function unpackQuestion(f: Pick<ScanFolder, "name" | "files" | "unknown">): string {
+  const unknown = f.unknown > 0 ? `, w tym ${f.unknown} ${plural(f.unknown, "nieznany", "nieznane", "nieznanych")} programowi` : "";
+  return `W folderze media jest folder „${f.name}” (${filesWord(f.files)}${unknown}). Może ktoś odłożył go tam na chwilę.`;
+}
+
+/** „Folder „Dziadek Józek” (23 pliki) — czyj to folder?” */
+export function whoseQuestion(f: Pick<ScanFolder, "name" | "files">): string {
+  return `Folder „${f.name}” (${filesWord(f.files)}) — czyj to folder?`;
+}
+
+export function personLabel(p: { name: string; years: string | null }): string {
+  return p.years ? `${p.name} (${p.years})` : p.name;
+}
+
+/** A person's years as the scan prints them: „1878–1944”, „1878–”, „–1944”. */
+export function yearsOf(birth: string | null | undefined, death: string | null | undefined, living = false): string | null {
+  const b = birth?.match(/\d{4}/)?.[0] ?? "";
+  const d = death?.match(/\d{4}/)?.[0] ?? "";
+  if (!b && !d) return null;
+  return living && !d ? `${b}–` : `${b}–${d}`;
+}
+
+/** Which sections the tidy dialog shows. Unknown files in a folder that is asked about belong to that question. */
+export interface TidySections {
+  moved: boolean;
+  loose: boolean;
+  unknown: ScanUnknown[];
+  unpack: ScanFolder[];
+  whose: ScanFolder[];
+  outside: boolean;
+}
+
+export function tidySections(scan: MediaScan, overlay: boolean, dismissed: ReadonlySet<string> = new Set()): TidySections {
+  const asked = scan.folders.filter((f) => f.question && !f.leftAlone && !dismissed.has(f.path));
+  // In A1 an unpack question is not asked (nothing moves), so its unknown files stay in the assign list.
+  const askedPaths = new Set(scan.folders.filter((f) => f.question && !(overlay && f.question === "unpack")).map((f) => f.path));
+  return {
+    moved: scan.moved.length > 0,
+    loose: !overlay && scan.looseLinked.length > 0 && !dismissed.has("loose"),
+    unknown: scan.unknown.filter((u) => !askedPaths.has(u.folder)),
+    unpack: overlay ? [] : asked.filter((f) => f.question === "unpack"),
+    whose: asked.filter((f) => f.question === "whose"),
+    outside: scan.outside.length > 0,
+  };
+}
+
+/** Nothing left to show: the dialog says so instead of staying empty. */
+export function tidyEmpty(s: TidySections): boolean {
+  return !s.moved && !s.loose && s.unknown.length === 0 && s.unpack.length === 0 && s.whose.length === 0 && !s.outside;
+}
+
+// ---- Historia zmian ----
+
+/** The journal of a „Uporządkowano pliki” row (batch `porzadkowanie-<ts>`), which media.undoRestructure takes; null for the
+ *  row of an undo itself (`…-cofniecie`) and for batches that aren't a run. */
+export function layoutJournal(batch: string | null | undefined): string | null {
+  const m = batch?.match(/^porzadkowanie-(.+)$/);
+  return m && !m[1].endsWith("-cofniecie") ? m[1] : null;
+}

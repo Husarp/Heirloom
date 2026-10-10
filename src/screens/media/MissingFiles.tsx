@@ -1,12 +1,14 @@
 import { ChevronRight, CircleCheck, FileSearch, FolderSearch, Info } from "lucide-react";
 import { useCallback, useState } from "react";
 import { call, type ApiError } from "../../api/transport";
+import { scanSoon } from "../../app/layout";
 import { afterChange, useStore } from "../../app/store";
 import { useApi } from "../../app/useApi";
 import { Checkbox, EmptyState, Spinner, useDismiss } from "../../components/bits";
 import { count, num, plural } from "../../lib/format";
 import { pickFiles, pickFolder } from "../../lib/native";
 import { OriginalMissingBanner } from "../start/OverlayBanners";
+import { foundElsewhereText } from "./layoutText";
 import { filtersLike, runEdit } from "./shared";
 import "./media.css";
 
@@ -22,6 +24,30 @@ interface MissingRow {
 interface FindResult {
   rows: { id: string; file: string; title: string | null; found: string[] }[];
   folder: string;
+}
+
+/** Files whose path in the archive is out of date but that lie elsewhere in the archive: they are shown all the same, so
+ *  they are not counted as missing; „Popraw ścieżki” writes the right paths (DESIGN B.4). */
+function FoundElsewhere() {
+  const n = useStore((s) => s.scan?.counts.moved ?? 0);
+  const notify = useStore((s) => s.notify);
+  if (n === 0) return null;
+  const fix = () =>
+    runEdit(async () => {
+      const r = await call<{ fixed: number }>("media.fixMoved");
+      afterChange();
+      scanSoon(0);
+      notify(`Poprawiono ścieżki: ${count(r.fixed, "plik", "pliki", "plików")}.`, { detail: "Zmiana czeka na zapis." });
+    });
+  return (
+    <div className="banner info">
+      <Info size={16} color="var(--text2)" style={{ flex: "none" }} />
+      <span className="grow">{foundElsewhereText(n)}. Zdjęcia są widoczne, ale inne programy ich nie znajdą.</span>
+      <button className="btn secondary sm" onClick={fix}>
+        Popraw ścieżki
+      </button>
+    </div>
+  );
 }
 
 /** Brakujące pliki (spec §4.33): files the archive describes that aren't in its folder. „Szukaj w folderze…” matches
@@ -180,6 +206,7 @@ export function MissingFiles() {
         <div className="missing-page">
           {crumb}
           <h1 className="page-title">Brakujące pliki</h1>
+          <FoundElsewhere />
           <div className="card">
             <EmptyState
               icon={<CircleCheck size={32} color="var(--accent-text)" />}
@@ -225,6 +252,7 @@ export function MissingFiles() {
           </button>
         </div>
 
+        <FoundElsewhere />
         {lastSearch &&
           (lastSearch.found > 0 ? (
             <div className="banner success">

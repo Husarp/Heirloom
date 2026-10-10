@@ -8,6 +8,7 @@ import { Avatar, rowButton } from "../../components/bits";
 import { dayMonth, num, plural, relativeTime, todayLong } from "../../lib/format";
 import { pickFiles } from "../../lib/native";
 import { UpdateBanner } from "../../shell/UpdateBanner";
+import { TidyBanners } from "../media/TidyBanner";
 import { runEdit } from "../media/shared";
 import { EmptyArchive } from "./EmptyArchive";
 import { OverlayBanners } from "./OverlayBanners";
@@ -47,6 +48,7 @@ export function Start() {
       <div className="start">
         <UpdateBanner />
         <OverlayBanners />
+        <TidyBanners />
         <div className="col" style={{ gap: 4 }}>
           <span style={{ fontSize: 13, color: "var(--text3)" }}>{todayLong()}</span>
           <h1 className="serif" style={{ fontSize: 38, lineHeight: 1.1, fontWeight: 500 }}>

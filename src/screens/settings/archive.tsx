@@ -11,6 +11,10 @@ import { bytes, count, displayPath } from "../../lib/format";
 import { openPath, pickFiles, pickFolder, pickSavePath, revealPath } from "../../lib/native";
 import { makeBackup, restoreFromBackup } from "../../app/backup";
 import { discardMine, switchToInPlace, switchToOverlay } from "../../app/workMode";
+import { askUndo, finishMove, scanNow } from "../../app/layout";
+import type { MediaLayout } from "../../api/types";
+import { LAYOUT_OPTIONS, interruptedText, lastRunText, layoutAsInArchive, layoutNow, tidyFiles, tidyNote } from "../media/layoutText";
+import { SwitchLayoutDialog } from "../media/SwitchLayoutDialog";
 import { lastBackupNote, ROTATION_NOTE } from "../archive/backupText";
 import { lastWriteBackText, waitingText } from "../archive/workModes";
 import { writeBackRefusal } from "../archive/writeBack";
@@ -36,6 +40,7 @@ export function ArchiveSections({ archive }: { archive: ArchiveStatus }) {
   return (
     <>
       <ArchiveSection archive={archive} measured={measured} />
+      {!archive.combined && <MediaFilesSection archive={archive} />}
       {archive.overlay && <OverlaySection archive={archive} />}
       <SettingsFilesSection archive={archive} />
       <BackupSection archive={archive} setBusy={setBusy} />
@@ -119,6 +124,65 @@ function ArchiveSection({ archive, measured }: { archive: ArchiveStatus; measure
         </SettingRow>
       )}
       <StorageBlock dataFile={archive.dataFile} measured={measured} />
+    </Section>
+  );
+}
+
+/** „Zdjęcia i pliki” (DESIGN B.7, B.8): how the files in media/ are laid out, what waits to be tidied, the last run. */
+function MediaFilesSection({ archive }: { archive: ArchiveStatus }) {
+  const scan = useStore((s) => s.scan);
+  const setTidyOpen = useStore((s) => s.setTidyOpen);
+  const [switchTo, setSwitchTo] = useState<MediaLayout | null>(null);
+  const overlay = archive.workMode === "overlay";
+  useEffect(() => {
+    void scanNow();
+  }, [archive.archiveId]);
+  if (!scan) {
+    return (
+      <Section id="files" title="Zdjęcia i pliki">
+        <SettingRow label="Układ plików w folderze media" note="Sprawdzam…" last />
+      </Section>
+    );
+  }
+  const layout = scan.layout.effective;
+  const left = scan.interrupted ?? archive.layoutInterrupted;
+  const run = scan.journal?.state === "saved" ? scan.journal : null;
+  const toTidy = tidyFiles(scan) + scan.counts.folders;
+  return (
+    <Section id="files" title="Zdjęcia i pliki">
+      <SettingRow label="Układ plików w folderze media" note={overlay ? layoutAsInArchive(layout) : layoutNow(scan)} last={overlay && toTidy === 0 && !left}>
+        {!overlay && (
+          <Segmented
+            size={28}
+            value={layout}
+            onChange={(value) => value !== layout && setSwitchTo(value)}
+            options={LAYOUT_OPTIONS}
+          />
+        )}
+      </SettingRow>
+      {left && !overlay && (
+        <SettingRow label="Przenoszenie przerwane" note={interruptedText(left)}>
+          <button className="btn secondary set-btn" onClick={() => finishMove(left.total - left.done)}>
+            Dokończ
+          </button>
+          <button className="btn secondary set-btn" onClick={() => askUndo(left.journal)}>
+            Cofnij przeniesione
+          </button>
+        </SettingRow>
+      )}
+      <SettingRow label={tidyNote(scan)} note="Pliki w folderze media, które leżą w złym miejscu albo nie są do nikogo przypisane" last={overlay || !run}>
+        <button className="btn secondary set-btn" disabled={toTidy === 0} onClick={() => setTidyOpen(true)}>
+          Przejrzyj…
+        </button>
+      </SettingRow>
+      {!overlay && run && (
+        <SettingRow label={`Ostatnie porządkowanie: ${lastRunText(run)}`} last>
+          <button className="btn secondary set-btn" onClick={() => askUndo(run.name)}>
+            Cofnij porządkowanie
+          </button>
+        </SettingRow>
+      )}
+      {switchTo && <SwitchLayoutDialog to={switchTo} onClose={() => setSwitchTo(null)} />}
     </Section>
   );
 }

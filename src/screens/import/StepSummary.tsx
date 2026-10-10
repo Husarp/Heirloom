@@ -4,6 +4,7 @@
 import { ArrowRight, Check, ChevronDown, ChevronRight, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useMemo, useState } from "react";
 import { call, type ApiError } from "../../api/transport";
+import { scanSoon } from "../../app/layout";
 import { useStore } from "../../app/store";
 import { useApi } from "../../app/useApi";
 import { Checkbox, Spinner } from "../../components/bits";
@@ -108,6 +109,7 @@ export function StepSummary({ state, act, goStep }: { state: ImportState; act: A
       // The import is its own save: „Cofnij zapis” in the bar must not reach back past it.
       useStore.setState({ lastSave: null });
       changed();
+      scanSoon();
       setWizard({ done: result });
       const saved = [
         result.files > 0 && count(result.files, "plik", "pliki", "plików"),

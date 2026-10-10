@@ -3,6 +3,7 @@ import { useStore } from "./store";
 import { cancelJob } from "./progress";
 import { Sidebar } from "../shell/Sidebar";
 import { TopBar } from "../shell/TopBar";
+import { TidyDialog } from "../screens/media/TidyDialog";
 import { FinalChangeDialog } from "../shell/FinalChangeDialog";
 import { RebaseDialog } from "../screens/archive/RebaseDialog";
 import { AskDialog, ConflictDialog, ForeignConfirmDialog, WhoEditsDialog } from "../shell/Dialogs";
@@ -60,6 +61,7 @@ export function App() {
           </div>
         </div>
       )}
+      {phase === "ready" && <TidyDialog />}
       {phase === "picker" && <ArchivePicker />}
       {phase === "loading" && <LoadingArchive />}
       {phase === "chooseMode" && <ChooseMode />}

@@ -21,6 +21,7 @@ import {
 } from "../screens/archive/writeBack";
 import type { FinalFacts } from "../screens/archive/workModes";
 import { discardMine, keepAsNewArchive, withBusy } from "./workMode";
+import { scanSoon } from "./layout";
 import { useStore } from "./store";
 
 const store = () => useStore.getState();
@@ -109,6 +110,7 @@ async function write(then: (() => void) | undefined, allowForeign: boolean): Pro
   try {
     const done = await withCounts("Przenoszę zmiany do archiwum…", call<WriteBackResult>("archive.writeBack", { author: writer(), allowForeign }));
     store().changed(done.status);
+    scanSoon();
     if (then) return then();
     const toast = writeBackDone(done.result);
     store().notify(toast.text, { detail: toast.detail, action: { label: "Cofnij", run: undoWriteBack } });
@@ -152,6 +154,7 @@ export async function rebaseFlow(): Promise<RebaseOutcome> {
   try {
     const done = await withBusy("Łączę zmiany z archiwum…", () => call<RebaseResult>("archive.rebase", choices ? { choices } : {}));
     store().changed(done.status);
+    scanSoon();
     if (done.result.merged && done.result.fastForward) store().notify(FAST_FORWARD_DONE);
     else store().notify(REBASE_DONE.text, { detail: REBASE_DONE.detail });
     return "merged";
@@ -202,6 +205,7 @@ async function undo() {
   try {
     const status = await withBusy("Cofam przeniesienie…", () => call<ArchiveStatus>("archive.undoWriteBack"));
     store().changed(status);
+    scanSoon();
     store().notify(UNDO_DONE.text, { detail: UNDO_DONE.detail });
   } catch (e) {
     await refreshStatus();

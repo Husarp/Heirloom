@@ -3,11 +3,12 @@
 
 import { create } from "zustand";
 import { call, ApiError } from "../api/transport";
-import type { AppState, ArchiveStatus, PersonSummary, SaveResult } from "../api/types";
+import type { AppState, ArchiveStatus, MediaScan, PersonSummary, SaveResult } from "../api/types";
 import { count } from "../lib/format";
 import { savesWhere, type FinalFacts, type FinalKind } from "../screens/archive/workModes";
 import { startRebase, startWriteBack, undoWriteBack } from "./writeBack";
 import { openInNewWindow } from "../lib/native";
+import { scanSoon } from "./layout";
 
 export type TreeView = "family" | "ancestors" | "descendants" | "overview";
 
@@ -156,6 +157,11 @@ interface Store {
   busy: Busy | null;
   /** The final-change dialog is open (src/shell/FinalChangeDialog.tsx). */
   finalChange: FinalChange | null;
+  /** What is lying in media/ that Heirloom doesn't know or that is in the wrong place (media.scan, DESIGN B.4); null
+   *  until the first scan, and for archives opened together. */
+  scan: MediaScan | null;
+  /** „Porządek w zdjęciach” (src/screens/media/TidyDialog.tsx) is open. */
+  tidyOpen: boolean;
   /** Start banners the user closed with ✕ (a kind of banner each); they come back at the next start. */
   hiddenBanners: string[];
   /** Set by the tree: its camera and selection, added to its route when the tree is left. */
@@ -195,6 +201,7 @@ interface Store {
    *  with `allowForeign` when the dialog asked about a file made by another program and was agreed to. */
   confirmFinal: (kind: FinalKind, run: FinalRun, extra?: Partial<FinalFacts>) => void;
   closeFinalChange: () => void;
+  setTidyOpen: (open: boolean) => void;
   setArchive: (status: ArchiveStatus) => void;
   go: (route: Route) => void;
   goBack: () => void;
@@ -308,6 +315,8 @@ export const useStore = create<Store>((set, get) => ({
   afterMode: "ready",
   busy: null,
   finalChange: null,
+  scan: null,
+  tidyOpen: false,
   hiddenBanners: [],
   treeSnapshot: null,
   setTreeSnapshot: (take) => set({ treeSnapshot: take }),
@@ -386,7 +395,7 @@ export const useStore = create<Store>((set, get) => ({
     flushPlace();
     await call("archive.close");
     const app = await call<AppState>("app.state");
-    set({ app, archive: null, phase: "picker", mode: "browse", editor: null, lastSave: null, section: null });
+    set({ app, archive: null, phase: "picker", mode: "browse", editor: null, lastSave: null, section: null, scan: null, tidyOpen: false });
   },
 
   finishFirstOpen: () => set({ phase: "ready" }),
@@ -395,12 +404,14 @@ export const useStore = create<Store>((set, get) => ({
     set({ archive: status, phase: get().afterMode, dataVersion: get().dataVersion + 1 });
     sayNotice(status);
     get().refreshApp().catch(() => {});
+    if (!status.combined) scanSoon(600);
   },
 
   adoptStatus: async (status) => {
     set({ archive: status, mode: "browse", editor: null, lastSave: null, section: null, leaveGuard: null, dataVersion: get().dataVersion + 1 });
     sayNotice(status);
     await get().refreshApp().catch(() => {});
+    if (!status.combined) scanSoon();
   },
 
   hideBanner: (kind) => set({ hiddenBanners: [...get().hiddenBanners, kind] }),
@@ -410,6 +421,7 @@ export const useStore = create<Store>((set, get) => ({
   undoWriteBack: () => undoWriteBack(),
   confirmFinal: (kind, run, extra) => set({ finalChange: { kind, run, extra } }),
   closeFinalChange: () => set({ finalChange: null }),
+  setTidyOpen: (open) => set({ tidyOpen: open }),
 
   setArchive: (status) => set({ archive: status }),
 
@@ -530,6 +542,7 @@ export const useStore = create<Store>((set, get) => ({
     set({ leaveGuard: null, section: null, lastSave: null });
     get().changed(status);
     set({ mode: "browse" });
+    scanSoon();
   },
 
   outsideSection: (then) => {
@@ -648,6 +661,7 @@ export const useStore = create<Store>((set, get) => ({
               // The undo steps and the last save's changes are gone with the reload.
               set({ section: null, lastSave: null });
               get().changed(status);
+              scanSoon();
               then();
             },
           },
@@ -700,8 +714,11 @@ async function opened(path: string, open: () => Promise<ArchiveStatus>): Promise
       section: null,
       recentlyViewed,
       treePlace: treePlaceOf(app),
+      scan: null,
+      tidyOpen: false,
     });
     if (status.combined) lookForPairs();
+    else if (!needsMode) scanSoon(600);
     if (!needsMode) sayNotice(status);
     return true;
   } catch (e) {

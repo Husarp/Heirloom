@@ -29,9 +29,11 @@ import { Dialog } from "../../components/Dialog";
 import { EmptyState, Spinner } from "../../components/bits";
 import { clock, count, dayMonth, plural } from "../../lib/format";
 import { askUndoImport } from "../import/undoImport";
+import { askUndo } from "../../app/layout";
+import { layoutJournal } from "../media/layoutText";
 import "./activity.css";
 
-type Filter = "all" | "person" | "media" | "relation" | "import" | "deleted";
+type Filter = "all" | "person" | "media" | "relation" | "import" | "deleted" | "layout";
 
 interface FeedRow {
   index: number;
@@ -56,6 +58,7 @@ const TABS: { value: Filter; label: string }[] = [
   { value: "relation", label: "Relacje" },
   { value: "import", label: "Import" },
   { value: "deleted", label: "Usunięte" },
+  { value: "layout", label: "Pliki" },
 ];
 
 const ICONS: Record<string, LucideIcon> = {
@@ -212,7 +215,15 @@ export function Activity() {
                       {clock(row.ts)} · {row.who}
                     </span>
                     {editing &&
-                      (undone.has(row.index) ? (
+                      (row.undo === "Cofnij porządkowanie" ? (
+                        // A run of „Uporządkuj” is taken back through its journal (files move back), not history.undo.
+                        layoutJournal(row.batch) && (
+                          <button className="btn secondary sm activity-undo" onClick={() => askUndo(layoutJournal(row.batch)!)}>
+                            <Undo2 size={13} />
+                            {row.undo}
+                          </button>
+                        )
+                      ) : undone.has(row.index) ? (
                         <button className="btn secondary sm activity-undo" disabled>
                           <Check size={13} />
                           {DONE[row.undo] ?? "Cofnięto"}
