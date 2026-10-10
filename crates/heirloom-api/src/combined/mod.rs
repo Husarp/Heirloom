@@ -68,6 +68,9 @@ pub struct Part {
     pub opened: Option<PathBuf>,
     pub root: Option<PathBuf>,
     pub data_path: Option<PathBuf>,
+    /// The archive is worked on here in „Nie ruszaj oryginału”: `root` is the folder of the user's changes, and the
+    /// files it doesn't have are in the original's folder, this one.
+    pub fallback: Option<PathBuf>,
     /// `ok`, `missing` (not found), `unreadable`, or `other` (found, but its id isn't the one the set remembers).
     pub state: &'static str,
     pub error: Option<String>,
@@ -91,6 +94,7 @@ impl Part {
             opened: None,
             root: None,
             data_path: None,
+            fallback: None,
             state: "missing",
             error: None,
             stamp: None,
@@ -106,9 +110,14 @@ impl Part {
 
     /// Reads an archive (`Archive::open` never writes anything), keeps its records and drops the rest: the combined
     /// view holds no `Archive`, so there is nothing it could save.
-    fn read(key: &str, path: &Path) -> Result<Part, ApiError> {
-        let archive = Archive::open(path)?;
-        let has_settings = archive.sidecar_path().join("ustawienia.json").is_file();
+    /// An archive worked on in „Nie ruszaj oryginału” on this computer (`overlays`: data key → folder of the changes) is
+    /// shown in the user's version, with the original's files.
+    fn read(key: &str, path: &Path, overlays: &HashMap<String, PathBuf>) -> Result<Part, ApiError> {
+        let original = Archive::open(path)?;
+        let has_settings = original.sidecar_path().join("ustawienia.json").is_file();
+        let mine = overlays.get(&crate::config::data_key(&original.data_path())).and_then(|folder| Archive::open(folder).ok());
+        let fallback = mine.as_ref().map(|_| original.root().to_path_buf());
+        let archive = mine.unwrap_or(original);
         let settings = archive.settings();
         let mut doc = archive.doc.clone();
         doc.upgrade_to_v7();
@@ -125,6 +134,7 @@ impl Part {
             opened: Some(std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())),
             root: Some(archive.root().to_path_buf()),
             data_path: Some(archive.data_path()),
+            fallback,
             state: "ok",
             error: None,
             stamp: stamp(&archive.data_path()),
@@ -139,9 +149,9 @@ impl Part {
     }
 
     /// An entry of the set file, found where it was saved (or last opened).
-    fn load(dir: &Path, entry: &Entry) -> Part {
+    fn load(dir: &Path, entry: &Entry, overlays: &HashMap<String, PathBuf>) -> Part {
         let Some(path) = setfile::locate(dir, entry) else { return Part::missing(entry) };
-        match Part::read(&entry.key, &path) {
+        match Part::read(&entry.key, &path, overlays) {
             Ok(mut part) => {
                 if !entry.id.is_empty() && !part.id.is_empty() && part.id != entry.id {
                     part.state = "other";
@@ -189,6 +199,8 @@ pub struct Combined {
     built: Option<Built>,
     /// „Do sprawdzenia”, worked out on the first `set.pairs`, then kept up to date by the decisions.
     pairs: Option<Vec<pairs::Pair>>,
+    /// Archives worked on in „Nie ruszaj oryginału” on this computer: data key → folder of the user's changes.
+    overlays: HashMap<String, PathBuf>,
     /// Families as last counted (the merged count once the view was built), while it waits for a rebuild.
     families: usize,
 }
@@ -198,19 +210,19 @@ fn now() -> String {
 }
 
 impl Combined {
-    pub fn open(path: &Path) -> Result<Combined, ApiError> {
+    pub fn open(path: &Path, overlays: HashMap<String, PathBuf>) -> Result<Combined, ApiError> {
         let set = setfile::read(path)?;
         let dir = path.parent().unwrap_or(Path::new("")).to_path_buf();
-        let parts: Vec<Part> = set.archives.iter().map(|e| Part::load(&dir, e)).collect();
+        let parts: Vec<Part> = set.archives.iter().map(|e| Part::load(&dir, e, &overlays)).collect();
         if !parts.iter().any(|p| p.doc.is_some()) {
             return Err(ApiError::new("set_empty", "Żadne archiwum z tego zestawu nie jest dostępne."));
         }
-        Ok(Combined::new(std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()), set, parts))
+        Ok(Combined::new(std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()), set, parts, overlays))
     }
 
     /// „Otwórz razem…”: writes a new set file of these archives (folders or GEDCOM files) and opens it. An existing set
     /// file (with its decisions) is replaced only when `replace` says the user confirmed that for this very file.
-    pub fn create(path: &Path, name: &str, archives: &[String], replace: bool) -> Result<Combined, ApiError> {
+    pub fn create(path: &Path, name: &str, archives: &[String], replace: bool, overlays: HashMap<String, PathBuf>) -> Result<Combined, ApiError> {
         let name = name.trim();
         if name.is_empty() {
             return Err(ApiError::new("bad_args", "Podaj nazwę zestawu."));
@@ -235,16 +247,16 @@ impl Combined {
         let mut parts: Vec<Part> = Vec::new();
         for archive in archives {
             let key = set.next_key();
-            let part = add_part(&dir, &mut set, &parts, &key, Path::new(archive))?;
+            let part = add_part(&dir, &mut set, &parts, &key, Path::new(archive), &overlays)?;
             parts.push(part);
         }
         setfile::write(&path, &set)?;
-        Ok(Combined::new(path, set, parts))
+        Ok(Combined::new(path, set, parts, overlays))
     }
 
-    fn new(path: PathBuf, set: SetFile, parts: Vec<Part>) -> Combined {
+    fn new(path: PathBuf, set: SetFile, parts: Vec<Part>, overlays: HashMap<String, PathBuf>) -> Combined {
         let families = parts.iter().map(|p| p.families).sum();
-        let mut c = Combined { path, set, parts, alias: HashMap::new(), resolved: Vec::new(), lost: Vec::new(), built: None, pairs: None, families };
+        let mut c = Combined { path, set, parts, alias: HashMap::new(), resolved: Vec::new(), lost: Vec::new(), built: None, pairs: None, overlays, families };
         c.resolve();
         c
     }
@@ -394,13 +406,13 @@ impl Combined {
                 let root = p.root.clone().filter(|_| p.doc.is_some())?;
                 // Thumbnails per archive, as when it is opened alone (an archive without settings: per set and key).
                 let id = if p.id.is_empty() { format!("{}-{}", self.set.id, p.key) } else { p.id.clone() };
-                Some(media::Roots { archive: root, thumbs: cache_root.map(|c| c.join(id).join("miniatury")), key: Some(p.key.clone()) })
+                Some(media::Roots { archive: root, fallback: p.fallback.clone(), thumbs: cache_root.map(|c| c.join(id).join("miniatury")), key: Some(p.key.clone()) })
             })
             .collect()
     }
 
     pub fn file_roots(&self) -> FileRoots {
-        FileRoots::Many(self.parts.iter().filter_map(|p| Some((p.key.clone(), p.root.clone()?))).collect())
+        FileRoots::Many(self.parts.iter().filter_map(|p| Some((p.key.clone(), p.root.iter().chain(&p.fallback).cloned().collect()))).filter(|(_, l): &(String, Vec<PathBuf>)| !l.is_empty()).collect())
     }
 
     pub fn people(&self) -> usize {
@@ -449,6 +461,7 @@ impl Combined {
                     "root": p.root.as_ref().map(|r| r.display().to_string()),
                     "path": p.opened.as_ref().map(|r| r.display().to_string()).or_else(|| entry.map(|e| e.last_path.clone())),
                     "dataPath": p.data_path.as_ref().map(|r| r.display().to_string()),
+                    "withChanges": p.fallback.is_some(),
                 })
             })
             .collect();
@@ -641,10 +654,10 @@ impl Combined {
                 let path = str_arg(args, "path")?;
                 let dir = self.dir();
                 let mut part = None;
-                let parts = &self.parts;
+                let (parts, overlays) = (&self.parts, &self.overlays);
                 self.set = setfile::modify(&self.path, |set| {
                     let key = set.next_key();
-                    part = Some(add_part(&dir, set, parts, &key, Path::new(&path))?);
+                    part = Some(add_part(&dir, set, parts, &key, Path::new(&path), overlays)?);
                     Ok(())
                 })?
                 .0;
@@ -680,7 +693,7 @@ impl Combined {
                 if is_set_path(&path) {
                     return Err(ApiError::new("bad_args", "Wskaż folder archiwum albo plik GEDCOM, nie zestaw."));
                 }
-                let mut part = Part::read(&key, Path::new(&path))?;
+                let mut part = Part::read(&key, Path::new(&path), &self.overlays)?;
                 if self.parts.iter().any(|p| p.key != key && p.same_data(&part)) {
                     return Err(ApiError::new("already_in_set", "To archiwum już jest w tym zestawie."));
                 }
@@ -858,7 +871,7 @@ impl Combined {
             if unchanged {
                 continue;
             }
-            let part = Part::load(&dir, &entry);
+            let part = Part::load(&dir, &entry, &self.overlays);
             match index {
                 Some(n) => {
                     let old = &self.parts[n];
@@ -894,11 +907,11 @@ fn same_place(a: Option<&Path>, b: Option<&Path>) -> bool {
 }
 
 /// Reads an archive for the set and adds its entry (refusing one that is already in it).
-fn add_part(dir: &Path, set: &mut SetFile, parts: &[Part], key: &str, path: &Path) -> Result<Part, ApiError> {
+fn add_part(dir: &Path, set: &mut SetFile, parts: &[Part], key: &str, path: &Path, overlays: &HashMap<String, PathBuf>) -> Result<Part, ApiError> {
     if is_set_path(&path.to_string_lossy()) {
         return Err(ApiError::new("bad_args", "Zestawu nie można dodać do zestawu — wybierz archiwum."));
     }
-    let part = Part::read(key, path).map_err(|e| ApiError::new(e.code, format!("Nie udało się otworzyć archiwum {}: {}", path.display(), e.message)))?;
+    let part = Part::read(key, path, overlays).map_err(|e| ApiError::new(e.code, format!("Nie udało się otworzyć archiwum {}: {}", path.display(), e.message)))?;
     let opened = part.opened.clone().unwrap_or_default();
     // Also an entry this window hasn't read yet (added in another window meanwhile).
     let listed = set.archives.iter().any(|e| same_place(setfile::locate(dir, e).as_deref(), Some(&opened)));

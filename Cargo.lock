@@ -1619,6 +1619,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "time",
+ "unicode-normalization",
  "ureq",
  "uuid",
  "zip",

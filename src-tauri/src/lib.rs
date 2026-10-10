@@ -7,7 +7,7 @@
 //! double-clicked `.heirloom-zestaw` file (the file type installer/setup.py registers): a Heirloom already open keeps
 //! its window, and the set opens in a new one.
 
-use heirloom_api::{Api, ApiError, media, running::RunningFile, update::Updater};
+use heirloom_api::{Api, ApiError, media, progress::Progress, running::RunningFile, update::Updater};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -39,9 +39,14 @@ async fn call(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     updater: tauri::State<'_, Updater>,
+    progress: tauri::State<'_, Progress>,
     method: String,
     args: Value,
 ) -> Result<Value, ApiError> {
+    // A long job (a backup .zip) holds the archive's lock: its progress and „Przerwij” are answered without it.
+    if method == "job.progress" || method == "job.cancel" {
+        return Ok(progress.call(&method));
+    }
     // Update checks wait on the internet, so they never take the archive's lock.
     if method.starts_with("update.") {
         let result = updater.call(&method, &args)?;
@@ -191,6 +196,11 @@ pub fn run() {
         Some((_, dir)) => Api::new(Some(dir.join("ustawienia")), Some(dir.join("cache"))),
         None => Api::with_default_dirs(),
     };
+    // Nor the real Documents folder (Moje zmiany, Kopie zapasowe).
+    if let Some((_, dir)) = &selftest {
+        api.set_home(dir.join("dom"));
+    }
+    let progress = api.progress();
     if let (Some((path, person)), None) = (open_args(std::env::args()), &selftest) {
         api.set_start(path, person);
     }
@@ -205,6 +215,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState(Mutex::new(api)))
+        .manage(progress)
         .manage(updater)
         .manage(running)
         .manage(SelfTest(selftest))

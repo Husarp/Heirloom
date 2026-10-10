@@ -87,6 +87,8 @@ pub struct SaveOptions<'a> {
     pub note: Option<&'a str>,
     /// The user confirmed saving into a file that came from another program.
     pub allow_foreign: bool,
+    /// Written into every history entry of this save (see [`history::Entry::kind`]).
+    pub kind: Option<&'a str>,
 }
 
 #[derive(Debug)]
@@ -295,6 +297,11 @@ impl Archive {
         self.origin() != Some(PRODUCT_ID)
     }
 
+    /// The records as they are on disk (as last read or saved).
+    pub fn saved(&self) -> &[Node] {
+        &self.saved
+    }
+
     pub fn has_unsaved_changes(&self) -> bool {
         self.doc.records != self.saved
     }
@@ -494,6 +501,11 @@ impl Archive {
                 entry.note = Some(note.trim().to_string());
             }
         }
+        if let Some(kind) = options.kind {
+            for entry in &mut entries {
+                entry.kind = Some(kind.to_string());
+            }
+        }
         // Records only moved (removed and added back unchanged) are still written, or "unsaved changes" would
         // never clear.
         if entries.is_empty() && self.doc.records == self.saved {
@@ -631,7 +643,7 @@ fn is_backup_of(name: &str, stem: &str) -> bool {
 }
 
 /// Writes a new file next to the target and swaps it in, so a crash never leaves a half-written file.
-fn write_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub fn write_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let name = path.file_name().map_or_else(|| "plik".into(), |n| n.to_string_lossy().into_owned());
     let temp = path.with_file_name(format!("{name}.tmp-{}", std::process::id()));
     {
@@ -687,7 +699,7 @@ fn folder_name(root: &Path) -> String {
 }
 
 /// "20260928-164005-123" in local time (UTC when the offset can't be read), safe in file names.
-fn compact_timestamp() -> String {
+pub fn compact_timestamp() -> String {
     let format = time::macros::format_description!("[year][month][day]-[hour][minute][second]-[subsecond digits:3]");
     let now = time::OffsetDateTime::now_utc();
     let local = time::UtcOffset::local_offset_at(now).map_or(now, |offset| now.to_offset(offset));
@@ -703,7 +715,7 @@ mod tests {
     }
 
     fn options() -> SaveOptions<'static> {
-        SaveOptions { author: "Ewa", batch: None, note: None, allow_foreign: false }
+        SaveOptions { author: "Ewa", batch: None, note: None, allow_foreign: false, kind: None }
     }
 
     #[test]
@@ -1148,5 +1160,16 @@ mod tests {
         assert!(archive.settings().editors[0].last_edited.is_some());
         let history = history::read(&archive.history_path()).unwrap();
         assert_eq!(history[0].note.as_deref(), Some("akty z Łęcznej"));
+    }
+
+    #[test]
+    fn the_kind_of_a_save_goes_into_every_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut archive = Archive::create(&dir.path().join("a"), "A").unwrap();
+        archive.apply_all(vec![Edit::Add(person("@I1@", "Jan /Nowak/")), Edit::Add(person("@I2@", "Anna /Nowak/"))]).unwrap();
+        archive.save(&SaveOptions { kind: Some("fromArchive"), ..options() }).unwrap();
+        let history = history::read(&archive.history_path()).unwrap();
+        assert_eq!(history.len(), 2);
+        assert!(history.iter().all(|e| e.kind.as_deref() == Some("fromArchive")));
     }
 }

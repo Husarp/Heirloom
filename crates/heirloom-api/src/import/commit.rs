@@ -13,7 +13,7 @@ use heirloom_core::gedcom::Node;
 use heirloom_core::SaveOptions;
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 fn batch_mark(node: &mut Node, batch: &str) {
     node.children.push(Node::with_value("_HLM_BATCH", batch));
@@ -140,7 +140,8 @@ pub fn commit(s: &mut Session, draft: &mut Draft, author: &str, note: Option<&st
     // copies this import made are removed again: a failed import leaves nothing behind in media/.
     let media_existed = root.join(MEDIA_DIR).is_dir();
     let mut created: Vec<PathBuf> = Vec::new();
-    let result = copy_files(&root, draft, &mut created).and_then(|copied| write(s, draft, &name, &copied, author, note, allow_foreign));
+    let layers = s.layers();
+    let result = copy_files(&layers, draft, &mut created).and_then(|copied| write(s, draft, &name, &copied, author, note, allow_foreign));
     if result.is_err() {
         // A file that can't be removed now (held by an antivirus) stays; the import already failed with its own message.
         for path in &created {
@@ -162,7 +163,7 @@ pub fn commit(s: &mut Session, draft: &mut Draft, author: &str, note: Option<&st
 }
 
 /// Copies the files the import saves into `media/` (M-label or name → path in the archive), noting each file created.
-fn copy_files(root: &Path, draft: &Draft, created: &mut Vec<PathBuf>) -> Result<HashMap<String, String>, ApiError> {
+fn copy_files(layers: &[PathBuf], draft: &Draft, created: &mut Vec<PathBuf>) -> Result<HashMap<String, String>, ApiError> {
     let batch = &draft.batch.merged;
     let mut copied: HashMap<String, String> = HashMap::new();
     for f in &draft.files {
@@ -173,7 +174,7 @@ fn copy_files(root: &Path, draft: &Draft, created: &mut Vec<PathBuf>) -> Result<
         if choice.is_some_and(|c| c.skip) || draft.duplicates.contains_key(&key) || (!described && !assigned) {
             continue;
         }
-        let (relative, new) = copy_new_into_archive(root, &f.path)?;
+        let (relative, new) = copy_new_into_archive(layers, &f.path)?;
         created.extend(new);
         copied.insert(key, relative);
     }
@@ -779,7 +780,7 @@ fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, St
     let applied = !edits.is_empty();
     s.archive.apply_all(edits)?;
     s.changed();
-    let report = match s.archive.save(&SaveOptions { author, batch: Some(name), note, allow_foreign }) {
+    let report = match s.archive.save(&SaveOptions { author, batch: Some(name), note, allow_foreign, kind: None }) {
         Ok(report) => report,
         Err(e) => {
             // Not written: the import must not stay in memory, or committing again would add it a second time.

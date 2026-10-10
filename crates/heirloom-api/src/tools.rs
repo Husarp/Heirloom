@@ -4,7 +4,7 @@
 
 use crate::derive::Derived;
 use crate::gedwrite::file_uri;
-use crate::media_edit::resolve;
+use crate::media_edit::resolve_in;
 use crate::{Api, ApiError, ApiResult, Session, str_arg};
 use heirloom_core::archive::{MEDIA_DIR, SIDECAR_DIR};
 use heirloom_core::gedcom::date::{Calendar, DateValue, Qualifier, Ymd};
@@ -63,6 +63,13 @@ fn write_failed(e: impl Display) -> ApiError {
     ApiError::new("io", format!("Nie można zapisać pliku: {e}"))
 }
 
+/// A file over 4 GB on a FAT32 disk (Windows error 223, EFBIG elsewhere).
+fn too_big(e: std::io::Error) -> Option<ApiError> {
+    matches!(e.raw_os_error(), Some(223) | Some(27)).then(|| {
+        ApiError::new("too_big", "Na tym dysku nie zmieści się plik większy niż 4 GB (np. pendrive FAT32). Wybierz inne miejsce.")
+    })
+}
+
 // ---------- Storage ----------
 
 /// "Zajęte miejsce": bytes per kind (photos and other files in `media/`, the AI files count as documents), the data
@@ -70,16 +77,20 @@ fn write_failed(e: impl Display) -> ApiError {
 fn storage(api: &mut Api) -> ApiResult {
     let cache_root = api.cache_root.clone();
     let s = api.session()?;
-    let root = s.archive.root();
+    // In „Nie ruszaj oryginału” the files of both folders, on the original's disk.
+    let layers = s.layers();
+    let root = layers.last().map_or(s.archive.root(), PathBuf::as_path);
     let (mut photos, mut documents) = (0, 0);
-    for (path, len) in files_in(&root.join(MEDIA_DIR)) {
-        if media_kind_for(None, None, path.to_str()) == MediaKind::Photo {
-            photos += len;
-        } else {
-            documents += len;
+    for layer in &layers {
+        for (path, len) in files_in(&layer.join(MEDIA_DIR)) {
+            if media_kind_for(None, None, path.to_str()) == MediaKind::Photo {
+                photos += len;
+            } else {
+                documents += len;
+            }
         }
+        documents += total_size(&layer.join(AI_DIR));
     }
-    documents += total_size(&root.join(AI_DIR));
     let backups = total_size(&s.archive.backup_dir());
     let cache = cache_root.map_or(0, |c| total_size(&c.join(&s.archive.settings().archive_id)));
     let data = fs::metadata(s.archive.data_path()).map_or(0, |m| m.len());
@@ -117,7 +128,7 @@ fn total_size(dir: &Path) -> u64 {
 }
 
 /// "D:" for a drive, `\\serwer\udział` for a network folder.
-fn disk_name(root: &Path) -> Option<String> {
+pub(crate) fn disk_name(root: &Path) -> Option<String> {
     let absolute = fs::canonicalize(root).ok()?;
     let Some(Component::Prefix(prefix)) = absolute.components().next() else { return None };
     match prefix.kind() {
@@ -143,29 +154,14 @@ pub(crate) fn last_backup(copies: &[PathBuf]) -> Option<String> {
 
 // ---------- Backup and GEDZIP ----------
 
-/// "Utwórz kopię (.zip)": the data file, `media/`, `zrodla-ai/` and Heirloom's own files from `.heirloom/` (not the
-/// copies of the data file in `.heirloom/kopie`), at their places in the archive folder.
+/// „Zapisz w innym miejscu…” (Kopie zapasowe): the archive as a .zip where the user chose (the same files as the
+/// automatic backup, [`crate::backup::selection`]).
 fn backup(s: &Session, target: &Path) -> ApiResult {
-    let root = s.archive.root();
-    outside_archive(root, target)?;
-    let mut entries = vec![(s.archive.settings().data_file.clone(), s.archive.data_path())];
-    for folder in [MEDIA_DIR, AI_DIR] {
-        for (path, _) in files_in(&root.join(folder)) {
-            if let Ok(relative) = path.strip_prefix(root) {
-                entries.push((zip_name(relative), path));
-            }
-        }
+    for layer in s.layers() {
+        outside_archive(&layer, target)?;
     }
-    if let Ok(list) = fs::read_dir(s.archive.sidecar_path()) {
-        for entry in list.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            // Files only (`kopie/` is a folder); a `.tmp-` file is a write in progress.
-            if entry.file_type().is_ok_and(|t| t.is_file()) && !name.contains(".tmp-") {
-                entries.push((format!("{SIDECAR_DIR}/{name}"), entry.path()));
-            }
-        }
-    }
-    let bytes = write_zip(target, None, &entries)?;
+    let entries = crate::backup::selection(s, "archive")?;
+    let bytes = write_zip(target, None, &entries, None)?;
     Ok(json!({ "path": target.display().to_string(), "bytes": bytes, "files": entries.len() }))
 }
 
@@ -173,8 +169,10 @@ fn backup(s: &Session, target: &Path) -> ApiResult {
 /// (percent-encoded, as `file_uri` writes it). Files kept elsewhere on the disk are packed into `media/`, and their
 /// FILE values changed in the exported copy only. The saved file is exported, not unsaved changes.
 fn export_gedzip(s: &Session, target: &Path) -> ApiResult {
-    let root = s.archive.root();
-    outside_archive(root, target)?;
+    let layers = s.layers();
+    for layer in &layers {
+        outside_archive(layer, target)?;
+    }
     let saved = fs::read(s.archive.data_path()).map_err(|e| ApiError::new("io", format!("Nie można odczytać pliku danych: {e}")))?;
     let (mut doc, _) = Document::from_bytes(&saved);
     let written_as = doc.version;
@@ -196,7 +194,7 @@ fn export_gedzip(s: &Session, target: &Path) -> ApiResult {
             return;
         }
         // A 5.5.1 file may write `zdjecia\Jan.jpg`: the same file on every system.
-        let source = resolve(root, &path.replace('\\', "/"));
+        let source = resolve_in(&layers, &path.replace('\\', "/"));
         if !source.is_file() {
             if !missing.contains(&path) {
                 missing.push(path);
@@ -210,7 +208,7 @@ fn export_gedzip(s: &Session, target: &Path) -> ApiResult {
         });
         file.value = Some(file_uri(name));
     });
-    let bytes = write_zip(target, Some(&doc.to_bytes()), &entries)?;
+    let bytes = write_zip(target, Some(&doc.to_bytes()), &entries, None)?;
     Ok(json!({ "path": target.display().to_string(), "bytes": bytes, "files": entries.len(), "missing": missing }))
 }
 
@@ -226,10 +224,12 @@ fn save_as_new(api: &mut Api, args: &Value) -> ApiResult {
     }
     let s = api.session()?;
     let root = s.archive.root().to_path_buf();
-    let same = match (fs::canonicalize(&folder), fs::canonicalize(&root)) {
+    let layers = s.layers();
+    // Neither the open folder nor, in „Nie ruszaj oryginału”, the original's.
+    let same = layers.iter().any(|root| match (fs::canonicalize(&folder), fs::canonicalize(root)) {
         (Ok(f), Ok(r)) => f == r,
-        _ => folder == root,
-    };
+        _ => folder == *root,
+    });
     if same {
         return Err(ApiError::new("inside_archive", "Wybierz inny folder niż ten, w którym jest obecny plik."));
     }
@@ -274,7 +274,7 @@ fn save_as_new(api: &mut Api, args: &Value) -> ApiResult {
         if path.is_empty() || is_url(&path) {
             return;
         }
-        let source = resolve(&root, &path);
+        let source = resolve_in(&layers, &path);
         if !source.is_file() {
             missing += 1;
             return;
@@ -309,7 +309,7 @@ fn save_as_new(api: &mut Api, args: &Value) -> ApiResult {
         if path.is_empty() || is_url(&path) {
             return;
         }
-        let source = resolve(&root, &path);
+        let source = resolve_in(&layers, &path);
         if let Some(name) = copied.get(&source) {
             file.value = Some(file_uri(name));
         } else if plan.contains_key(&source) {
@@ -317,8 +317,16 @@ fn save_as_new(api: &mut Api, args: &Value) -> ApiResult {
         }
     });
     let archive = heirloom_core::Archive::create_from_document(&folder, &name, doc)?;
+    // „Zachowaj je jako osobne archiwum…”: the folder of „Twoje zmiany” is done with.
+    let retire = args.get("retire").and_then(Value::as_bool).unwrap_or(false) && api.session.as_ref().is_some_and(|s| s.overlay.is_some());
+    let _ = &root;
+    if retire {
+        api.session = None;
+        crate::overlay::retire(&root, &format!("zachowane jako osobne archiwum {}", crate::overlay::today()));
+    }
     // The same family goes on in the new folder (same records, same ids), and so does an import in progress.
     let import = api.import.take();
+    api.record_in_place(&archive, &folder.display().to_string());
     let status = api.install(archive, &folder.display().to_string())?;
     api.import = import;
     Ok(json!({ "status": status, "copied": copied.len(), "failed": failed, "missing": missing }))
@@ -326,7 +334,7 @@ fn save_as_new(api: &mut Api, args: &Value) -> ApiResult {
 
 /// Backups and exports are written outside the archive folder, so nothing in it is ever replaced (and a backup never
 /// ends up inside what it protects).
-fn outside_archive(root: &Path, target: &Path) -> Result<(), ApiError> {
+pub(crate) fn outside_archive(root: &Path, target: &Path) -> Result<(), ApiError> {
     let folder = target
         .parent()
         .and_then(|p| fs::canonicalize(p).ok())
@@ -338,14 +346,9 @@ fn outside_archive(root: &Path, target: &Path) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// A path inside a zip: `media/Józef 1904.jpg`.
-fn zip_name(relative: &Path) -> String {
-    relative.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
-}
-
 /// Calls `f` with every FILE of a multimedia object: `0 @O1@ OBJE` records and objects written inside other records
 /// (GEDCOM 5.5.1). The header's FILE (in 5.5.1 the file's own name) is not a media file.
-fn for_each_file(nodes: &mut [Node], in_object: bool, f: &mut dyn FnMut(&mut Node)) {
+pub(crate) fn for_each_file(nodes: &mut [Node], in_object: bool, f: &mut dyn FnMut(&mut Node)) {
     for node in nodes {
         if in_object && node.tag == "FILE" {
             f(node);
@@ -357,7 +360,7 @@ fn for_each_file(nodes: &mut [Node], in_object: bool, f: &mut dyn FnMut(&mut Nod
 }
 
 /// A FILE value as a path, the way the app reads it (heirloom-core `view.rs`): GEDCOM 7 values are URIs.
-fn decode_file(value: &str, version: Version) -> String {
+pub(crate) fn decode_file(value: &str, version: Version) -> String {
     let value = value.trim();
     let value = value.strip_prefix("file:///").or_else(|| value.strip_prefix("file://")).unwrap_or(value);
     if version == Version::V7 || value.contains("%20") { percent_decode(value) } else { value.to_string() }
@@ -388,13 +391,13 @@ fn percent_decode(text: &str) -> String {
 }
 
 /// `https://…`: a file on the web, not on the disk (a drive letter is one character before the colon).
-fn is_url(path: &str) -> bool {
+pub(crate) fn is_url(path: &str) -> bool {
     path.split_once(':').is_some_and(|(scheme, _)| scheme.len() > 1 && scheme.chars().all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c)))
 }
 
 /// `media/Józef 1904.jpg` for a path written relative to the archive folder; None for absolute paths and paths that
 /// climb out of it (they are packed under a new name).
-fn inside_name(path: &str) -> Option<String> {
+pub(crate) fn inside_name(path: &str) -> Option<String> {
     let normalized = path.replace('\\', "/");
     if normalized.starts_with('/') || Path::new(path).is_absolute() {
         return None;
@@ -425,10 +428,10 @@ fn free_name(taken: &mut HashSet<String>, source: &Path) -> String {
 
 /// Writes the zip next to `target` under a temporary name and moves it into place when complete, so a failed run
 /// never leaves a half-written file that looks like a backup. Returns the zip's size.
-fn write_zip(target: &Path, gedcom: Option<&[u8]>, entries: &[(String, PathBuf)]) -> Result<u64, ApiError> {
+pub(crate) fn write_zip(target: &Path, gedcom: Option<&[u8]>, entries: &[(String, PathBuf)], progress: Option<&crate::progress::Progress>) -> Result<u64, ApiError> {
     let name = target.file_name().map_or_else(|| "kopia.zip".to_string(), |n| n.to_string_lossy().into_owned());
     let temp = target.with_file_name(format!("{name}.tmp-{}", std::process::id()));
-    let written = fill_zip(&temp, gedcom, entries).and_then(|()| fs::rename(&temp, target).map_err(write_failed));
+    let written = fill_zip(&temp, gedcom, entries, progress).and_then(|()| fs::rename(&temp, target).map_err(write_failed));
     if let Err(e) = written {
         let _ = fs::remove_file(&temp);
         return Err(e);
@@ -436,19 +439,25 @@ fn write_zip(target: &Path, gedcom: Option<&[u8]>, entries: &[(String, PathBuf)]
     Ok(fs::metadata(target).map_or(0, |m| m.len()))
 }
 
-fn fill_zip(path: &Path, gedcom: Option<&[u8]>, entries: &[(String, PathBuf)]) -> Result<(), ApiError> {
+fn fill_zip(path: &Path, gedcom: Option<&[u8]>, entries: &[(String, PathBuf)], progress: Option<&crate::progress::Progress>) -> Result<(), ApiError> {
     let mut zip = ZipWriter::new(std::io::BufWriter::new(fs::File::create(path).map_err(write_failed)?));
     if let Some(bytes) = gedcom {
         zip.start_file("gedcom.ged", entry_options("gedcom.ged", bytes.len() as u64, SystemTime::now())).map_err(write_failed)?;
         zip.write_all(bytes).map_err(write_failed)?;
     }
-    for (name, source) in entries {
+    for (n, (name, source)) in entries.iter().enumerate() {
+        if progress.is_some_and(|p| !p.step(n as u64)) {
+            return Err(ApiError::new("cancelled", "Przerwano tworzenie kopii — nic nie zostało zapisane."));
+        }
         let unreadable = |e: std::io::Error| ApiError::new("io", format!("Nie można odczytać pliku {name}: {e}"));
         let mut file = fs::File::open(source).map_err(unreadable)?;
         let meta = file.metadata().map_err(unreadable)?;
         let modified = meta.modified().unwrap_or_else(|_| SystemTime::now());
         zip.start_file(name.as_str(), entry_options(name, meta.len(), modified)).map_err(write_failed)?;
-        std::io::copy(&mut file, &mut zip).map_err(|e| ApiError::new("io", format!("Nie można skopiować pliku {name}: {e}")))?;
+        std::io::copy(&mut file, &mut zip).map_err(|e| {
+            let text = format!("Nie można skopiować pliku {name}: {e}");
+            too_big(e).unwrap_or_else(|| ApiError::new("io", text))
+        })?;
     }
     let file = zip.finish().map_err(write_failed)?.into_inner().map_err(write_failed)?;
     file.sync_all().map_err(write_failed)
@@ -482,7 +491,7 @@ fn problem(d: &Derived, kind: &str, message: String, person: Option<usize>) -> V
 /// aren't in the file, missing files, people without a name, children born before a parent or after a parent died,
 /// someone who is their own ancestor, families without anyone. Nothing is changed.
 fn check(s: &mut Session) -> Value {
-    let root = s.archive.root().to_path_buf();
+    let roots = s.file_roots();
     s.ensure();
     let d = s.derived.as_ref().expect("ensured");
     let doc = &s.archive.doc;
@@ -509,7 +518,7 @@ fn check(s: &mut Session) -> Value {
             owner_of.entry(link.object.as_str()).or_insert(i);
         }
     }
-    for id in crate::lists::missing_files(d, &crate::media_edit::FileRoots::One(root.to_path_buf())) {
+    for id in crate::lists::missing_files(d, &roots) {
         let file = d.view.media.get(&id).and_then(|m| m.file.clone()).unwrap_or_default();
         problems.push(problem(d, "missingFile", format!("Nie ma pliku {file}."), owner_of.get(id.as_str()).copied()));
     }
@@ -686,8 +695,10 @@ fn is_inside(path: &Path, folder: &Path) -> bool {
 /// "Eksportuj do pliku": this archive's display choices and this computer's appearance, as one small JSON file.
 fn export_settings(api: &mut Api, target: &Path) -> ApiResult {
     let s = api.session()?;
-    let (root, display) = (s.archive.root().to_path_buf(), s.archive.settings().display.clone());
-    outside_archive(&root, target)?;
+    let display = s.archive.settings().display.clone();
+    for layer in s.layers() {
+        outside_archive(&layer, target)?;
+    }
     let file = json!({ "format": SETTINGS_FORMAT, "version": 1, "display": display, "appearance": api.config.appearance });
     let text = serde_json::to_string_pretty(&file).map_err(write_failed)?;
     fs::write(target, text).map_err(write_failed)?;
@@ -758,6 +769,7 @@ mod tests {
         heirloom_gen::write_archive(&root, &options).unwrap();
         let mut api = Api::new(None, Some(dir.join("cache")));
         api.call("archive.open", json!({ "path": root.to_str().unwrap() })).unwrap();
+        api.call("archive.setWorkMode", json!({ "mode": "inPlace" })).unwrap();
         (api, root)
     }
 

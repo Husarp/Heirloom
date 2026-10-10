@@ -444,6 +444,7 @@ mod tests {
             before: Some("0 @I1@ INDI\n1 NAME Józef /Kowalski/\n1 BIRT\n2 DATE 1878\n".into()),
             after: Some("0 @I1@ INDI\n1 NAME Józef /Kowalski/\n2 NICK Dziadek Józek\n1 BIRT\n2 DATE 12 MAR 1878\n2 PLAC Wólka\n".into()),
             note: None,
+            kind: None,
         };
         let list = changes(&d, &entry);
         assert_eq!(list[0], json!({ "field": "Urodzenie · data", "old": "1878", "new": "12 marca 1878" }));

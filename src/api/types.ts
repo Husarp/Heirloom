@@ -61,6 +61,92 @@ export interface ArchiveStatus {
   lastSaved: string | null;
   /** Only when archives are opened together (a set): then the status is the set's, and `readOnly` is always on. */
   combined?: CombinedInfo;
+  /** How this person works with the archive on this computer: „Pracuj na archiwum”, „Nie ruszaj oryginału”, or null
+   *  until asked (the question on first open). Sets have none. */
+  workMode?: "inPlace" | "overlay" | null;
+  /** „Nie ruszaj oryginału”: where the user's changes are and what the archive doesn't have yet. `root`, `dataFile`
+   *  and `dataPath` above are the original's. */
+  overlay?: OverlayStatus | null;
+  /** Said once after opening (changes found again, a write-back finished, the archive's changes taken in). */
+  notice?: string;
+}
+
+export interface OverlayStatus {
+  /** The folder of „Twoje zmiany”. */
+  folder: string;
+  /** „Dokumenty › Heirloom › Moje zmiany › Rodzina Kowalskich”. */
+  folderLabel: string;
+  dataPath: string;
+  /** Changes (records) the archive doesn't have yet. */
+  pending: number;
+  /** Someone changed the archive since the last sync. */
+  originalChanged: boolean;
+  /** The archive can't be opened now (a pendrive unplugged). */
+  originalMissing: boolean;
+  lastWriteBack: string | null;
+  canUndoWriteBack: boolean;
+  /** A write-back that didn't finish: why, for the banner. */
+  interrupted: string | null;
+  /** The archive and the user's folder are on one disk (no close reminder then). */
+  sameDrive: boolean;
+}
+
+/** What the question „Jak chcesz pracować z tym archiwum?” shows. */
+export interface ModeInfo {
+  writable: boolean;
+  /** The program that made the file, when it isn't Heirloom. */
+  foreign: string | null;
+  usedBefore: boolean;
+  editors: Editor[];
+  folder: { path: string; label: string };
+  suggested: "inPlace" | "overlay";
+}
+
+/** Ustawienia › Archiwum › Twoje zmiany. */
+export interface OverlayInfo {
+  folder: string;
+  folderLabel: string;
+  pending: number;
+  people: number;
+  newFiles: number;
+  newBytes: number;
+  writable: boolean;
+  lockedOriginal: boolean;
+  lastWriteBack: string | null;
+  canUndoWriteBack: boolean;
+  originalChanged: boolean;
+  originalMissing: boolean;
+}
+
+/** What „Przenieś zmiany do archiwum” would do. */
+export interface WriteBackPreview {
+  changes: number;
+  people: number;
+  files: number;
+  bytes: number;
+  originalChanged: boolean;
+  foreign: { origin: string; version: string | null; dataFile: string } | null;
+  lockedOriginal: boolean;
+  writable: boolean;
+  originalMissing: boolean;
+  root: string;
+  name: string;
+}
+
+/** The automatic backup (.zip) of the archive: where it goes and what to warn about. */
+export interface BackupInfo {
+  folder: string;
+  folderLabel: string;
+  files: number;
+  bytes: number;
+  needed: number;
+  free: number | null;
+  lastZip: { path: string; at: string; bytes: number; exists: boolean } | null;
+  /** The last backup has exactly what the archive has now. */
+  current: boolean;
+  inOneDrive: boolean;
+  sameDisk: boolean;
+  cloudOnly: { files: number; bytes: number };
 }
 
 /** Archives opened together („Otwórz razem…”, crates/heirloom-api/src/combined). */
@@ -89,6 +175,8 @@ export interface CombinedArchive {
   /** The folder or .ged to open the archive by itself. */
   path: string | null;
   dataPath: string | null;
+  /** Shown in the user's version („Nie ruszaj oryginału” on this computer). */
+  withChanges?: boolean;
 }
 
 /** A name offered by „Kto edytuje?”. */

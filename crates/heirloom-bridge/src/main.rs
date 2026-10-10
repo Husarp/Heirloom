@@ -21,6 +21,8 @@ fn main() {
     }
     let dir = std::env::temp_dir().join("heirloom-bridge");
     let mut api = Api::new(Some(dir.join("config")), Some(dir.join("cache")));
+    // Its own Documents folder too („Moje zmiany”, „Kopie zapasowe”).
+    api.set_home(dir.join("dom"));
     if let Some(path) = open {
         if let Err(e) = api.open_path(&path) {
             eprintln!("could not open {path}: {}", e.message);

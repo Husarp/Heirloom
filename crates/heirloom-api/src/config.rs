@@ -1,5 +1,6 @@
-//! Settings that belong to this computer, not to an archive: the recent archives, the appearance, update checks
-//! and the last place in each archive. Stored in `%APPDATA%\Heirloom\aplikacja.json`.
+//! Settings that belong to this computer, not to an archive: the recent archives, the appearance, update checks,
+//! the last place in each archive and how this person works with each archive („Pracuj na archiwum” or „Nie ruszaj
+//! oryginału”). Stored in `%APPDATA%\Heirloom\aplikacja.json`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -24,6 +25,56 @@ pub struct AppConfig {
     /// server, one person's last screen must not move another's.
     pub places: BTreeMap<String, Place>,
     pub updates: Updates,
+    /// How this person works with each archive, by [`data_key`]. Never written into the archive: a relative given the
+    /// folder is asked again, and two people on one shared folder may choose differently.
+    pub archives: BTreeMap<String, ArchiveUse>,
+    /// Where the folders of „Twoje zmiany” go; none: `<Dokumenty>\Heirloom\Moje zmiany`.
+    pub changes_folder: Option<String>,
+    /// Where the automatic backups (.zip) go; none: `<Dokumenty>\Heirloom\Kopie zapasowe`.
+    pub backup_folder: Option<String>,
+}
+
+pub const IN_PLACE: &str = "inPlace";
+pub const OVERLAY: &str = "overlay";
+
+/// One archive as this person uses it on this computer.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ArchiveUse {
+    /// [`IN_PLACE`] or [`OVERLAY`].
+    pub mode: String,
+    /// The folder of „Twoje zmiany” (overlay mode).
+    pub overlay: Option<String>,
+    /// The path as it was opened (the folder or the `.ged`), for when the original can't be found.
+    pub opened: String,
+    /// Only when the archive has its own `ustawienia.json`.
+    pub archive_id: Option<String>,
+    pub data_file: String,
+    /// The data file's hash when it was last opened or saved here.
+    pub hash: Option<String>,
+    pub decided_at: String,
+    /// The automatic backups made on this computer (Heirloom deletes only these when it keeps the newest five).
+    pub zips: Vec<ZipInfo>,
+    /// Part B: the findings „Nie teraz” was said to.
+    pub tidy_seen: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ZipInfo {
+    pub path: String,
+    pub at: String,
+    pub bytes: u64,
+    /// The data file and the files as they were zipped: an unchanged archive needs no new backup.
+    pub data_hash: String,
+    pub media_sig: String,
+}
+
+/// The registry key of an archive: its data file's full path, lowercase (Windows ignores case; a mapped drive and its
+/// network path resolve to one path).
+pub fn data_key(data_path: &Path) -> String {
+    let full = std::fs::canonicalize(data_path).or_else(|_| std::path::absolute(data_path)).unwrap_or_else(|_| data_path.to_path_buf());
+    full.to_string_lossy().to_lowercase()
 }
 
 /// Where an archive was left, for „Po otwarciu archiwum: Ostatnie miejsce”.
@@ -136,6 +187,11 @@ impl AppConfig {
 
     pub fn forget(&mut self, path: &str) {
         self.recent.retain(|r| !same_path(&r.path, path));
+    }
+
+    /// Whether this path was opened before (the recent list).
+    pub fn seen(&self, path: &str) -> bool {
+        self.recent.iter().any(|r| same_path(&r.path, path))
     }
 
     /// Updates the parts of an archive's place that are given.
