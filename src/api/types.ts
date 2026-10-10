@@ -149,6 +149,49 @@ export interface BackupInfo {
   cloudOnly: { files: number; bytes: number };
 }
 
+/** `archive.backupAuto`: the .zip that was made. */
+export interface BackupResult {
+  path: string;
+  bytes: number;
+  files: number;
+}
+
+/** `job.progress` / `job.cancel` (answered without waiting for the running job). */
+export interface JobProgress {
+  running: boolean;
+  label: string;
+  done: number;
+  total: number;
+  cancelling: boolean;
+}
+
+/** `archive.writeBack` → { result, status }. */
+export interface WriteBackResult {
+  result: { changes: number; files: number; bytes: number };
+  status: ArchiveStatus;
+}
+
+/** One record changed on both sides (`archive.rebase`). Texts are the record as GEDCOM lines; null: deleted there. */
+export interface RebaseConflict {
+  key: string;
+  tag: string;
+  name: string;
+  /** The side kept when no choice is given. */
+  default: "mine" | "theirs";
+  mine: string | null;
+  theirs: string | null;
+  base: string | null;
+}
+
+/** `archive.rebase` → { result, status }. `merged: false` with `conflicts`: nothing was changed, choose and call again with
+ *  `choices` (or `preview: true` first, which never changes anything). */
+export interface RebaseResult {
+  result:
+    | { merged: true; fastForward: boolean; changes: number; conflicts: [] }
+    | { merged: false; conflicts: RebaseConflict[]; theirChanges: number; myChanges: number };
+  status: ArchiveStatus;
+}
+
 /** Archives opened together („Otwórz razem…”, crates/heirloom-api/src/combined). */
 export interface CombinedInfo {
   setPath: string;

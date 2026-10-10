@@ -137,6 +137,10 @@ fn the_first_open_asks_and_nothing_is_written_before_the_answer() {
         ("archive.setSettings", json!({ "display": { "x": 1 } })),
         ("import.commit", json!({ "author": "Ewa" })),
         ("history.undo", json!({ "index": 0 })),
+        ("archive.saveAsCopy", Value::Null),
+        ("settings.import", json!({ "path": path(&dir.path().join("x.json")) })),
+        ("source.create", json!({})),
+        ("place.rename", json!({})),
     ] {
         assert_eq!(code(&mut api, method, args), "mode_unset", "{method}");
     }
@@ -373,6 +377,60 @@ fn a_changed_original_is_taken_in_and_merged() {
     // The merge is one change of its own, from the archive.
     let history = fs::read_to_string(PathBuf::from(result["status"]["sidecar"].as_str().unwrap()).join("historia.jsonl")).unwrap();
     assert!(history.lines().last().unwrap().contains("\"kind\":\"fromArchive\""));
+    let feed = run(&mut again, "history.feed", json!({ "filter": "all", "limit": 50 }));
+    assert_eq!(feed["rows"][0]["who"], "Zmiany z archiwum", "{feed}");
+}
+
+#[test]
+fn rebase_preview_changes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = family(dir.path());
+    let mut api = computer(dir.path(), "ten");
+    overlay_mode(&mut api, &original);
+    run(&mut api, "person.create", json!({ "given": "Anna" }));
+    run(&mut api, "archive.save", json!({ "author": "Ewa" }));
+    their_edit(dir.path(), &original, "Janek");
+    let before = snapshot(&PathBuf::from(run(&mut api, "archive.status", Value::Null)["overlay"]["folder"].as_str().unwrap()));
+    let result = run(&mut api, "archive.rebase", json!({ "preview": true }))["result"].clone();
+    assert_eq!((result["merged"].as_bool(), result["conflicts"].as_array().map(Vec::len)), (Some(false), Some(0)));
+    assert_eq!((result["theirChanges"].as_u64(), result["myChanges"].as_u64()), (Some(1), Some(1)));
+    let status = run(&mut api, "archive.status", Value::Null);
+    assert_eq!((status["overlay"]["originalChanged"].as_bool(), status["unsavedChanges"].as_u64()), (Some(true), Some(0)));
+    assert_eq!(snapshot(&PathBuf::from(status["overlay"]["folder"].as_str().unwrap())), before, "nothing was written");
+    // The real thing then merges.
+    assert_eq!(run(&mut api, "archive.rebase", json!({}))["result"]["merged"], true);
+}
+
+/// Moving files (Part B) is saved as a batch of kind "layout": not an import, and not undone line by line.
+#[test]
+fn layout_entries_are_not_imports_and_are_not_undone_one_by_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = family(dir.path());
+    let history = original.join(".heirloom").join("historia.jsonl");
+    let entry = heirloom_core::history::Entry {
+        ts: "2026-10-10T10:00:00Z".into(),
+        author: "Ewa".into(),
+        batch: Some("porzadkowanie-1".into()),
+        action: heirloom_core::history::Action::Update,
+        record: "@O1@".into(),
+        tag: "OBJE".into(),
+        before: None,
+        after: None,
+        note: Some("Uporządkowano pliki".into()),
+        kind: Some("layout".into()),
+    };
+    heirloom_core::history::append(&history, &[entry]).unwrap();
+    let mut api = computer(dir.path(), "ten");
+    run(&mut api, "archive.open", json!({ "path": path(&original) }));
+    run(&mut api, "archive.setWorkMode", json!({ "mode": "inPlace" }));
+    let imports = run(&mut api, "import.history", Value::Null);
+    assert!(imports.as_array().unwrap().iter().all(|b| b["name"] != "porzadkowanie-1"), "{imports}");
+    let feed = run(&mut api, "history.feed", json!({ "filter": "all", "limit": 50 }));
+    let row = feed["rows"].as_array().unwrap().iter().find(|r| r["batch"] == "porzadkowanie-1").unwrap();
+    assert_eq!((row["action"].as_str(), row["undo"].as_str()), (Some("Uporządkowano pliki"), Some("Cofnij porządkowanie")));
+    assert_eq!(code(&mut api, "history.undo", json!({ "batch": "porzadkowanie-1" })), "layout_entry");
+    let index = row["index"].clone();
+    assert_eq!(code(&mut api, "history.undo", json!({ "index": index })), "layout_entry");
 }
 
 #[test]
@@ -651,6 +709,13 @@ fn backups_in_overlay_mode_and_restore() {
     let names = zip_names(Path::new(&mine_zip));
     assert!(names.contains(&"media/anna.jpg".to_string()) && names.contains(&"media/jan.jpg".to_string()), "{names:?}");
     assert!(!names.iter().any(|n| n.ends_with("oryginal.json") || n.ends_with("baza.ged")));
+    // Never inside the user's folder, nor inside the original.
+    let mine_folder = PathBuf::from(run(&mut api, "archive.status", Value::Null)["overlay"]["folder"].as_str().unwrap());
+    for inside in [mine_folder.join("kopie"), original.join("kopie")] {
+        run(&mut api, "app.setBackupFolder", json!({ "folder": path(&inside) }));
+        assert_eq!(code(&mut api, "archive.backupAuto", json!({})), "inside_archive", "{inside:?}");
+    }
+    run(&mut api, "app.setBackupFolder", json!({ "folder": path(&dir.path().join("kopie-zapasowe")) }));
     // The original itself.
     let original_zip = run(&mut api, "archive.backupAuto", json!({ "scope": "original" }))["path"].as_str().unwrap().to_string();
     let names = zip_names(Path::new(&original_zip));
@@ -685,4 +750,29 @@ fn a_restore_refuses_paths_out_of_its_folder() {
     let empty = dir.path().join("pusty.zip");
     zip::ZipWriter::new(fs::File::create(&empty).unwrap()).finish().unwrap();
     assert_eq!(code(&mut api, "archive.restore", json!({ "zip": path(&empty), "folder": path(&dir.path().join("cel")) })), "bad_file");
+}
+
+/// A 5.5.1 file of another program: the user's version is GEDCOM 7 after the first save, the archive still 5.5.1.
+#[test]
+fn a_5_5_1_original_is_merged_after_conversion() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("Pobrane");
+    fs::create_dir_all(&folder).unwrap();
+    let ged = "0 HEAD\n1 SOUR MYHERITAGE\n1 GEDC\n2 VERS 5.5.1\n1 CHAR UTF-8\n0 @I1@ INDI\n1 NAME Jan /Nowak/\n0 @I2@ INDI\n1 NAME Ewa /Nowak/\n0 TRLR\n";
+    fs::write(folder.join("drzewo.ged"), ged).unwrap();
+    let mut api = computer(dir.path(), "ten");
+    run(&mut api, "archive.open", json!({ "path": path(&folder.join("drzewo.ged")) }));
+    run(&mut api, "archive.setWorkMode", json!({ "mode": "overlay" }));
+    run(&mut api, "person.create", json!({ "given": "Anna", "surname": "Nowak" }));
+    run(&mut api, "archive.save", json!({ "author": "Ewa" }));
+    assert_eq!(run(&mut api, "archive.status", Value::Null)["gedcomVersion"], "7.0");
+    // The other program changes its file (still 5.5.1).
+    fs::write(folder.join("drzewo.ged"), ged.replace("Jan /Nowak/", "Janek /Nowak/")).unwrap();
+    assert_eq!(run(&mut api, "archive.status", Value::Null)["overlay"]["originalChanged"], true);
+    let preview = run(&mut api, "archive.rebase", json!({ "preview": true }))["result"].clone();
+    assert_eq!((preview["conflicts"].as_array().map(Vec::len), preview["theirChanges"].as_u64()), (Some(0), Some(1)), "{preview}");
+    assert_eq!(run(&mut api, "archive.rebase", json!({}))["result"]["merged"], true);
+    let people = run(&mut api, "people.list", json!({}))["people"].clone();
+    let names: Vec<&str> = people.as_array().unwrap().iter().map(|p| p["given"].as_str().unwrap()).collect();
+    assert!(names.contains(&"Janek") && names.contains(&"Anna") && names.contains(&"Ewa") && !names.contains(&"Jan"), "{names:?}");
 }

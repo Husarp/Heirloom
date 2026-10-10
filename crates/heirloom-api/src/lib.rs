@@ -430,8 +430,10 @@ impl Api {
                         .map(|(k, v)| (k.clone(), if v.as_str() == Some("theirs") { overlay::merge::Side::Theirs } else { overlay::merge::Side::Mine }))
                         .collect()
                 });
+                // `preview`: only says what a merge would do (the conflicts, the counts); nothing changes.
+                let preview = args.get("preview").and_then(Value::as_bool).unwrap_or(false);
                 let s = self.session()?;
-                let result = overlay::writeback::rebase(s, choices)?;
+                let result = overlay::writeback::rebase(s, choices, preview)?;
                 Ok(json!({ "result": result, "status": self.archive_status()? }))
             }
             "archive.discardOverlay" => self.discard_overlay(),
@@ -597,6 +599,10 @@ impl Api {
                 vec![entries.get(index).ok_or_else(|| ApiError::bad_args("index"))?]
             }
         };
+        // Moving files (Part B) has its own button: undoing its lines one by one would unlink the files it moved.
+        if targets.iter().any(|e| e.kind.as_deref() == Some("layout")) {
+            return Err(ApiError::new("layout_entry", "Przenoszenie plików cofniesz przyciskiem „Cofnij porządkowanie”."));
+        }
         let parse = |text: &str| {
             heirloom_core::gedcom::Document::from_bytes(text.as_bytes()).0.records.into_iter().find(|r| r.tag != "HEAD" && r.tag != "TRLR")
         };
@@ -843,7 +849,7 @@ impl Api {
                 overlay::writeback::settle_if_stale(&root, info);
             }
             let fast_forward = s.overlay.as_ref().is_some_and(|i| i.interrupted.is_none() && i.original_changed() && i.pending(&s.archive) == 0);
-            if fast_forward && overlay::writeback::rebase(s, None).is_ok_and(|r| r["merged"] == true) {
+            if fast_forward && overlay::writeback::rebase(s, None, false).is_ok_and(|r| r["merged"] == true) {
                 notices.push("Wczytano nowe zmiany z archiwum.".into());
             }
         }

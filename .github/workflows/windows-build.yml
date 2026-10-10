@@ -40,6 +40,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
+      # The cfg(windows) tests (no-replace moves, held files, read-only folders) run nowhere else.
+      - name: Rust tests (cargo test --workspace)
+        shell: pwsh
+        run: |
+          cargo test --workspace --no-fail-fast
+          if ($LASTEXITCODE) { throw "cargo test failed" }
+
       - name: Build (scripts/build.ps1)
         shell: pwsh
         run: pwsh -NoProfile -File scripts/build.ps1

@@ -185,5 +185,21 @@ class SetFileType(unittest.TestCase):
         self.assertEqual([k for k in registry.keys if "heirloom" in k], [])
 
 
+class OwnData(unittest.TestCase):
+    def test_the_users_changes_and_backups_are_never_uninstalled(self):
+        """„Moje zmiany” may hold work no archive has yet, and „Kopie zapasowe” is the family's backup (design A.13)."""
+        source = (__import__("pathlib").Path(setup.__file__)).read_text(encoding="utf-8")
+        line = next(l for l in source.splitlines() if l.startswith("OWN_DATA = "))
+        local, roaming = PureWindowsPath(r"C:\Users\Ala\AppData\Local"), PureWindowsPath(r"C:\Users\Ala\AppData\Roaming")
+        own = eval(line.split("=", 1)[1], {"LOCAL": local, "ROAMING": roaming})
+        self.assertTrue(own, "the program's own data is listed")
+        for kept in (local / "Heirloom" / "Moje zmiany", PureWindowsPath(r"C:\Users\Ala\Documents\Heirloom"),
+                     PureWindowsPath(r"C:\Users\Ala\Documents\Heirloom\Moje zmiany"),
+                     PureWindowsPath(r"C:\Users\Ala\Documents\Heirloom\Kopie zapasowe")):
+            for folder in own:
+                self.assertNotIn(folder, (kept, *kept.parents), f"{folder} would remove {kept}")
+                self.assertNotIn(kept, folder.parents, f"{folder} lies inside {kept}")
+
+
 if __name__ == "__main__":
     unittest.main()

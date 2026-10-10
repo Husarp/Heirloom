@@ -693,7 +693,7 @@ pub fn apply_records(archive: &mut Archive, target: &[Node]) -> Result<usize, Ap
 /// „Połącz” (A.9): the archive's changes since the last sync merged into „Twoje zmiany”. Without `choices`, a merge with
 /// conflicts changes nothing and returns them; with them, it is applied and saved as one change („Zmiany z archiwum”),
 /// and the archive as it is now becomes the base.
-pub fn rebase(s: &mut Session, choices: Option<HashMap<String, Side>>) -> ApiResult {
+pub fn rebase(s: &mut Session, choices: Option<HashMap<String, Side>>, preview: bool) -> ApiResult {
     let root = s.archive.root().to_path_buf();
     if s.archive.has_unsaved_changes() {
         return Err(unsaved());
@@ -706,17 +706,26 @@ pub fn rebase(s: &mut Session, choices: Option<HashMap<String, Side>>) -> ApiRes
     let theirs_bytes = fs::read(&info.original_data_path).map_err(io_error)?;
     let (mut theirs, _) = Document::from_bytes(&theirs_bytes);
     // One form for all three: GEDCOM 7 when either side is.
+    // A preview changes nothing, so it converts a copy.
+    let mut mine_doc = if preview { Some(s.archive.doc.clone()) } else { None };
     if theirs.version == Version::V7 && s.archive.doc.version != Version::V7 {
-        s.archive.upgrade_to_v7();
-        s.changed();
+        match mine_doc.as_mut() {
+            Some(doc) => {
+                doc.upgrade_to_v7();
+            }
+            None => {
+                s.archive.upgrade_to_v7();
+                s.changed();
+            }
+        }
     }
     let info = s.overlay.as_ref().ok_or_else(not_overlay)?;
-    let version = s.archive.doc.version;
+    let version = mine_doc.as_ref().map_or(s.archive.doc.version, |d| d.version);
     if version == Version::V7 {
         theirs.upgrade_to_v7();
     }
     let base = info.base_as(version);
-    let mine = s.archive.doc.records.clone();
+    let mine = mine_doc.map_or_else(|| s.archive.doc.records.clone(), |d| d.records);
     let fast_forward = heirloom_core::history::diff(&base, &mine, "", None).iter().all(|e| e.tag == "HEAD");
     let merged = if fast_forward {
         merge::Merge { records: theirs.records.clone(), ..merge::Merge::default() }
@@ -728,7 +737,7 @@ pub fn rebase(s: &mut Session, choices: Option<HashMap<String, Side>>) -> ApiRes
             )
         })?
     };
-    if choices.is_none() && !merged.conflicts.is_empty() {
+    if preview || (choices.is_none() && !merged.conflicts.is_empty()) {
         let mine_pending = info.pending(&s.archive);
         let d = s.derived();
         let conflicts: Vec<Value> = merged

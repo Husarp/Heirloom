@@ -1009,7 +1009,8 @@ fn history(s: &Session) -> Value {
     // Each batch's records as they were before it (the oldest entry of a record in the batch).
     let mut before: HashMap<&str, Vec<(&str, &Option<String>)>> = HashMap::new();
     for e in &entries {
-        let Some(batch) = &e.batch else { continue };
+        // Moving files (kind "layout") is saved under a batch too, but it is not an import.
+        let Some(batch) = e.batch.as_ref().filter(|_| e.kind.is_none()) else { continue };
         let current = now.entry(e.record.as_str()).or_insert_with(|| s.archive.doc.record(&e.record).map(heirloom_core::history::record_text));
         let active = e.tag != "HEAD" && e.after.is_some() && *current == e.after;
         if e.tag != "HEAD" {
