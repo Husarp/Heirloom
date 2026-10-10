@@ -213,9 +213,14 @@ pub fn read_base(root: &Path) -> Option<Document> {
     Some(Document::from_bytes(&bytes).0)
 }
 
-/// A finished overlay is renamed so it is never taken for current changes; when the rename fails (the folder open in
-/// Explorer), it is marked in its manifest instead. Returns the folder's new place.
+/// A finished overlay is renamed so it is never taken for current changes. It is marked in its manifest first, so
+/// that even when the rename fails (the folder open in Explorer) — or the folder is opened directly later under its
+/// new name — it can never be taken for the current changes of the original. Returns the folder's new place.
 pub fn retire(root: &Path, words: &str) -> PathBuf {
+    if let Some(mut manifest) = read_manifest(root) {
+        manifest.retired = true;
+        let _ = write_manifest(root, &manifest);
+    }
     let name = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let parent = root.parent().unwrap_or(Path::new(""));
     // Not through free_folder: its 60-character cut would take the date and „można usunąć” off the end.
@@ -229,10 +234,6 @@ pub fn retire(root: &Path, words: &str) -> PathBuf {
     }
     if fsx::move_no_replace(root, &target).is_ok() {
         return target;
-    }
-    if let Some(mut manifest) = read_manifest(root) {
-        manifest.retired = true;
-        let _ = write_manifest(root, &manifest);
     }
     root.to_path_buf()
 }

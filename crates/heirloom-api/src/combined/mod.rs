@@ -71,6 +71,8 @@ pub struct Part {
     /// The archive is worked on here in „Nie ruszaj oryginału”: `root` is the folder of the user's changes, and the
     /// files it doesn't have are in the original's folder, this one.
     pub fallback: Option<PathBuf>,
+    /// With `fallback`: how many records of the user's version the archive doesn't have yet.
+    pub pending: usize,
     /// `ok`, `missing` (not found), `unreadable`, or `other` (found, but its id isn't the one the set remembers).
     pub state: &'static str,
     pub error: Option<String>,
@@ -95,6 +97,7 @@ impl Part {
             root: None,
             data_path: None,
             fallback: None,
+            pending: 0,
             state: "missing",
             error: None,
             stamp: None,
@@ -117,6 +120,10 @@ impl Part {
         let has_settings = original.sidecar_path().join("ustawienia.json").is_file();
         let mine = overlays.get(&crate::config::data_key(&original.data_path())).and_then(|folder| Archive::open(folder).ok());
         let fallback = mine.as_ref().map(|_| original.root().to_path_buf());
+        let pending = mine
+            .as_ref()
+            .and_then(|m| Some(crate::overlay::OverlayInfo::new(m.root(), crate::overlay::read_manifest(m.root())?, false).pending(m)))
+            .unwrap_or(0);
         let archive = mine.unwrap_or(original);
         let settings = archive.settings();
         let mut doc = archive.doc.clone();
@@ -135,6 +142,7 @@ impl Part {
             root: Some(archive.root().to_path_buf()),
             data_path: Some(archive.data_path()),
             fallback,
+            pending,
             state: "ok",
             error: None,
             stamp: stamp(&archive.data_path()),
@@ -462,6 +470,7 @@ impl Combined {
                     "path": p.opened.as_ref().map(|r| r.display().to_string()).or_else(|| entry.map(|e| e.last_path.clone())),
                     "dataPath": p.data_path.as_ref().map(|r| r.display().to_string()),
                     "withChanges": p.fallback.is_some(),
+                    "pending": p.pending,
                 })
             })
             .collect();
