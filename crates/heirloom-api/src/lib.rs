@@ -569,7 +569,18 @@ impl Api {
                 }
             }
             // Part B: where the photos lie in media/. The scan and the preview only read.
-            "media.scan" => Ok(layout::run_scan(self.session()?)),
+            "media.scan" => {
+                let s = self.session()?;
+                let mut report = layout::run_scan(s);
+                let key = match &s.overlay {
+                    Some(info) => info.manifest.original.data_path.to_lowercase(),
+                    None => data_key(&s.archive.data_path()),
+                };
+                // „Nie teraz” was said to exactly these findings (on this computer).
+                let seen = self.config.archives.get(&key).and_then(|u| u.tidy_seen.as_ref());
+                report["seen"] = json!(seen.is_some_and(|f| report["fingerprint"].as_str() == Some(f.as_str())));
+                Ok(report)
+            }
             "media.restructurePreview" => layout::engine::preview(self.session()?, &args),
             "media.fixMoved" | "media.assign" | "media.leaveAlone" | "media.setLayout" | "media.restructure" | "media.finishRestructure" | "media.undoRestructure" | "media.tidySeen" => {
                 self.mode_chosen()?;

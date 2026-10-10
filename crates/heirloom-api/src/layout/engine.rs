@@ -63,6 +63,12 @@ pub struct Move {
     pub objects: Vec<String>,
     #[serde(default)]
     pub unknown: bool,
+    /// The file as it was when the plan was made. A move keeps size and time, so a cut-off run finds its file again by
+    /// them (never by the name alone: another file may have taken it).
+    #[serde(default)]
+    pub size: u64,
+    #[serde(default)]
+    pub mtime: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -316,7 +322,7 @@ fn build_plan(s: &mut Session, opts: &PlanOptions) -> Result<Plan, ApiError> {
             plan.edits.insert(t.objs[i].id.clone(), FileEdit { before: t.objs[i].raw.clone(), after: file_uri(&to) });
         }
         plan.bytes += f.size;
-        plan.moves.push(Move { from: f.rel.clone(), to, objects: object_ids, unknown: objs.is_none() });
+        plan.moves.push(Move { from: f.rel.clone(), to, objects: object_ids, unknown: objs.is_none(), size: f.size, mtime: f.mtime });
     }
     shorten_long_paths(&root, &folders, &mut plan);
     let mut new_folders: Vec<String> = Vec::new();
@@ -489,16 +495,49 @@ pub fn finish(s: &mut Session, progress: &Progress, args: &Value) -> ApiResult {
     if s.archive.upgrade_to_v7() {
         s.changed();
     }
-    // A file already at its new place counts as moved, whatever the journal says (the run may have been cut off between
-    // the move and its line).
-    let root = s.archive.root().to_path_buf();
-    for (i, m) in journal.moves.iter().enumerate() {
-        if !journal.done.contains_key(&i) && path_of(&root, &m.to).is_file() && !path_of(&root, &m.from).is_file() {
-            journal.done.insert(i, m.to.clone());
-        }
-    }
+    // The run may have been cut off between a move and its line in the journal.
+    find_unrecorded(s.archive.root(), &mut journal);
     let options = RunOptions { author, allow_foreign, set_layout: journal.layout.as_deref().and_then(Layout::parse), assign_to: None };
     execute(s, progress, journal, &options)
+}
+
+fn mtime_of(path: &Path) -> i64 {
+    std::fs::metadata(path).ok().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs() as i64)
+}
+
+/// A run can be cut off between a move and its line in the journal. Such a file is found again by what a move keeps —
+/// its size and time — in the folder it was going to: at its planned name, or at the next free name when the planned one
+/// had been taken. A file of the same name but other contents is NOT the moved file. Nothing is changed.
+fn find_unrecorded(root: &Path, j: &mut Journal) {
+    for i in 0..j.moves.len() {
+        if j.done.contains_key(&i) {
+            continue;
+        }
+        let m = &j.moves[i];
+        if m.mtime == 0 || path_of(root, &m.from).exists() {
+            continue;
+        }
+        let (dir, name) = split_path(&m.to);
+        let (stem, ext) = name_parts(name);
+        let mut found: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir(path_of(root, dir)).into_iter().flatten().flatten() {
+            let file = entry.file_name().to_string_lossy().into_owned();
+            let (fstem, fext) = name_parts(&file);
+            // The planned name, or "name (2)", "name (3)" …
+            let numbered = fstem.strip_prefix(stem.as_str()).is_some_and(|rest| rest.is_empty() || (rest.starts_with(" (") && rest.ends_with(')') && rest[2..rest.len() - 1].bytes().all(|b| b.is_ascii_digit())));
+            if !numbered || name_key(&fext) != name_key(&ext) {
+                continue;
+            }
+            let path = entry.path();
+            if entry.metadata().is_ok_and(|md| md.is_file() && md.len() == m.size) && mtime_of(&path) == m.mtime {
+                found.push(join_rel(dir, &file));
+            }
+        }
+        // Several files that look alike: not decided here (the moved map keeps the photo visible).
+        if let [only] = found.as_slice() {
+            j.done.insert(i, only.clone());
+        }
+    }
 }
 
 /// The next free name for a file whose planned name has been taken.
@@ -577,6 +616,7 @@ fn execute(s: &mut Session, progress: &Progress, mut journal: Journal, options: 
             }
         }
         if STOP_AFTER.with(|s| s.get()).is_some_and(|n| done_now >= n) {
+            s.layout_interrupted = interrupted(&sidecar);
             return Err(ApiError::new("stopped_for_test", "stopped"));
         }
     }
@@ -736,6 +776,12 @@ fn move_back(root: &Path, j: &Journal) -> (HashSet<usize>, usize) {
     (back, failed)
 }
 
+/// The two files Windows puts in folders by itself; only these are deleted with an emptied folder (a „~$…” or
+/// `.tmp-123` file may be somebody's work in progress).
+fn is_leftover(name: &str) -> bool {
+    matches!(name.to_lowercase().as_str(), "thumbs.db" | "desktop.ini")
+}
+
 /// Removes the folders the moved files left, when they are empty (Thumbs.db and desktop.ini go too, but only when they
 /// are the last entries). Never `media/` itself, never a folder with anything else in it. Returns the folders removed.
 fn remove_empty_parents<'a>(root: &Path, files: impl Iterator<Item = &'a str>) -> Vec<String> {
@@ -755,7 +801,7 @@ fn remove_empty_parents<'a>(root: &Path, files: impl Iterator<Item = &'a str>) -
         let path = path_of(root, &dir);
         let Ok(entries) = std::fs::read_dir(&path) else { continue };
         let names: Vec<(String, bool)> = entries.flatten().map(|e| (e.file_name().to_string_lossy().into_owned(), e.file_type().is_ok_and(|k| k.is_file()))).collect();
-        if names.iter().any(|(n, file)| !file || !fsx::is_noise(n)) {
+        if names.iter().any(|(n, file)| !file || !is_leftover(n)) {
             continue;
         }
         for (n, _) in &names {
@@ -785,12 +831,8 @@ pub fn undo(s: &mut Session, progress: &Progress, args: &Value) -> ApiResult {
         s.changed();
     }
     let root = s.archive.root().to_path_buf();
-    // A file whose line is missing (cut off) but that stands at its new place counts as moved.
-    for (i, m) in journal.moves.iter().enumerate() {
-        if !journal.done.contains_key(&i) && path_of(&root, &m.to).is_file() && !path_of(&root, &m.from).is_file() {
-            journal.done.insert(i, m.to.clone());
-        }
-    }
+    // A file whose line is missing (cut off) is found by its size and time (see `find_unrecorded`).
+    find_unrecorded(&root, &mut journal);
     progress.start("Cofam przenoszenie plików…", journal.moves.len() as u64);
     let _job = Job(progress);
     let (back, failed) = move_back(&root, &journal);
@@ -813,9 +855,14 @@ pub fn undo(s: &mut Session, progress: &Progress, args: &Value) -> ApiResult {
     }
     let removed = remove_empty_parents(&root, journal.moves.iter().enumerate().filter(|(i, _)| back.contains(i)).map(|(i, m)| journal.done.get(&i).map_or(m.to.as_str(), String::as_str)));
     let _ = append_line(&journal.path, &json!({ "state": "undone" }));
+    // The layout goes back to what it was before the run (none: the next scan guesses again).
     if journal.state.as_deref() == Some("saved") && journal.layout.is_some() {
-        if let Some(before) = journal.layout_before.as_deref().and_then(Layout::parse) {
-            super::store_setting(s, before);
+        match journal.layout_before.as_deref().and_then(Layout::parse) {
+            Some(before) => super::store_setting(s, before),
+            None => {
+                s.archive.settings_mut().display.remove(super::SETTING);
+                let _ = s.archive.save_settings();
+            }
         }
     }
     s.layout_interrupted = interrupted(&sidecar);
