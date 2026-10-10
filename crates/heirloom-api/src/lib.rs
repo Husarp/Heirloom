@@ -776,6 +776,18 @@ impl Api {
             }
         };
         if let Some(manifest) = overlay::read_manifest(archive.root()) {
+            if manifest.retired {
+                // Earlier, set-aside changes (renamed after a switch, a write-back or „Porzuć moje zmiany…”): opened so the
+                // user can look at them, like any archive of its own. Never registered over the original's record and
+                // never attached to the original again.
+                self.install(archive, path)?;
+                if let Some(s) = self.session.as_mut() {
+                    s.work_mode = Some(IN_PLACE);
+                }
+                let mut status = self.archive_status()?;
+                status["notice"] = json!("To są wcześniejsze, odłożone zmiany. Archiwum, z którego pochodzą, nie zostało przez to zmienione.");
+                return Ok(status);
+            }
             let missing = !Path::new(&manifest.original.data_path).is_file();
             return self.install_overlay(archive, manifest, missing, Vec::new());
         }

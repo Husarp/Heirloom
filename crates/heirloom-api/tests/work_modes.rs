@@ -372,6 +372,13 @@ fn a_changed_original_is_taken_in_and_merged() {
     assert_eq!(result["merged"], false);
     assert_eq!(result["conflicts"].as_array().unwrap().len(), 1);
     let key = result["conflicts"][0]["key"].as_str().unwrap().to_string();
+    // „Pokaż różnice”: what each side changed from the base, worded like the history feed.
+    let conflict = &result["conflicts"][0];
+    let new_values = |side: &str| -> Vec<String> { conflict[side].as_array().unwrap().iter().map(|c| c["new"].as_str().unwrap_or("").to_string()).collect() };
+    assert!(new_values("mineChanges").iter().any(|v| v.contains("Jan Piotr")), "{conflict}");
+    assert!(new_values("theirChanges").iter().any(|v| v.contains("Janek")), "{conflict}");
+    let preview = run(&mut again, "archive.rebase", json!({ "preview": true }))["result"].clone();
+    assert!(preview["since"].as_str().is_some_and(|s| s.len() >= 10), "the date of the last sync: {preview}");
     let result = run(&mut again, "archive.rebase", json!({ "choices": { key: "theirs" } }));
     assert_eq!(result["result"]["merged"], true);
     assert_eq!(result["status"]["overlay"]["originalChanged"], false);
@@ -636,6 +643,8 @@ fn archives_opened_together_show_the_users_version() {
     let status = run(&mut api, "set.create", json!({ "path": path(&set), "name": "Razem", "archives": [path(&original), path(&other)] }));
     assert_eq!(status["people"], 3, "Jan and Anna (the user's version) and Zofia");
     assert_eq!(status["combined"]["archives"][0]["withChanges"], true);
+    assert_eq!(status["combined"]["archives"][0]["pending"], 2, "Anna and the photo link of her: the count behind „(z Twoimi zmianami: 2)”");
+    assert_eq!(status["combined"]["archives"][1]["pending"], 0);
     assert_eq!(status["combined"]["archives"][0]["path"], path(&original), "the set names the original");
     let media = run(&mut api, "media.list", Value::Null);
     let items = media["items"].as_array().unwrap();
@@ -780,4 +789,161 @@ fn a_5_5_1_original_is_merged_after_conversion() {
     let people = run(&mut api, "people.list", json!({}))["people"].clone();
     let names: Vec<&str> = people.as_array().unwrap().iter().map(|p| p["given"].as_str().unwrap()).collect();
     assert!(names.contains(&"Janek") && names.contains(&"Anna") && names.contains(&"Ewa") && !names.contains(&"Jan"), "{names:?}");
+}
+
+/// A set-aside folder opened directly (the discard text invites it) is only looked at: it never takes the place of the
+/// current changes of the original (review finding F1).
+#[test]
+fn set_aside_changes_opened_directly_never_replace_the_current_ones() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = family(dir.path());
+    let mut api = computer(dir.path(), "ten");
+    let old = overlay_mode(&mut api, &original);
+    run(&mut api, "person.create", json!({ "given": "Stara", "surname": "Zmiana" }));
+    run(&mut api, "archive.save", json!({ "author": "Ewa" }));
+    let fresh = PathBuf::from(run(&mut api, "archive.discardOverlay", Value::Null)["overlay"]["folder"].as_str().unwrap());
+    run(&mut api, "person.create", json!({ "given": "Nowa", "surname": "Zmiana" }));
+    run(&mut api, "archive.save", json!({ "author": "Ewa" }));
+    let kept: Vec<PathBuf> = fs::read_dir(old.parent().unwrap()).unwrap().flatten().map(|e| e.path()).filter(|p| p.to_string_lossy().contains("porzucone")).collect();
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert!(overlay_retired(&kept[0]), "marked before the rename");
+    // Opened directly: looked at, with a notice, and nothing attached to the original.
+    let status = run(&mut api, "archive.open", json!({ "path": path(&kept[0]) }));
+    assert!(status["notice"].as_str().unwrap().starts_with("To są wcześniejsze, odłożone zmiany."), "{status}");
+    assert!(status["overlay"].is_null());
+    let names = |api: &mut Api| -> Vec<String> { run(api, "people.list", json!({}))["people"].as_array().unwrap().iter().map(|p| p["given"].as_str().unwrap().to_string()).collect() };
+    assert!(names(&mut api).contains(&"Stara".to_string()));
+    // The original opened again: the CURRENT changes, not the old ones.
+    let mut again = computer(dir.path(), "ten");
+    let _ = &mut again;
+    let status = run(&mut api, "archive.open", json!({ "path": path(&original) }));
+    assert_eq!(status["workMode"], "overlay");
+    assert_eq!(PathBuf::from(status["overlay"]["folder"].as_str().unwrap()), fresh);
+    let n = names(&mut api);
+    assert!(n.contains(&"Nowa".to_string()) && !n.contains(&"Stara".to_string()), "{n:?}");
+    // A retired folder is marked too when it is retired by a switch.
+    run(&mut api, "archive.writeBack", json!({ "author": "Ewa" }));
+    run(&mut api, "archive.setWorkMode", json!({ "mode": "inPlace" }));
+    let moved: Vec<PathBuf> = fs::read_dir(fresh.parent().unwrap()).unwrap().flatten().map(|e| e.path()).filter(|p| p.to_string_lossy().contains("przeniesione")).collect();
+    assert_eq!(moved.len(), 1);
+    assert!(overlay_retired(&moved[0]));
+}
+
+fn overlay_retired(folder: &Path) -> bool {
+    heirloom_api::overlay::read_manifest(folder).is_some_and(|m| m.retired)
+}
+
+/// A file that cannot be moved aside stops the merge before anything is saved (review finding F2).
+#[cfg(unix)]
+#[test]
+fn a_file_that_cannot_move_aside_stops_the_rebase() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let original = family(dir.path());
+    let mut api = computer(dir.path(), "ten");
+    let mine = overlay_mode(&mut api, &original);
+    let jan = run(&mut api, "people.list", json!({}))["people"][0]["id"].as_str().unwrap().to_string();
+    let new_photo = dir.path().join("zrodla").join("slub.jpg");
+    photo(&new_photo, 60);
+    run(&mut api, "media.add", json!({ "paths": [path(&new_photo)], "person": jan }));
+    run(&mut api, "archive.save", json!({ "author": "Ewa" }));
+    photo(&original.join("media").join("slub.jpg"), 61);
+    let history = fs::read(mine.join(".heirloom").join("historia.jsonl")).unwrap();
+    let data = fs::read(mine.join("rodzina.ged")).unwrap();
+    fs::set_permissions(mine.join("media"), fs::Permissions::from_mode(0o555)).unwrap();
+    let failed = code(&mut api, "archive.rebase", json!({}));
+    fs::set_permissions(mine.join("media"), fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(failed, "io");
+    assert_eq!(fs::read(mine.join("rodzina.ged")).unwrap(), data, "nothing saved");
+    assert_eq!(fs::read(mine.join(".heirloom").join("historia.jsonl")).unwrap(), history);
+    assert!(mine.join("media").join("slub.jpg").is_file());
+    // With the folder writable again the merge goes through.
+    assert_eq!(run(&mut api, "archive.rebase", json!({}))["result"]["merged"], true);
+    assert!(mine.join("media").join("slub (2).jpg").is_file());
+}
+
+/// A refused merge leaves nothing behind in the open archive, not even the conversion to GEDCOM 7 (review finding F3).
+#[test]
+fn a_refused_merge_leaves_no_conversion_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("Pobrane");
+    fs::create_dir_all(&folder).unwrap();
+    let old = "0 HEAD\n1 SOUR MYHERITAGE\n1 GEDC\n2 VERS 5.5.1\n1 CHAR UTF-8\n0 @I1@ INDI\n1 NAME Jan /Nowak/\n1 _UID AAA\n0 @I2@ INDI\n1 NAME Ewa /Nowak/\n1 _UID BBB\n0 TRLR\n";
+    fs::write(folder.join("drzewo.ged"), old).unwrap();
+    let mut api = computer(dir.path(), "ten");
+    run(&mut api, "archive.open", json!({ "path": path(&folder.join("drzewo.ged")) }));
+    let mine = PathBuf::from(run(&mut api, "archive.setWorkMode", json!({ "mode": "overlay" }))["overlay"]["folder"].as_str().unwrap());
+    run(&mut api, "archive.close", Value::Null);
+    // The user's version, still 5.5.1 (edited by hand), has a change of its own.
+    fs::write(mine.join("drzewo.ged"), old.replace("Ewa /Nowak/", "Ewa /Nowak/\n1 SEX F")).unwrap();
+    // The archive is replaced by an unrelated GEDCOM 7 file.
+    let other = "0 HEAD\n1 GEDC\n2 VERS 7.0\n0 @I1@ INDI\n1 NAME Zofia /Inna/\n1 UID 11111111-1111-4111-8111-111111111111\n0 @I2@ INDI\n1 NAME Piotr /Inny/\n1 UID 22222222-2222-4222-8222-222222222222\n0 TRLR\n";
+    fs::write(folder.join("drzewo.ged"), other).unwrap();
+    let status = run(&mut api, "archive.open", json!({ "path": path(&folder.join("drzewo.ged")) }));
+    assert_eq!(status["gedcomVersion"], "5.5.1", "{status}");
+    assert_eq!(code(&mut api, "archive.rebase", json!({})), "too_different");
+    let status = run(&mut api, "archive.status", Value::Null);
+    assert_eq!((status["gedcomVersion"].as_str(), status["unsavedChanges"].as_u64()), (Some("5.5.1"), Some(0)), "{status}");
+}
+
+/// Every file under `root` with its bytes (no times).
+fn contents(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    snapshot(root).0.into_iter().map(|(p, (bytes, _))| (p, bytes)).collect()
+}
+
+/// The whole story of ticket L02c: edit in „Nie ruszaj oryginału”, someone edits the original (the same field, and
+/// another one), merge with one conflict, write back, undo: the original is as it was just before the write-back.
+#[test]
+fn scenario_conflict_merge_write_back_and_undo() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = family(dir.path());
+    let mut api = computer(dir.path(), "ten");
+    let mine = overlay_mode(&mut api, &original);
+    // The user changes Jan's given name and saves into his own folder.
+    let jan = run(&mut api, "people.list", json!({}))["people"][0]["id"].as_str().unwrap().to_string();
+    run(&mut api, "person.update", json!({ "id": jan, "given": "Jan Piotr", "surname": "Kowalski" }));
+    run(&mut api, "archive.save", json!({ "author": "Ewa" }));
+    // Someone else changes the same name in the original and, by a text edit, gives Jan a trade as well.
+    their_edit(dir.path(), &original, "Janek");
+    let ged = fs::read_to_string(original.join("rodzina.ged")).unwrap();
+    let at = ged.find("1 NAME Janek").expect("the name was changed");
+    let line_end = ged[at..].find('\n').unwrap() + at + 1;
+    fs::write(original.join("rodzina.ged"), format!("{}1 OCCU Stolarz\n{}", &ged[..line_end], &ged[line_end..])).unwrap();
+    // The write-back says the archive changed; the merge finds the one clash and keeps the user's version.
+    assert_eq!(code(&mut api, "archive.writeBack", json!({ "author": "Ewa" })), "original_changed");
+    let preview = run(&mut api, "archive.rebase", json!({ "preview": true }))["result"].clone();
+    let conflicts = preview["conflicts"].as_array().unwrap();
+    assert_eq!(conflicts.len(), 1, "{preview}");
+    assert_eq!(conflicts[0]["mineChanges"][0]["new"].as_str().unwrap().contains("Jan Piotr"), true);
+    assert_eq!(conflicts[0]["theirChanges"][0]["new"].as_str().unwrap().contains("Janek"), true);
+    let theirs: Vec<String> = conflicts[0]["theirChanges"].as_array().unwrap().iter().map(|c| c["new"].as_str().unwrap_or("").to_string()).collect();
+    assert!(theirs.iter().any(|v| v.contains("Stolarz")), "their other change is listed too: {theirs:?}");
+    let key = conflicts[0]["key"].as_str().unwrap().to_string();
+    let merged = run(&mut api, "archive.rebase", json!({ "choices": { key: "mine" } }));
+    assert_eq!(merged["result"]["merged"], true);
+    let people = run(&mut api, "people.list", json!({}))["people"].clone();
+    assert!(people.as_array().unwrap().iter().any(|p| p["given"] == "Jan Piotr"));
+    // Just before the write-back.
+    let before = contents(&original);
+    let done = run(&mut api, "archive.writeBack", json!({ "author": "Ewa" }));
+    assert_eq!(done["status"]["overlay"]["canUndoWriteBack"], true);
+    let data = fs::read_to_string(original.join("rodzina.ged")).unwrap();
+    // The record is kept whole from the side chosen (A.9): the user's name; their trade shows in „Pokaż różnice” only.
+    assert!(data.contains("Jan Piotr /Kowalski/") && !data.contains("Janek /"), "{data}");
+    run(&mut api, "archive.undoWriteBack", Value::Null);
+    let after = contents(&original);
+    // The data, the history and every photo are byte for byte as before. (The copy the write-back made in kopie\ stays
+    // on purpose, and the editors' „last edited” in ustawienia.json is not taken back.)
+    for (path, bytes) in &before {
+        let rel = path.strip_prefix(&original).unwrap_or(path);
+        if rel.ends_with("ustawienia.json") {
+            eprintln!("ustawienia.json {} after the undo", if after.get(path) == Some(bytes) { "is the same" } else { "differs (editors)" });
+            continue;
+        }
+        assert_eq!(after.get(path), Some(bytes), "{} differs after the undo", rel.display());
+    }
+    let extra: Vec<String> = after.keys().filter(|p| !before.contains_key(*p)).map(|p| p.strip_prefix(&original).unwrap().display().to_string()).collect();
+    assert!(extra.iter().all(|p| p.contains("kopie")), "only the safety copy is new: {extra:?}");
+    assert_eq!(run(&mut api, "archive.status", Value::Null)["overlay"]["pending"].as_u64().unwrap() > 0, true, "the user's changes wait again");
+    assert!(mine.is_dir());
 }

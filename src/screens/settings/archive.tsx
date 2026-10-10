@@ -13,6 +13,7 @@ import { makeBackup, restoreFromBackup } from "../../app/backup";
 import { discardMine, switchToInPlace, switchToOverlay } from "../../app/workMode";
 import { lastBackupNote, ROTATION_NOTE } from "../archive/backupText";
 import { lastWriteBackText, waitingText } from "../archive/workModes";
+import { writeBackRefusal } from "../archive/writeBack";
 import { BusyDialog, CheckDialog, type CheckProblem } from "./dialogs";
 import { failed, fileSafe, Keycap, saveSettings, Section, Select, showInFolder, today, whenDone } from "./parts";
 
@@ -134,15 +135,7 @@ function OverlaySection({ archive }: { archive: ArchiveStatus }) {
   const overlay = archive.overlay!;
   const nothing = info != null && info.pending === 0 && info.newFiles === 0;
   // Why moving the changes into the archive isn't possible now (the changes stay here).
-  const blocked = !info
-    ? null
-    : info.originalMissing
-      ? "Archiwum jest teraz niedostępne — przenieść zmiany można, gdy będzie dostępne."
-      : info.lockedOriginal
-        ? "Właściciel archiwum zablokował zmiany (Tylko do odczytu). Twoje zmiany zostają u Ciebie."
-        : !info.writable
-          ? "W archiwum nie da się nic zapisać (np. płyta lub zablokowany pendrive). Twoje zmiany zostają u Ciebie."
-          : null;
+  const blocked = info ? writeBackRefusal(info) : null;
   return (
     <Section id="overlay" title="Twoje zmiany">
       <SettingRow label="Folder" note={<span className="selectable">{displayPath(overlay.folder)}</span>}>

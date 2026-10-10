@@ -4,6 +4,7 @@ import { cancelJob } from "./progress";
 import { Sidebar } from "../shell/Sidebar";
 import { TopBar } from "../shell/TopBar";
 import { FinalChangeDialog } from "../shell/FinalChangeDialog";
+import { RebaseDialog } from "../screens/archive/RebaseDialog";
 import { AskDialog, ConflictDialog, ForeignConfirmDialog, WhoEditsDialog } from "../shell/Dialogs";
 import { CombinedBar, EditModeBar, ReadOnlyBar } from "../shell/Bars";
 import { Toasts } from "../shell/Toasts";
@@ -69,6 +70,7 @@ export function App() {
       {paletteOpen && phase === "ready" && <CommandPalette />}
       <AskDialog />
       {finalChange && <FinalChangeDialog />}
+      <RebaseDialog />
       {busy && <BusyDialog text={busy.text} note={busy.note} done={busy.done} total={busy.total} onCancel={busy.cancellable && !busy.cancelling ? cancelJob : undefined} />}
       <Toasts />
     </>

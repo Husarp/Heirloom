@@ -705,27 +705,20 @@ pub fn rebase(s: &mut Session, choices: Option<HashMap<String, Side>>, preview: 
     let original_root = info.original_root.clone();
     let theirs_bytes = fs::read(&info.original_data_path).map_err(io_error)?;
     let (mut theirs, _) = Document::from_bytes(&theirs_bytes);
-    // One form for all three: GEDCOM 7 when either side is.
-    // A preview changes nothing, so it converts a copy.
-    let mut mine_doc = if preview { Some(s.archive.doc.clone()) } else { None };
-    if theirs.version == Version::V7 && s.archive.doc.version != Version::V7 {
-        match mine_doc.as_mut() {
-            Some(doc) => {
-                doc.upgrade_to_v7();
-            }
-            None => {
-                s.archive.upgrade_to_v7();
-                s.changed();
-            }
-        }
+    // One form for all three: GEDCOM 7 when either side is. The merge works on a copy: a refusal ("too_different") or
+    // a conflict question leaves the open archive as it was; the conversion is applied to it only when the merge is.
+    let mut mine_doc = s.archive.doc.clone();
+    let convert = theirs.version == Version::V7 && mine_doc.version != Version::V7;
+    if convert {
+        mine_doc.upgrade_to_v7();
     }
     let info = s.overlay.as_ref().ok_or_else(not_overlay)?;
-    let version = mine_doc.as_ref().map_or(s.archive.doc.version, |d| d.version);
+    let version = mine_doc.version;
     if version == Version::V7 {
         theirs.upgrade_to_v7();
     }
     let base = info.base_as(version);
-    let mine = mine_doc.map_or_else(|| s.archive.doc.records.clone(), |d| d.records);
+    let mine = mine_doc.records;
     let fast_forward = heirloom_core::history::diff(&base, &mine, "", None).iter().all(|e| e.tag == "HEAD");
     let merged = if fast_forward {
         merge::Merge { records: theirs.records.clone(), ..merge::Merge::default() }
@@ -739,6 +732,7 @@ pub fn rebase(s: &mut Session, choices: Option<HashMap<String, Side>>, preview: 
     };
     if preview || (choices.is_none() && !merged.conflicts.is_empty()) {
         let mine_pending = info.pending(&s.archive);
+        let since = info.manifest.base.at.clone();
         let d = s.derived();
         let conflicts: Vec<Value> = merged
             .conflicts
@@ -747,6 +741,22 @@ pub fn rebase(s: &mut Session, choices: Option<HashMap<String, Side>>, preview: 
                 let name = c.mine.as_ref().or(c.theirs.as_ref()).and_then(|n| n.child_value("NAME")).map(|n| n.replace('/', "").trim().to_string());
                 let name = name.or_else(|| d.index(&c.key).map(|i| d.info[i].name.clone())).unwrap_or_else(|| c.key.clone());
                 let side = |n: &Option<Node>| n.as_ref().map(heirloom_core::history::record_text);
+                // What each side changed from the base, as the history feed words it („Pokaż różnice”).
+                let from_base = |to: &Option<Node>| {
+                    let entry = Entry {
+                        ts: String::new(),
+                        author: String::new(),
+                        batch: None,
+                        action: history::Action::Update,
+                        record: c.key.clone(),
+                        tag: c.tag.clone(),
+                        before: side(&c.base),
+                        after: side(to),
+                        note: None,
+                        kind: None,
+                    };
+                    crate::activity::changes(&d, &entry)
+                };
                 json!({
                     "key": c.key,
                     "tag": c.tag,
@@ -755,14 +765,17 @@ pub fn rebase(s: &mut Session, choices: Option<HashMap<String, Side>>, preview: 
                     "mine": side(&c.mine),
                     "theirs": side(&c.theirs),
                     "base": side(&c.base),
+                    "mineChanges": from_base(&c.mine),
+                    "theirChanges": from_base(&c.theirs),
                 })
             })
             .collect();
-        return Ok(json!({ "merged": false, "conflicts": conflicts, "theirChanges": their_changes(&base, &theirs.records), "myChanges": mine_pending }));
+        return Ok(json!({ "merged": false, "conflicts": conflicts, "theirChanges": their_changes(&base, &theirs.records), "myChanges": mine_pending, "since": since }));
     }
     let mut records = merged.records;
     // A file of „Twoje zmiany” whose name the archive now uses for another file moves aside, so it hides nothing.
     let mut renames: HashMap<String, String> = HashMap::new();
+    let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
     for f in new_files(&root, &original_root) {
         if !original_root.join(&f.rel).is_file() {
             continue;
@@ -777,9 +790,16 @@ pub fn rebase(s: &mut Session, choices: Option<HashMap<String, Side>>, preview: 
             "" => fsx::free_name(&taken, stem, ext),
             folder => format!("{folder}/{}", fsx::free_name(&taken, stem, ext)),
         };
-        if fsx::move_no_replace(&root.join(&f.rel), &root.join(&to)).is_ok() {
-            renames.insert(fsx::name_key(&f.rel), to);
+        // A file left under its old name would hide the archive's different file: stop before anything is saved, and
+        // put back the ones already moved.
+        if let Err(e) = fsx::move_no_replace(&root.join(&f.rel), &root.join(&to)) {
+            for (from, now) in &moved {
+                let _ = fsx::move_no_replace(now, from);
+            }
+            return Err(ApiError::new("io", format!("Nie można zmienić nazwy pliku {} w folderze Twoich zmian: {e}", f.rel)));
         }
+        moved.push((root.join(&f.rel), root.join(&to)));
+        renames.insert(fsx::name_key(&f.rel), to);
     }
     if !renames.is_empty() {
         let doc = Document { records, ..s.archive.doc.clone() };
@@ -798,7 +818,19 @@ pub fn rebase(s: &mut Session, choices: Option<HashMap<String, Side>>, preview: 
         renumber_history(&s.archive.history_path(), s.overlay.as_ref().map_or(0, |i| i.manifest.synced.history_len), &merged.renumbered);
     }
     let editors = s.archive.settings().editors.clone();
-    let changed = apply_records(&mut s.archive, &records)?;
+    if convert {
+        s.archive.upgrade_to_v7();
+    }
+    let changed = match apply_records(&mut s.archive, &records) {
+        Ok(n) => n,
+        Err(e) => {
+            // Nothing was saved: the files go back under their names too.
+            for (from, now) in &moved {
+                let _ = fsx::move_no_replace(now, from);
+            }
+            return Err(e);
+        }
+    };
     s.changed();
     if changed > 0 {
         let note = format!("Zmiany z archiwum {}", original_root.display());

@@ -6,6 +6,7 @@ import { call, ApiError } from "../api/transport";
 import type { AppState, ArchiveStatus, PersonSummary, SaveResult } from "../api/types";
 import { count } from "../lib/format";
 import { savesWhere, type FinalFacts, type FinalKind } from "../screens/archive/workModes";
+import { startRebase, startWriteBack, undoWriteBack } from "./writeBack";
 import { openInNewWindow } from "../lib/native";
 
 export type TreeView = "family" | "ancestors" | "descendants" | "overview";
@@ -183,13 +184,12 @@ interface Store {
    *  every screen reads again, editing ends, and a notice of the status is said. */
   adoptStatus: (status: ArchiveStatus) => Promise<void>;
   hideBanner: (kind: string) => void;
-  /** TODO(L02c): „Przenieś zmiany do archiwum…” — the preview, the final-change dialog and the write-back. `then`
-   *  runs once the changes are in the archive (switching to „Pracuj na archiwum” continues there). Until then it
-   *  only shows where the changes wait. */
+  /** „Przenieś zmiany do archiwum…” — the preview, the final-change dialog and the write-back. `then` runs once the
+   *  changes are in the archive (switching to „Pracuj na archiwum” continues there). */
   startWriteBack: (then?: () => void) => void;
-  /** TODO(L02c): „Wczytaj zmiany” — takes in what someone changed in the archive (the rebase dialog). */
+  /** „Wczytaj zmiany” — takes in what someone changed in the archive (the rebase dialog). */
   startRebase: () => void;
-  /** TODO(L02c): [Cofnij] after a write-back (archive.undoWriteBack with its confirmation). */
+  /** [Cofnij] after a write-back (archive.undoWriteBack with its confirmation). */
   undoWriteBack: () => void;
   /** The final-change dialog (DESIGN A.7) with the backup of the archive; `run` is called when the user confirms,
    *  with `allowForeign` when the dialog asked about a file made by another program and was agreed to. */
@@ -405,15 +405,9 @@ export const useStore = create<Store>((set, get) => ({
 
   hideBanner: (kind) => set({ hiddenBanners: [...get().hiddenBanners, kind] }),
 
-  startWriteBack: () => {
-    get().go({ name: "settings", section: "overlay" });
-  },
-  startRebase: () => {
-    get().go({ name: "settings", section: "overlay" });
-  },
-  undoWriteBack: () => {
-    get().go({ name: "settings", section: "overlay" });
-  },
+  startWriteBack: (then) => startWriteBack(then),
+  startRebase: () => startRebase(),
+  undoWriteBack: () => undoWriteBack(),
   confirmFinal: (kind, run, extra) => set({ finalChange: { kind, run, extra } }),
   closeFinalChange: () => set({ finalChange: null }),
 
