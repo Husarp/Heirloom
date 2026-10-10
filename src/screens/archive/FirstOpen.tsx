@@ -50,10 +50,8 @@ export function FirstOpen() {
             </div>
           ))}
         </div>
-        {archive?.overlay?.originalMissing ? (
-          <OriginalMissingBanner />
-        ) : (
-          data && data.missingFiles > 0 && (
+        <OriginalMissingBanner />
+        {data && data.missingFiles > 0 && !archive?.overlay?.originalMissing && (
           <div className="banner warn" style={{ padding: "10px 10px 10px 14px" }}>
             <ImageOff size={16} color="var(--warn)" />
             <span className="grow">Nie znaleziono {count(data.missingFiles, "pliku", "plików", "plików")} — wskaż folder, w którym mogą być.</span>
@@ -67,7 +65,6 @@ export function FirstOpen() {
               Wskaż folder…
             </button>
           </div>
-          )
         )}
         {data && data.otherFields > 0 && (
           <div className="banner info">
