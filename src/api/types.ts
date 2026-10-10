@@ -69,6 +69,8 @@ export interface ArchiveStatus {
   overlay?: OverlayStatus | null;
   /** Said once after opening (changes found again, a write-back finished, the archive's changes taken in). */
   notice?: string;
+  /** A „Uporządkuj” run that was cut off: the banner „Przenoszenie plików zostało przerwane (przeniesiono 120 z 340)”. */
+  layoutInterrupted?: LayoutInterrupted | null;
 }
 
 export interface OverlayStatus {
@@ -317,4 +319,140 @@ export interface PersonSummary {
   created: string | null;
   /** Archives opened together: the keys of the archives the person is in (two or more for a linked person). */
   from?: string[];
+}
+
+// ---------- Part B: where the photos lie in media/ (media.scan and the commands that move or assign files) ----------
+
+export type MediaLayout = "flat" | "perPerson";
+
+export interface LayoutInterrupted {
+  /** The journal's name: give it to media.finishRestructure / media.undoRestructure. */
+  journal: string;
+  done: number;
+  total: number;
+  layout: MediaLayout | null;
+}
+
+/** A person as the scan names them („Józef Kowalski (1878–1944)” = name + years). */
+export interface LayoutPerson {
+  id: string;
+  name: string;
+  /** „1878–1944”, „1878–”, „–1944”, or null. */
+  years: string | null;
+}
+
+export interface ScanUnknown {
+  /** Path inside the archive, `/` separators: give it to media.assign / media.leaveAlone. */
+  path: string;
+  name: string;
+  size: number;
+  /** `media` or `media/<folder>`. */
+  folder: string;
+  /** Prefilled when exactly one name fits, or the file lies in a person's folder. `why`: „pasuje nazwa pliku” | „w folderze osoby”. */
+  suggestion: { id: string; name: string; why: string } | null;
+  /** Two or three people that fit the name (nothing prefilled). */
+  candidates: LayoutPerson[];
+}
+
+export interface ScanFolder {
+  path: string;
+  name: string;
+  files: number;
+  linked: number;
+  unknown: number;
+  person: LayoutPerson | null;
+  /** Left alone earlier and not changed since. */
+  leftAlone: boolean;
+  /** Left alone earlier but its files changed: asked again. */
+  changed: boolean;
+  /** `unpack`: in a flat archive (B1) a folder to take out or leave; `whose`: in B2 a folder of nobody with unknown files. */
+  question: "unpack" | "whose" | null;
+}
+
+export interface JournalSummary {
+  name: string;
+  ts: string;
+  state: "saved" | "interrupted";
+  moved: number;
+  total: number;
+}
+
+export interface MediaScan {
+  layout: {
+    setting: MediaLayout | null;
+    guess: MediaLayout;
+    /** The setting, else the guess. */
+    effective: MediaLayout;
+    rootOwned: number;
+    folderOwned: number;
+    personFolders: number;
+  };
+  /** FILE values that point at nothing but whose file is elsewhere in the archive. */
+  moved: { id: string; file: string; found: string }[];
+  /** B2: files of people lying loose in media/ (`ids`: every record that names the file). */
+  looseLinked: { id: string; ids: string[]; file: string; owner: LayoutPerson }[];
+  unknown: ScanUnknown[];
+  folders: ScanFolder[];
+  /** Absolute FILE paths outside the archive that exist. */
+  outside: { id: string; file: string }[];
+  counts: { moved: number; looseLinked: number; unknown: number; folders: number; outside: number; missing: number; files: number };
+  /** Everything to tidy: the banner shows it when > 0 and `!seen`. */
+  total: number;
+  /** Give it to media.tidySeen („Nie teraz”). */
+  fingerprint: string;
+  /** „Nie teraz” was said to exactly these findings (on this computer). */
+  seen: boolean;
+  /** More than 50 000 files: the scan stopped. */
+  truncated: boolean;
+  /** The last saved or open „Uporządkuj” run (Settings: „Ostatnie porządkowanie”), else null. */
+  journal: JournalSummary | null;
+  interrupted: LayoutInterrupted | null;
+}
+
+export interface RestructurePlan {
+  to: MediaLayout;
+  count: number;
+  bytes: number;
+  /** The first 300 moves. */
+  moves: { from: string; to: string; objects: string[]; unknown: boolean }[];
+  unknownMoves: number;
+  /** Files in the media root that belong to nobody: they stay. */
+  unassigned: number;
+  /** Files of several people (go to one folder). */
+  groupFiles: number;
+  /** Files several records point at (moved once). */
+  shared: number;
+  alreadyInPlace: number;
+  newFolders: string[];
+  shortened: { from: string; to: string }[];
+  longPaths: number;
+}
+
+export interface RestructureResult {
+  moved: number;
+  /** Files not moved: `reason` is `held` (open in another program), `locked`, `missing` or `error`. */
+  skipped: { from: string; reason: "held" | "locked" | "missing" | "error" }[];
+  /** Skipped for a reason other than `missing`: „6 plików było otwartych w innym programie”. */
+  held: number;
+  /** The journal's name, for „Cofnij porządkowanie”; null when nothing moved. */
+  journal: string | null;
+  batch?: string;
+  layout: MediaLayout | null;
+  removedFolders: string[];
+  /** Unknown files that came along (unpacking a folder): offer them in the assign list. */
+  unknownMoved: string[];
+  /** Of those, assigned to `assignTo`. */
+  assigned: number;
+  /** A fresh media.scan. */
+  report: MediaScan;
+  status: ArchiveStatus;
+}
+
+export interface UndoRestructureResult {
+  movedBack: number;
+  notBack: number;
+  journal: string;
+  removedFolders: string[];
+  report: MediaScan;
+  status: ArchiveStatus;
 }

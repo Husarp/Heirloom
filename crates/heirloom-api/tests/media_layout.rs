@@ -929,3 +929,341 @@ fn a_new_folder_name_is_shortened_when_the_path_would_pass_240_characters() {
     assert_eq!(hashes(&mut api), objs0);
     assert!(root.join(to).is_file());
 }
+
+// ---------- where new files go ----------
+
+fn import_answer() -> String {
+    let json = heirloom_api::import::check::extract_blocks(IMPORT_FORMAT, "doc").into_iter().next().unwrap().text;
+    format!("```json\n{json}\n```")
+}
+
+/// Loads the documented example with its photo M002 and decides every person as new (or the given ones as `merge`).
+fn load_import(api: &mut Api, dir: &Path) {
+    let m002 = dir.join("paczka").join("M002 Józef i Marianna.jpg");
+    fs::create_dir_all(m002.parent().unwrap()).unwrap();
+    fs::write(&m002, "paczka-m002").unwrap();
+    let state = run(api, "import.load", json!({ "texts": [import_answer()], "paths": [path(&m002)] }));
+    for p in state["persons"].as_array().unwrap() {
+        run(api, "import.decide", json!({ "person": p["id"], "kind": "new" }));
+    }
+}
+
+#[test]
+fn an_import_puts_each_file_in_the_folder_of_its_first_person_even_a_new_one() {
+    let mut f = family();
+    run(&mut f.api, "media.setLayout", json!({ "layout": "perPerson" }));
+    load_import(&mut f.api, f.dir.path());
+    // The example describes M002 as a photo of people of the batch: the first one decides.
+    run(&mut f.api, "import.commit", json!({ "author": "Ewa" }));
+    let list = run(&mut f.api, "media.list", Value::Null);
+    let item = list["items"].as_array().unwrap().iter().find(|m| m["path"].as_str().is_some_and(|p| p.contains("M002"))).unwrap_or_else(|| panic!("{list}"));
+    let rel = item["path"].as_str().unwrap();
+    let (folder, _) = rel.rsplit_once('/').unwrap();
+    assert!(folder.starts_with("media/") && folder != "media", "{rel}: in a folder of a person");
+    // The folder is named after the first person of the file, surname first (a new person has no record before the save).
+    let names: Vec<String> = item["people"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap().to_string()).collect();
+    assert!(!names.is_empty());
+    let surname_first: Vec<String> = names.iter().map(|n| { let mut w: Vec<&str> = n.split(' ').collect(); let last = w.pop().unwrap(); format!("{last} {}", w.join(" ")) }).collect();
+    assert!(surname_first.iter().any(|n| folder == format!("media/{n}")), "{folder} should be one of {surname_first:?}");
+    assert!(f.root.join(rel).is_file());
+    // Flat: the same import lands in media/.
+    let mut g = family();
+    run(&mut g.api, "media.setLayout", json!({ "layout": "flat" }));
+    load_import(&mut g.api, g.dir.path());
+    run(&mut g.api, "import.commit", json!({ "author": "Ewa" }));
+    let list = run(&mut g.api, "media.list", Value::Null);
+    assert!(list["items"].as_array().unwrap().iter().any(|m| m["path"] == "media/M002 Józef i Marianna.jpg"));
+}
+
+#[test]
+fn replacing_a_file_goes_to_the_folder_of_the_owner_and_outside_files_are_copied_in() {
+    let mut f = family();
+    run(&mut f.api, "media.setLayout", json!({ "layout": "perPerson" }));
+    restructure(&mut f.api, "perPerson");
+    // An object whose file lies outside the archive, linked to Jan.
+    let outside = f.dir.path().join("poza").join("na-dysku.jpg");
+    fs::create_dir_all(outside.parent().unwrap()).unwrap();
+    fs::write(&outside, "poza archiwum").unwrap();
+    let data = f.root.join("rodzina.ged");
+    let text = fs::read_to_string(&data).unwrap();
+    let text = text.replacen(&format!("0 {} INDI", f.jan), &format!("0 {} INDI\n1 OBJE @O50@", f.jan), 1).replacen("0 TRLR", &format!("0 @O50@ OBJE\n1 FILE {}\n2 FORM image/jpeg\n0 TRLR", outside.display()), 1);
+    fs::write(&data, text).unwrap();
+    run(&mut f.api, "archive.reload", Value::Null);
+    let report = scan(&mut f.api);
+    assert_eq!(report["outside"].as_array().unwrap().len(), 1);
+    assert_eq!(report["outside"][0]["id"], "@O50@");
+    let copied = run(&mut f.api, "media.relink", json!({ "id": "@O50@", "path": path(&outside) }));
+    assert_eq!(copied["path"], "media/Kowalski Jan/na-dysku.jpg", "the owner's folder");
+    assert_eq!(fs::read(f.root.join("media/Kowalski Jan/na-dysku.jpg")).unwrap(), b"poza archiwum");
+    assert_eq!(fs::read(&outside).unwrap(), b"poza archiwum", "the original stays where it was");
+    assert!(scan(&mut f.api)["outside"].as_array().unwrap().is_empty());
+}
+
+fn open_in_a1(dir: &Path, original: &Path) -> Api {
+    let mut api = computer(dir, "krewny");
+    run(&mut api, "archive.open", json!({ "path": path(original) }));
+    run(&mut api, "archive.setWorkMode", json!({ "mode": "overlay" }));
+    api
+}
+
+/// A copy of the family archive as it lies on a stick: folders of people, a loose unknown file, a file of nobody.
+fn per_person_original() -> (tempfile::TempDir, PathBuf, String, String) {
+    let mut f = family();
+    restructure(&mut f.api, "perPerson");
+    put(&f.root, "media/luzem.jpg", "luzem");
+    let (jan, anna) = (f.jan.clone(), f.anna.clone());
+    run(&mut f.api, "archive.close", Value::Null);
+    let Family { dir, root, .. } = f;
+    (dir, root, jan, anna)
+}
+
+fn snapshot_all(root: &Path) -> BTreeMap<String, Vec<u8>> {
+    let mut out = BTreeMap::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for e in fs::read_dir(&dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else {
+                out.insert(p.strip_prefix(root).unwrap().display().to_string(), fs::read(&p).unwrap());
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn working_on_a_copy_places_new_files_in_the_originals_layout_and_moves_nothing() {
+    let (dir, original, jan, anna) = per_person_original();
+    let before = snapshot_all(&original);
+    let mut api = open_in_a1(dir.path(), &original);
+    let report = scan(&mut api);
+    assert_eq!(report["layout"]["setting"], "perPerson", "the original's layout");
+    assert_eq!(unknown_paths(&report), vec!["media/luzem.jpg"]);
+    // A new file for Jan: into the overlay, in a folder named like the one in the original.
+    let new = dir.path().join("nowe").join("nowe-zdjecie.jpg");
+    fs::create_dir_all(new.parent().unwrap()).unwrap();
+    fs::write(&new, "nowe w kopii").unwrap();
+    let id = run(&mut api, "media.add", json!({ "paths": [path(&new)], "person": jan }))[0]["id"].as_str().unwrap().to_string();
+    let rel = run(&mut api, "media.get", json!({ "id": id }))["path"].as_str().unwrap().to_string();
+    assert_eq!(rel, "media/Kowalski Jan/nowe-zdjecie.jpg");
+    let status = run(&mut api, "archive.status", Value::Null);
+    let overlay_root = PathBuf::from(status["overlay"]["folder"].as_str().unwrap());
+    assert!(overlay_root.join(&rel).is_file(), "written into the folder of the changes");
+    // Moving is refused in every form.
+    for (method, args) in [
+        ("media.restructure", json!({ "to": "flat", "author": "Ewa" })),
+        ("media.restructurePreview", json!({ "to": "flat" })),
+        ("media.finishRestructure", json!({ "author": "Ewa" })),
+        ("media.undoRestructure", json!({ "journal": "x", "author": "Ewa" })),
+        ("media.setLayout", json!({ "layout": "flat" })),
+    ] {
+        assert_eq!(code(&mut api, method, args), "overlay_mode", "{method}");
+    }
+    // Assigning a file of the original copies and moves nothing: the record points at it where it is.
+    let assigned = run(&mut api, "media.assign", json!({ "path": "media/luzem.jpg", "person": anna }));
+    assert_eq!(assigned["assigned"][0]["moved"], false);
+    assert_eq!(assigned["assigned"][0]["path"], "media/luzem.jpg");
+    let overlay_files = tree(&overlay_root);
+    assert_eq!(overlay_files.keys().cloned().collect::<Vec<_>>(), vec!["media/Kowalski Jan/nowe-zdjecie.jpg"], "no copy of the assigned file");
+    let list = run(&mut api, "media.list", Value::Null);
+    let item = list["items"].as_array().unwrap().iter().find(|m| m["path"] == "media/luzem.jpg").unwrap();
+    assert_eq!((item["missing"].as_bool(), item["layer"].as_str()), (Some(false), Some("archive")));
+    save(&mut api);
+    assert_eq!(snapshot_all(&original), before, "the original is byte for byte what it was");
+    // The files left in the original are still reported as the original's own (nothing else to tidy).
+    assert!(unknown_paths(&scan(&mut api)).is_empty());
+}
+
+#[test]
+fn the_guess_is_stored_in_the_changes_folder_when_the_original_has_no_setting() {
+    let f = family();
+    let (dir, original) = (f.dir, f.root);
+    let before = snapshot_all(&original);
+    let mut api = open_in_a1(dir.path(), &original);
+    assert_eq!(scan(&mut api)["layout"]["setting"], Value::Null);
+    let status = run(&mut api, "archive.status", Value::Null);
+    assert_eq!(status["display"]["mediaLayout"], "flat");
+    let overlay_settings: Value = serde_json::from_slice(&fs::read(PathBuf::from(status["overlay"]["folder"].as_str().unwrap()).join(".heirloom").join("ustawienia.json")).unwrap()).unwrap();
+    assert_eq!(overlay_settings["display"]["mediaLayout"], "flat");
+    assert_eq!(snapshot_all(&original), before);
+}
+
+#[test]
+fn assigning_a_loose_file_moves_it_into_the_persons_folder_when_files_are_kept_in_folders() {
+    let mut f = family();
+    run(&mut f.api, "media.setLayout", json!({ "layout": "perPerson" }));
+    put(&f.root, "media/Maria Nowak 1950.jpg", "maria");
+    put(&f.root, "media/inne.jpg", "inne");
+    let report = scan(&mut f.api);
+    assert_eq!(unknown_row(&report, "media/Maria Nowak 1950.jpg")["suggestion"]["id"], f.maria.as_str());
+    let result = run(&mut f.api, "media.assign", json!({ "path": "media/Maria Nowak 1950.jpg", "person": f.maria }));
+    assert_eq!(result["assigned"][0]["path"], "media/Nowak Maria/Maria Nowak 1950.jpg");
+    assert_eq!(result["assigned"][0]["moved"], true);
+    assert!(f.root.join("media/Nowak Maria/Maria Nowak 1950.jpg").is_file() && !f.root.join("media/Maria Nowak 1950.jpg").exists());
+    assert_eq!(run(&mut f.api, "archive.status", Value::Null)["unsavedChanges"], 2, "an unsaved edit: the new record and Maria's link");
+    let list = run(&mut f.api, "media.list", Value::Null);
+    let item = list["items"].as_array().unwrap().iter().find(|m| m["path"] == "media/Nowak Maria/Maria Nowak 1950.jpg").unwrap();
+    assert_eq!(item["people"][0]["id"], f.maria.as_str());
+    // Dropping the edit is harmless: the file stays in the folder, it is only unknown again.
+    run(&mut f.api, "archive.undo", Value::Null);
+    assert!(unknown_paths(&scan(&mut f.api)).contains(&"media/Nowak Maria/Maria Nowak 1950.jpg".to_string()));
+    // A file in a subfolder is not moved; neither is a file when files are kept together.
+    run(&mut f.api, "media.setLayout", json!({ "layout": "flat" }));
+    let result = run(&mut f.api, "media.assign", json!({ "path": "media/inne.jpg", "person": f.maria }));
+    assert_eq!(result["assigned"][0]["moved"], false);
+    assert!(f.root.join("media/inne.jpg").is_file());
+    // Paths that leave the media folder are refused.
+    for bad in ["../rodzina.ged", "media/../rodzina.ged", "/etc/passwd", "rodzina.ged", "media/nie ma.jpg"] {
+        assert!(f.api.call("media.assign", json!({ "path": bad, "person": f.maria })).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn a_folder_left_in_a_flat_archive_is_unpacked_and_its_new_files_go_to_the_person_it_is_named_after() {
+    let mut f = family();
+    let root = f.root.clone();
+    let jozef = f.jozef.clone();
+    add(&mut f.api, &root, "media/Kowalski Józef/ślub.jpg", Some(&jozef));
+    put(&root, "media/Kowalski Józef/nowe1.jpg", "nowe1");
+    put(&root, "media/Kowalski Józef/nowe2.jpg", "nowe2");
+    put(&root, "media/skany/s1.jpg", "s1");
+    save(&mut f.api);
+    let report = scan(&mut f.api);
+    assert_eq!(report["layout"]["effective"], "flat");
+    let row = report["folders"].as_array().unwrap().iter().find(|x| x["path"] == "media/Kowalski Józef").unwrap();
+    assert_eq!((row["files"].as_u64(), row["linked"].as_u64(), row["unknown"].as_u64(), row["question"].as_str(), row["person"]["id"].as_str()), (Some(3), Some(1), Some(2), Some("unpack"), Some(jozef.as_str())));
+    assert_eq!(unknown_row(&report, "media/Kowalski Józef/nowe1.jpg")["suggestion"]["why"], "w folderze osoby");
+    let plan = run(&mut f.api, "media.restructurePreview", json!({ "to": "flat", "folders": ["media/Kowalski Józef"], "only": true }));
+    assert_eq!((plan["count"].as_u64(), plan["unknownMoves"].as_u64()), (Some(3), Some(2)));
+    let tree0 = tree(&root);
+    let objs0 = hashes(&mut f.api);
+    let result = run(&mut f.api, "media.restructure", json!({ "to": "flat", "folders": ["media/Kowalski Józef"], "only": true, "setLayout": false, "assignTo": jozef, "author": "Ewa" }));
+    assert_eq!((result["moved"].as_u64(), result["assigned"].as_u64()), (Some(3), Some(2)));
+    assert_eq!(result["unknownMoved"].as_array().unwrap().len(), 2);
+    assert!(!root.join("media/Kowalski Józef").exists());
+    assert!(root.join("media/skany/s1.jpg").is_file(), "another folder is not touched");
+    assert_eq!(tree(&root).len(), tree0.len());
+    assert_eq!(multiset(&tree(&root)), multiset(&tree0));
+    for (id, hash) in &objs0 {
+        assert_eq!(hashes(&mut f.api)[id], *hash);
+    }
+    // The two new files now belong to Józef: an unsaved edit the user saves (or drops).
+    let status = run(&mut f.api, "archive.status", Value::Null);
+    assert_eq!((status["unsavedChanges"].as_u64(), status["display"]["mediaLayout"].as_str()), (Some(3), Some("flat")));
+    let list = run(&mut f.api, "media.list", Value::Null);
+    let of_jozef = list["items"].as_array().unwrap().iter().filter(|m| m["people"].as_array().unwrap().iter().any(|p| p["id"] == jozef.as_str())).count();
+    assert_eq!(of_jozef, 4, "his photo, the wedding one and the two new files");
+    assert!(unknown_paths(&scan(&mut f.api)).iter().all(|p| !p.contains("nowe")));
+    // Without a person to assign to, the moved unknown files are reported for the assign list.
+    let mut g = family();
+    let groot = g.root.clone();
+    put(&groot, "media/Kowalski Jan/obce.jpg", "obce");
+    save(&mut g.api);
+    let result = run(&mut g.api, "media.restructure", json!({ "to": "flat", "folders": ["media/Kowalski Jan"], "only": true, "setLayout": false, "author": "Ewa" }));
+    assert_eq!(result["unknownMoved"][0], "media/obce.jpg");
+    assert!(unknown_paths(&scan(&mut g.api)).contains(&"media/obce.jpg".to_string()));
+}
+
+#[test]
+fn the_scan_stops_at_fifty_thousand_files() {
+    let mut f = family();
+    let bulk = f.root.join("media").join("duzo");
+    fs::create_dir_all(&bulk).unwrap();
+    for n in 0..50_010 {
+        fs::write(bulk.join(format!("{n}.jpg")), n.to_string()).unwrap();
+    }
+    let report = scan(&mut f.api);
+    assert_eq!(report["truncated"], true);
+    assert!(report["counts"]["files"].as_u64().unwrap() <= 50_000);
+}
+
+// ---------- odd data ----------
+
+#[test]
+fn files_written_inside_other_records_or_with_odd_paths_are_never_unknown_and_never_moved() {
+    let mut f = family();
+    let root = f.root.clone();
+    put(&root, "media/zagniezdzony.jpg", "w osobie");
+    put(&root, "media/dziwna.jpg", "dziwna sciezka");
+    let data = f.root.join("rodzina.ged");
+    let text = fs::read_to_string(&data).unwrap();
+    // An object written inside Jan, and a record whose path has `./` and a double slash.
+    let text = text
+        .replacen(&format!("0 {} INDI", f.jan), &format!("0 {} INDI\n1 OBJE\n2 FILE media/zagniezdzony.jpg\n3 FORM image/jpeg\n1 OBJE @O60@", f.jan), 1)
+        .replacen("0 TRLR", "0 @O60@ OBJE\n1 FILE ./media//dziwna.jpg\n2 FORM image/jpeg\n0 TRLR", 1);
+    fs::write(&data, text).unwrap();
+    run(&mut f.api, "archive.reload", Value::Null);
+    let report = scan(&mut f.api);
+    assert!(unknown_paths(&report).is_empty(), "{:?}", unknown_paths(&report));
+    run(&mut f.api, "media.setLayout", json!({ "layout": "perPerson" }));
+    let plan = run(&mut f.api, "media.restructurePreview", json!({ "to": "perPerson" }));
+    let from: Vec<&str> = plan["moves"].as_array().unwrap().iter().map(|m| m["from"].as_str().unwrap()).collect();
+    assert!(!from.contains(&"media/zagniezdzony.jpg"), "{from:?}");
+    assert!(from.contains(&"media/dziwna.jpg"), "the odd path is the same file");
+    restructure(&mut f.api, "perPerson");
+    assert!(root.join("media/zagniezdzony.jpg").is_file(), "its path is part of Jan's record");
+    assert!(!root.join("media/dziwna.jpg").exists() && root.join("media/Kowalski Jan/dziwna.jpg").is_file());
+    let objs = hashes(&mut f.api);
+    assert!(objs.contains_key("@O60@"));
+}
+
+#[test]
+fn when_every_file_is_held_nothing_is_saved_and_no_journal_is_left_to_undo() {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut f = family();
+        let root = f.root.clone();
+        // Everything goes to folders that cannot be written.
+        for folder in ["Kowalski Jan", "Kowalska Anna", "Kowalski Józef"] {
+            fs::create_dir_all(root.join("media").join(folder)).unwrap();
+            fs::set_permissions(root.join("media").join(folder), fs::Permissions::from_mode(0o555)).unwrap();
+        }
+        if fs::write(root.join("media/Kowalski Jan/probe"), "x").is_ok() {
+            fs::remove_file(root.join("media/Kowalski Jan/probe")).unwrap();
+            return;
+        }
+        let data0 = data_bytes(&root);
+        let result = restructure(&mut f.api, "perPerson");
+        for folder in ["Kowalski Jan", "Kowalska Anna", "Kowalski Józef"] {
+            fs::set_permissions(root.join("media").join(folder), fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert_eq!((result["moved"].as_u64(), result["held"].as_u64()), (Some(0), Some(5)));
+        assert_eq!(result["journal"], Value::Null);
+        assert_eq!(data_bytes(&root), data0);
+        assert_eq!(feed_rows(&mut f.api, "Uporządkowano pliki"), 0);
+        assert!(run(&mut f.api, "media.scan", Value::Null)["journal"].is_null());
+    }
+}
+
+#[test]
+fn the_history_row_says_what_happened_and_the_questions_wait_for_the_mode() {
+    let mut f = family();
+    restructure(&mut f.api, "perPerson");
+    let feed = run(&mut f.api, "history.feed", json!({}));
+    let row = feed["rows"].as_array().unwrap().iter().find(|r| r["action"] == "Uporządkowano pliki").unwrap();
+    assert_eq!((row["undo"].as_str(), row["note"].as_str()), (Some("Cofnij porządkowanie"), Some("Uporządkowano pliki")));
+    // Another computer, not asked yet: reading works and writes nothing; every command that changes anything waits.
+    let root = f.root.clone();
+    let dir = f.dir.path().to_path_buf();
+    let before = snapshot_all(&root);
+    let mut other = computer(&dir, "krewny");
+    run(&mut other, "archive.open", json!({ "path": path(&root) }));
+    let report = run(&mut other, "media.scan", Value::Null);
+    assert!(report["layout"]["setting"] == "perPerson");
+    run(&mut other, "media.restructurePreview", json!({ "to": "flat" }));
+    for (method, args) in [
+        ("media.restructure", json!({ "to": "flat", "author": "Ewa" })),
+        ("media.assign", json!({ "path": "media/skan.jpg", "person": "@I1@" })),
+        ("media.leaveAlone", json!({ "path": "media/skan.jpg", "kind": "file" })),
+        ("media.fixMoved", Value::Null),
+        ("media.setLayout", json!({ "layout": "flat" })),
+        ("media.finishRestructure", json!({ "author": "Ewa" })),
+        ("media.undoRestructure", json!({ "journal": "x", "author": "Ewa" })),
+    ] {
+        assert_eq!(code(&mut other, method, args), "mode_unset", "{method}");
+    }
+    assert_eq!(snapshot_all(&root), before, "nothing was written");
+}

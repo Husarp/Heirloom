@@ -72,9 +72,10 @@ fn is_abs(file: &str) -> bool {
 /// into one of the folders cut down to its inside part, and None for a path outside the archive.
 fn rel_in_layers(file: &str, layers: &[PathBuf]) -> Option<String> {
     let file = slash(file);
-    let file = file.trim_start_matches("./");
+    let file = file.as_str();
     if !is_abs(file) {
-        return Some(file.to_string());
+        // `./media//x.jpg` is the file `media/x.jpg`.
+        return Some(file.split('/').filter(|p| !p.is_empty() && *p != ".").collect::<Vec<_>>().join("/"));
     }
     for layer in layers {
         let root = slash(&layer.to_string_lossy());
@@ -229,7 +230,21 @@ impl Tree {
         for (i, o) in objs.iter().enumerate() {
             by_key.entry(o.key.clone()).or_default().push(i);
         }
-        let embedded = d.view.media_order.iter().filter(|id| id.contains('#')).filter_map(|id| d.view.media.get(id)?.file.as_ref()).filter_map(|f| rel_in_layers(f, layers)).map(|f| name_key(&f)).collect();
+        // Files written inside other records (an object inside a person, a citation, an event …): referenced, never moved.
+        let mut embedded: HashSet<String> = d.view.media_order.iter().filter(|id| id.contains('#')).filter_map(|id| d.view.media.get(id)?.file.as_ref()).filter_map(|f| rel_in_layers(f, layers)).map(|f| name_key(&f)).collect();
+        fn nested(node: &Node, layers: &[PathBuf], out: &mut HashSet<String>) {
+            for child in &node.children {
+                if child.tag == "OBJE" && child.pointer().is_none() {
+                    if let Some(rel) = child.child("FILE").and_then(|f| f.value.as_deref()).and_then(|v| rel_in_layers(&decode_value(v), layers)) {
+                        out.insert(name_key(&rel));
+                    }
+                }
+                nested(child, layers, out);
+            }
+        }
+        for record in doc.records.iter().filter(|r| r.tag != "OBJE") {
+            nested(record, layers, &mut embedded);
+        }
         Tree { persons, by_given, objs, by_key, by_id, embedded, person_index }
     }
 
@@ -416,17 +431,27 @@ pub fn effective_layout(s: &mut Session) -> Layout {
 /// `media`, or `media/<folder>` where a new file for `person` goes (B.3).
 pub fn dir_for_person(s: &mut Session, person: Option<&str>) -> String {
     let Some(person) = person else { return MEDIA.into() };
-    if effective_layout(s) != Layout::PerPerson {
-        return MEDIA.into();
+    dirs_for_persons(s, &[person]).remove(person).unwrap_or_else(|| MEDIA.into())
+}
+
+/// The same for several people with one pass over the archive.
+fn dirs_for_persons(s: &mut Session, persons: &[&str]) -> HashMap<String, String> {
+    let mut dirs: HashMap<String, String> = persons.iter().map(|p| (p.to_string(), MEDIA.to_string())).collect();
+    if persons.is_empty() || effective_layout(s) != Layout::PerPerson {
+        return dirs;
     }
     s.ensure();
     let layers = s.layers();
     let t = Tree::build(&s.archive.doc, s.derived.as_ref().expect("ensured"), &layers);
-    let Some(&p) = t.person_index.get(person) else { return MEDIA.into() };
     let mut include = t.linked_persons();
-    include.push(p);
+    include.extend(persons.iter().filter_map(|p| t.person_index.get(*p).copied()));
     let f = Folders::build(&t, &layers, &include);
-    f.by_person.get(&p).map_or_else(|| MEDIA.into(), |folder| format!("{MEDIA}/{folder}"))
+    for person in persons {
+        if let Some(folder) = t.person_index.get(*person).and_then(|p| f.by_person.get(p)) {
+            dirs.insert(person.to_string(), format!("{MEDIA}/{folder}"));
+        }
+    }
+    dirs
 }
 
 /// Where a file replacing the one of object `id` goes: the folder of the object's owner.
@@ -911,6 +936,10 @@ pub fn assign(s: &mut Session, args: &Value) -> ApiResult {
     crate::edit::prepare(s)?;
     let layers = s.layers();
     let in_place = s.overlay.is_none();
+    let mut person_ids: Vec<&str> = items.iter().map(|(_, p)| p.as_str()).collect();
+    person_ids.sort_unstable();
+    person_ids.dedup();
+    let dirs = if in_place { dirs_for_persons(s, &person_ids) } else { HashMap::new() };
     let mut prepared: Vec<(String, String, bool)> = Vec::new();
     let mut taken_in: HashMap<String, HashSet<String>> = HashMap::new();
     for (path, person) in &items {
@@ -925,7 +954,7 @@ pub fn assign(s: &mut Session, args: &Value) -> ApiResult {
         let mut final_rel = rel.clone();
         let mut did_move = false;
         if in_place && matches!(split_media(&rel), Some((None, _))) {
-            let dir = dir_for_person(s, Some(person));
+            let dir = dirs.get(person).cloned().unwrap_or_else(|| MEDIA.to_string());
             if dir != MEDIA {
                 let root = &layers[0];
                 let target_dir = crate::media_edit::resolve(root, &dir);

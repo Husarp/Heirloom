@@ -622,6 +622,15 @@ fn execute(s: &mut Session, progress: &Progress, mut journal: Journal, options: 
     }
     progress.step(total as u64);
 
+    // Nothing moved (every file was held): nothing to save, and nothing to take back later.
+    if journal.done.is_empty() {
+        let _ = append_line(&journal.path, &json!({ "state": "rolledBack", "moved": 0 }));
+        if let Some(layout) = options.set_layout {
+            super::store_setting(s, layout);
+        }
+        s.layout_interrupted = interrupted(&sidecar);
+        return Ok(json!({ "moved": 0, "skipped": skipped, "held": skipped.iter().filter(|x| x["reason"] != "missing").count(), "journal": null, "layout": options.set_layout.map(Layout::code), "removedFolders": [], "unknownMoved": [], "assigned": 0 }));
+    }
     // The FILE values of the files that moved, in one save.
     let batch = journal.batch.clone();
     if let Err(error) = apply_and_save(s, &journal, &options.author, options.allow_foreign, &batch, NOTE_DONE, &file_edits_forward, &HashSet::new()) {
