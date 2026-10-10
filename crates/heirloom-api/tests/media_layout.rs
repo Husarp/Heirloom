@@ -1267,3 +1267,34 @@ fn the_history_row_says_what_happened_and_the_questions_wait_for_the_mode() {
     }
     assert_eq!(snapshot_all(&root), before, "nothing was written");
 }
+
+#[test]
+fn taking_back_a_run_whose_lines_were_lost_puts_back_our_files_and_leaves_the_others() {
+    let mut f = family();
+    let root = f.root.clone();
+    let target = root.join("media/Kowalski Jan/jan1.jpg");
+    let mark = target.clone();
+    engine_hook(Some(Box::new(move |_, to| {
+        if to == mark {
+            fs::create_dir_all(mark.parent().unwrap()).unwrap();
+            fs::write(&mark, "ktos inny").unwrap();
+        }
+    })));
+    let tree0 = tree(&root);
+    engine::stop_after(Some(3));
+    f.api.call("media.restructure", json!({ "to": "perPerson", "author": "Ewa" })).unwrap_err();
+    engine::stop_after(None);
+    engine_hook(None);
+    let journal = journals_of(&root)[0].clone();
+    let kept: Vec<String> = fs::read_to_string(&journal).unwrap().lines().filter(|l| !l.starts_with("{\"done\"")).map(str::to_string).collect();
+    fs::write(&journal, kept.join("\n") + "\n").unwrap();
+    let name = journal.file_stem().unwrap().to_string_lossy().into_owned();
+    let result = run(&mut f.api, "media.undoRestructure", json!({ "journal": name, "author": "Ewa" }));
+    assert_eq!(result["movedBack"], 3);
+    // Our three files are back; the file that was in the way is untouched and stays (its folder with it).
+    assert_eq!(fs::read(&target).unwrap(), b"ktos inny");
+    let tree1 = tree(&root);
+    let mut expected = tree0.clone();
+    expected.insert("media/Kowalski Jan/jan1.jpg".into(), blake3::hash(b"ktos inny").to_hex().to_string());
+    assert_eq!(tree1, expected);
+}
