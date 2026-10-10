@@ -1,7 +1,9 @@
 import { useEffect } from "react";
 import { useStore } from "./store";
+import { cancelJob } from "./progress";
 import { Sidebar } from "../shell/Sidebar";
 import { TopBar } from "../shell/TopBar";
+import { FinalChangeDialog } from "../shell/FinalChangeDialog";
 import { AskDialog, ConflictDialog, ForeignConfirmDialog, WhoEditsDialog } from "../shell/Dialogs";
 import { CombinedBar, EditModeBar, ReadOnlyBar } from "../shell/Bars";
 import { Toasts } from "../shell/Toasts";
@@ -29,6 +31,7 @@ export function App() {
   const foreignConfirmOpen = useStore((s) => s.foreignConfirmOpen);
   const paletteOpen = useStore((s) => s.paletteOpen);
   const busy = useStore((s) => s.busy);
+  const finalChange = useStore((s) => s.finalChange);
   useAppearance();
   useShortcuts();
   useCloseGuard();
@@ -65,7 +68,8 @@ export function App() {
       {foreignConfirmOpen && <ForeignConfirmDialog />}
       {paletteOpen && phase === "ready" && <CommandPalette />}
       <AskDialog />
-      {busy && <BusyDialog text={busy.text} note={busy.note} />}
+      {finalChange && <FinalChangeDialog />}
+      {busy && <BusyDialog text={busy.text} note={busy.note} done={busy.done} total={busy.total} onCancel={busy.cancellable && !busy.cancelling ? cancelJob : undefined} />}
       <Toasts />
     </>
   );

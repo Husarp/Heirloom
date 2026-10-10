@@ -31,6 +31,7 @@ export function StepSummary({ state, act, goStep }: { state: ImportState; act: A
   const changed = useStore((s) => s.changed);
   const notify = useStore((s) => s.notify);
   const setAsk = useStore((s) => s.setAsk);
+  const confirmFinal = useStore((s) => s.confirmFinal);
   const requireEdit = useStore((s) => s.requireEdit);
   const setWizard = useWizard((w) => w.set);
   const reset = useWizard((w) => w.reset);
@@ -88,43 +89,54 @@ export function StepSummary({ state, act, goStep }: { state: ImportState; act: A
       commitAs(who);
     });
 
-  const commitAs = (who: string, allowForeign = false) =>
+  // In the archive itself the import is a final change: the dialog asks first (and offers a backup); an empty archive
+  // has nothing to lose. In „Nie ruszaj oryginału” it goes into the user's changes, which can be taken back (A.10).
+  const commitAs = (who: string) =>
     whenSaved(async () => {
-      setSaving(true);
-      try {
-        const result = await call<CommitResult>("import.commit", { author: who, note: note.trim() || null, allowForeign });
-        // The import is its own save: „Cofnij zapis” in the bar must not reach back past it.
-        useStore.setState({ lastSave: null });
-        changed();
-        setWizard({ done: result });
-        const saved = [
-          result.files > 0 && count(result.files, "plik", "pliki", "plików"),
-          result.merged > 0 && count(result.merged, "połączona osoba", "połączone osoby", "połączonych osób"),
-        ].filter(Boolean);
-        // Design 17f: the batch and what came with it under the message; undo and the tree as actions.
-        notify(result.message, {
-          detail: [result.batch, ...saved].join(" · "),
-          actions: [{ label: "Pokaż w drzewie", run: () => useStore.getState().go({ name: "tree", view: "family" }) }],
-          action: { label: "Cofnij import", run: () => askUndoImport(result.batch, () => requireEdit(() => undoImport(result.batch))) },
-        });
-      } catch (e) {
-        const error = e as ApiError;
-        // The first save into another program's file asks first, like „Zapisz” does (PLAN §11.2 rule 4).
-        if (error.code === "foreign")
-          setAsk({
-            title: "Zapisać import w pliku z innego programu?",
-            text: `Plik ${archive?.dataFile ?? ""} utworzył program ${archive?.origin ?? "nieznany"}. Heirloom zapisze go w formacie GEDCOM 7 i zachowa dane, których nie zna. Przed zapisem zrobi kopię zapasową oryginału w folderze .heirloom/kopie.`,
-            icon: "warn",
-            buttons: [
-              { label: "Anuluj", kind: "ghost" },
-              { label: "Zapisz w tym pliku", kind: "primary", run: () => commitAs(who, true) },
-            ],
-          });
-        else notify(error.message, { kind: "err" });
-      } finally {
-        setSaving(false);
+      if (useStore.getState().archive?.workMode !== "overlay" && !(await isEmptyArchive())) {
+        const people = included.length;
+        confirmFinal("import", ({ allowForeign }) => save(who, allowForeign), { people, files: state.summary.files - state.summary.duplicates });
+        return;
       }
+      await save(who);
     }, "Przed zapisaniem importu");
+
+  const save = async (who: string, allowForeign = false) => {
+    setSaving(true);
+    try {
+      const result = await call<CommitResult>("import.commit", { author: who, note: note.trim() || null, allowForeign });
+      // The import is its own save: „Cofnij zapis” in the bar must not reach back past it.
+      useStore.setState({ lastSave: null });
+      changed();
+      setWizard({ done: result });
+      const saved = [
+        result.files > 0 && count(result.files, "plik", "pliki", "plików"),
+        result.merged > 0 && count(result.merged, "połączona osoba", "połączone osoby", "połączonych osób"),
+      ].filter(Boolean);
+      // Design 17f: the batch and what came with it under the message; undo and the tree as actions.
+      notify(result.message, {
+        detail: [result.batch, ...saved].join(" · "),
+        actions: [{ label: "Pokaż w drzewie", run: () => useStore.getState().go({ name: "tree", view: "family" }) }],
+        action: { label: "Cofnij import", run: () => askUndoImport(result.batch, () => requireEdit(() => undoImport(result.batch))) },
+      });
+    } catch (e) {
+      const error = e as ApiError;
+      // The first save into another program's file asks first, like „Zapisz” does (PLAN §11.2 rule 4).
+      if (error.code === "foreign")
+        setAsk({
+          title: "Zapisać import w pliku z innego programu?",
+          text: `Plik ${archive?.dataFile ?? ""} utworzył program ${archive?.origin ?? "nieznany"}. Heirloom zapisze go w formacie GEDCOM 7 i zachowa dane, których nie zna. Przed zapisem zrobi kopię zapasową oryginału w folderze .heirloom/kopie.`,
+          icon: "warn",
+          buttons: [
+            { label: "Anuluj", kind: "ghost" },
+            { label: "Zapisz w tym pliku", kind: "primary", run: () => save(who, true) },
+          ],
+        });
+      else notify(error.message, { kind: "err" });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const cancel = () =>
     setAsk({
@@ -242,6 +254,12 @@ export function StepSummary({ state, act, goStep }: { state: ImportState; act: A
         </div>
 
         <div className="col scroll" style={{ gap: 14, minHeight: 0 }}>
+          {archive?.workMode === "overlay" && (
+            <div className="row" style={{ gap: 8, fontSize: 13, color: "var(--text2)" }}>
+              <ShieldCheck size={15} color="var(--accent-text)" style={{ flex: "none" }} />
+              Import trafi do Twoich zmian. Archiwum zostaje bez zmian.
+            </div>
+          )}
           {family && (
             <div className="card" style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
               <span style={{ fontSize: 14, fontWeight: 600 }}>Gdzie dołączą do drzewa</span>
@@ -308,6 +326,16 @@ export function StepSummary({ state, act, goStep }: { state: ImportState; act: A
       </Footer>
     </>
   );
+}
+
+/** No people and no media: nothing an import could damage, so no question and no backup. */
+async function isEmptyArchive(): Promise<boolean> {
+  if ((useStore.getState().archive?.people ?? 0) > 0) return false;
+  try {
+    return (await call<{ items: unknown[] }>("media.list")).items.length === 0;
+  } catch {
+    return false;
+  }
 }
 
 function Stat({ n, label }: { n: number; label: string }) {

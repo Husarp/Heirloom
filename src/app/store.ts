@@ -99,6 +99,26 @@ export interface Ask {
   buttons: { label: string; kind?: "primary" | "secondary" | "ghost" | "danger"; run?: () => void | Promise<void> }[];
 }
 
+/** A job the whole window waits for; the numbers come from `job.progress` (src/app/progress.ts). */
+export interface Busy {
+  text: string;
+  note?: string;
+  done?: number;
+  total?: number;
+  /** Shows „Przerwij” (only the backup zip can be stopped). */
+  cancellable?: boolean;
+  cancelling?: boolean;
+}
+
+export type FinalRun = (options: { allowForeign: boolean }) => void | Promise<void>;
+
+/** What the final-change dialog is asked for. */
+export interface FinalChange {
+  kind: FinalKind;
+  run: FinalRun;
+  extra?: Partial<FinalFacts>;
+}
+
 interface Store {
   phase: Phase;
   app: AppState | null;
@@ -132,7 +152,9 @@ interface Store {
   /** „Jak chcesz pracować z tym archiwum?” is answered: where to go on (the first-open page, or the archive). */
   afterMode: "firstOpen" | "ready";
   /** A job the whole window waits for („Przygotowuję folder na Twoje zmiany…”). */
-  busy: { text: string; note?: string } | null;
+  busy: Busy | null;
+  /** The final-change dialog is open (src/shell/FinalChangeDialog.tsx). */
+  finalChange: FinalChange | null;
   /** Start banners the user closed with ✕ (a kind of banner each); they come back at the next start. */
   hiddenBanners: string[];
   /** Set by the tree: its camera and selection, added to its route when the tree is left. */
@@ -169,9 +191,10 @@ interface Store {
   startRebase: () => void;
   /** TODO(L02c): [Cofnij] after a write-back (archive.undoWriteBack with its confirmation). */
   undoWriteBack: () => void;
-  /** TODO(L02b): the final-change dialog (src/shell/FinalChangeDialog.tsx) with the backup of the archive; until then
-   *  `run` is simply done. */
-  confirmFinal: (kind: FinalKind, run: () => void | Promise<void>, extra?: Partial<FinalFacts>) => void;
+  /** The final-change dialog (DESIGN A.7) with the backup of the archive; `run` is called when the user confirms,
+   *  with `allowForeign` when the dialog asked about a file made by another program and was agreed to. */
+  confirmFinal: (kind: FinalKind, run: FinalRun, extra?: Partial<FinalFacts>) => void;
+  closeFinalChange: () => void;
   setArchive: (status: ArchiveStatus) => void;
   go: (route: Route) => void;
   goBack: () => void;
@@ -284,6 +307,7 @@ export const useStore = create<Store>((set, get) => ({
   ask: null,
   afterMode: "ready",
   busy: null,
+  finalChange: null,
   hiddenBanners: [],
   treeSnapshot: null,
   setTreeSnapshot: (take) => set({ treeSnapshot: take }),
@@ -390,9 +414,8 @@ export const useStore = create<Store>((set, get) => ({
   undoWriteBack: () => {
     get().go({ name: "settings", section: "overlay" });
   },
-  confirmFinal: (_kind, run) => {
-    void run();
-  },
+  confirmFinal: (kind, run, extra) => set({ finalChange: { kind, run, extra } }),
+  closeFinalChange: () => set({ finalChange: null }),
 
   setArchive: (status) => set({ archive: status }),
 

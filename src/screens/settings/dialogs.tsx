@@ -5,11 +5,13 @@ import { Fragment } from "react";
 import { useStore } from "../../app/store";
 import { Spinner } from "../../components/bits";
 import { Dialog } from "../../components/Dialog";
-import { count } from "../../lib/format";
+import { count, num, plural } from "../../lib/format";
 import { WHATS_NEW } from "./whatsNew";
 
-/** Blocks the window while a backup or an export is written (it can't be cancelled halfway). */
-export function BusyDialog({ text, note }: { text: string; note?: string }) {
+/** Blocks the window while a backup or an export is written. With `done`/`total` it says how far it is; „Przerwij”
+ *  only where the job can be stopped (the backup zip). */
+export function BusyDialog({ text, note, done, total, onCancel }: { text: string; note?: string; done?: number; total?: number; onCancel?: () => void }) {
+  const counted = total != null && total > 0 && done != null;
   return (
     <Dialog width={400}>
       <div className="dialog-body" style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
@@ -18,8 +20,18 @@ export function BusyDialog({ text, note }: { text: string; note?: string }) {
         </span>
         <span className="col" style={{ gap: 2 }}>
           <span style={{ fontSize: 15, fontWeight: 600 }}>{text}</span>
+          {counted && (
+            <span className="num" style={{ fontSize: 13, color: "var(--text2)" }}>
+              {num(done)} z {num(total)} {plural(total, "pliku", "plików", "plików")}
+            </span>
+          )}
           {note && <span style={{ fontSize: 13, color: "var(--text2)" }}>{note}</span>}
         </span>
+        {onCancel && (
+          <button className="btn secondary" style={{ marginLeft: "auto" }} onClick={onCancel}>
+            Przerwij
+          </button>
+        )}
       </div>
     </Dialog>
   );

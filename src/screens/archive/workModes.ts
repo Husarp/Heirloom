@@ -34,6 +34,8 @@ export interface FinalFacts {
   changes?: number;
   bytes?: number;
   dataFile?: string;
+  /** The file was made by another program and the user hasn't confirmed saving into it: the dialog says so. */
+  foreign?: { origin: string | null; version: string | null; dataFile: string } | null;
 }
 
 export const FINAL_TITLES: Record<FinalKind, string> = {
@@ -64,6 +66,12 @@ export function finalChangeText(kind: FinalKind, f: FinalFacts): string {
     return `Do archiwum „${f.name}”${f.root ? ` (${f.root})` : ""} ${plural(changes + files, "trafi", "trafią", "trafi")}: ${what}. Zobaczy je każdy, kto otworzy to archiwum. Przeniesienie można cofnąć, dopóki nikt inny nie zmieni archiwum.`;
   }
   return `Heirloom przeniesie ${num(files)} ${plural(files, "plik", "pliki", "plików")} w folderze media i zmieni ich ścieżki w pliku ${f.dataFile ?? ""}. Porządkowanie można cofnąć („Cofnij porządkowanie”).`;
+}
+
+/** „Plik drzewo.ged utworzył program MyHeritage (GEDCOM 5.5.1). Po zapisie będzie w formacie GEDCOM 7 — …” */
+export function foreignLine(f: NonNullable<FinalFacts["foreign"]>): string {
+  const program = f.origin ? `program ${f.origin}` : "inny program";
+  return `Plik ${f.dataFile} utworzył ${program}${f.version ? ` (GEDCOM ${f.version})` : ""}. Po zapisie będzie w formacie GEDCOM 7 — ${f.origin ?? "ten program"} może go nie otworzyć. Dane, których Heirloom nie zna, zostaną w pliku.`;
 }
 
 /** „Masz 14 zmian, których nie ma jeszcze w archiwum.” */

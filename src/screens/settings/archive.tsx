@@ -3,13 +3,15 @@
 import { FolderOpen, HardDriveDownload } from "lucide-react";
 import { useEffect, useState } from "react";
 import { call } from "../../api/transport";
-import type { AppState, ArchiveStatus, OverlayInfo } from "../../api/types";
+import type { AppState, ArchiveStatus, BackupInfo, OverlayInfo } from "../../api/types";
 import { useStore } from "../../app/store";
 import { useApi } from "../../app/useApi";
 import { Segmented, SettingRow, Spinner, Toggle } from "../../components/bits";
 import { bytes, count, displayPath } from "../../lib/format";
-import { openPath, pickFiles, pickSavePath } from "../../lib/native";
+import { openPath, pickFiles, pickFolder, pickSavePath, revealPath } from "../../lib/native";
+import { makeBackup, restoreFromBackup } from "../../app/backup";
 import { discardMine, switchToInPlace, switchToOverlay } from "../../app/workMode";
+import { lastBackupNote, ROTATION_NOTE } from "../archive/backupText";
 import { lastWriteBackText, waitingText } from "../archive/workModes";
 import { BusyDialog, CheckDialog, type CheckProblem } from "./dialogs";
 import { failed, fileSafe, Keycap, saveSettings, Section, Select, showInFolder, today, whenDone } from "./parts";
@@ -284,10 +286,34 @@ const KEEP = [5, 10, 20, 50, 100];
 
 function BackupSection({ archive, setBusy }: { archive: ArchiveStatus; setBusy: (busy: Busy) => void }) {
   const notify = useStore((s) => s.notify);
-  const whenSaved = useStore((s) => s.whenSaved);
+  const dataVersion = useStore((s) => s.dataVersion);
   const keep = [...new Set([...KEEP, archive.backupsToKeep])].sort((a, b) => a - b);
+  const [info, setInfo] = useState<BackupInfo | null>(null);
+  const [tick, setTick] = useState(0);
 
-  const createBackup = async () => {
+  // Where the next backup goes and when the last one was made; read again after a backup and when the folder changes.
+  useEffect(() => {
+    let current = true;
+    call<BackupInfo>("archive.backupInfo", { scope: "archive" })
+      .then((next) => current && setInfo(next))
+      .catch(() => current && setInfo(null));
+    return () => {
+      current = false;
+    };
+  }, [archive.archiveId, dataVersion, tick]);
+
+  const changeFolder = async () => {
+    const folder = await pickFolder("Gdzie zapisywać kopie zapasowe?");
+    if (!folder) return;
+    try {
+      await call("app.setBackupFolder", { folder });
+      setTick((n) => n + 1);
+    } catch (e) {
+      failed(e);
+    }
+  };
+
+  const saveElsewhere = async () => {
     const path = await pickSavePath(`Heirloom-${fileSafe(archive.name)}-${today()}.zip`, [{ name: "Archiwum ZIP", extensions: ["zip"] }]);
     if (!path) return;
     setBusy({ text: "Tworzę kopię…", note: "Przy wielu zdjęciach może to chwilę potrwać." });
@@ -301,12 +327,49 @@ function BackupSection({ archive, setBusy }: { archive: ArchiveStatus; setBusy: 
     }
   };
 
+  const last = info?.lastZip?.exists ? info.lastZip : null;
+  const whenSaved = useStore((s) => s.whenSaved);
+
   return (
     <Section id="backup" title="Kopie zapasowe">
-      <SettingRow label="Kopia całego archiwum" note="Plik .zip z danymi i zdjęciami">
-        <button className="btn secondary set-btn" onClick={() => whenSaved(createBackup, "Kopia obejmuje tylko zapisane dane")}>
+      <SettingRow
+        label="Kopia całego archiwum (.zip)"
+        note={
+          <>
+            {info && (
+              <span style={{ display: "block" }}>
+                Trafi do: {info.folderLabel}{" "}
+                <button className="link" onClick={changeFolder}>
+                  Zmień…
+                </button>{" "}
+                · {lastBackupNote(info)}
+                {last && (
+                  <>
+                    {" "}
+                    <button className="link" onClick={() => revealPath(last.path).catch(failed)}>
+                      Pokaż w folderze
+                    </button>
+                  </>
+                )}
+              </span>
+            )}
+            <span style={{ display: "block" }}>{ROTATION_NOTE}</span>
+          </>
+        }
+      >
+        <button className="btn secondary set-btn" onClick={() => makeBackup(() => setTick((n) => n + 1))}>
           <HardDriveDownload size={15} />
-          Utwórz kopię (.zip)
+          Utwórz kopię
+        </button>
+      </SettingRow>
+      <SettingRow label="Kopia w wybranym miejscu" note="Plik .zip z danymi i zdjęciami, np. na pendrive">
+        <button className="btn secondary set-btn" onClick={() => whenSaved(saveElsewhere, "Kopia obejmuje tylko zapisane dane")}>
+          Zapisz w innym miejscu…
+        </button>
+      </SettingRow>
+      <SettingRow label="Przywróć z kopii" note="Rozpakowuje kopię do nowego folderu i otwiera ją. Obecne archiwum zostaje bez zmian.">
+        <button className="btn secondary set-btn" onClick={restoreFromBackup}>
+          Przywróć z kopii…
         </button>
       </SettingRow>
       <SettingRow

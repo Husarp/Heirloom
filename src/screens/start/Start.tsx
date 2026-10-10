@@ -1,6 +1,7 @@
 import { ArrowRight, Cake, CalendarHeart, Flower2, HardDriveDownload, Heart, History, ImagePlus, Import, UserPlus, UserRoundPlus } from "lucide-react";
 import type { ReactNode } from "react";
 import { call } from "../../api/transport";
+import { makeBackup } from "../../app/backup";
 import { useStore } from "../../app/store";
 import { useApi } from "../../app/useApi";
 import { Avatar, rowButton } from "../../components/bits";
@@ -238,7 +239,7 @@ function QuickActions() {
     { icon: <UserPlus size={16} />, title: "Dodaj osobę", text: "włącza tryb edycji", run: () => requireEdit(() => go({ name: "edit", id: null })) },
     { icon: <Import size={16} />, title: "Importuj paczkę", text: "odpowiedź AI lub folder", run: () => go({ name: "import" }) },
     { icon: <ImagePlus size={16} />, title: "Dodaj zdjęcia", text: "wybierz pliki z dysku", run: addPhotos },
-    { icon: <HardDriveDownload size={16} />, title: "Utwórz kopię zapasową", text: "cały folder archiwum jako .zip", run: () => go({ name: "settings", section: "backup" }) },
+    { icon: <HardDriveDownload size={16} />, title: "Utwórz kopię zapasową", text: "cały folder archiwum jako .zip", run: () => makeBackup() },
   ];
   return (
     <Card title="Szybkie akcje">
