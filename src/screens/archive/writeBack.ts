@@ -46,7 +46,7 @@ export const UNDO_FAILED_TITLE = "Nie da się cofnąć";
 
 export const REBASE_TITLE = "Archiwum zmieniło się";
 export const FAST_FORWARD_DONE = "Wczytano nowe zmiany z archiwum.";
-export const REBASE_DONE = { text: "Połączono zmiany z archiwum z Twoimi.", detail: "Nic nie zginęło." };
+export const REBASE_DONE = { text: "Zmiany z archiwum połączono z Twoimi.", detail: "Nic nie zginęło." };
 export const TOO_DIFFERENT_TITLE = "Archiwum wygląda teraz zupełnie inaczej";
 
 /** „Od 3 października ktoś zmienił archiwum (14 zmian). Ty masz 37 zmian. Heirloom połączy jedno z drugim — nic nie zginie.” */

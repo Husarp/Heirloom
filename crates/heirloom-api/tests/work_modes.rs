@@ -885,3 +885,65 @@ fn a_refused_merge_leaves_no_conversion_behind() {
     let status = run(&mut api, "archive.status", Value::Null);
     assert_eq!((status["gedcomVersion"].as_str(), status["unsavedChanges"].as_u64()), (Some("5.5.1"), Some(0)), "{status}");
 }
+
+/// Every file under `root` with its bytes (no times).
+fn contents(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    snapshot(root).0.into_iter().map(|(p, (bytes, _))| (p, bytes)).collect()
+}
+
+/// The whole story of ticket L02c: edit in „Nie ruszaj oryginału”, someone edits the original (the same field, and
+/// another one), merge with one conflict, write back, undo: the original is as it was just before the write-back.
+#[test]
+fn scenario_conflict_merge_write_back_and_undo() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = family(dir.path());
+    let mut api = computer(dir.path(), "ten");
+    let mine = overlay_mode(&mut api, &original);
+    // The user changes Jan's given name and saves into his own folder.
+    let jan = run(&mut api, "people.list", json!({}))["people"][0]["id"].as_str().unwrap().to_string();
+    run(&mut api, "person.update", json!({ "id": jan, "given": "Jan Piotr", "surname": "Kowalski" }));
+    run(&mut api, "archive.save", json!({ "author": "Ewa" }));
+    // Someone else changes the same name in the original and, by a text edit, gives Jan a trade as well.
+    their_edit(dir.path(), &original, "Janek");
+    let ged = fs::read_to_string(original.join("rodzina.ged")).unwrap();
+    let at = ged.find("1 NAME Janek").expect("the name was changed");
+    let line_end = ged[at..].find('\n').unwrap() + at + 1;
+    fs::write(original.join("rodzina.ged"), format!("{}1 OCCU Stolarz\n{}", &ged[..line_end], &ged[line_end..])).unwrap();
+    // The write-back says the archive changed; the merge finds the one clash and keeps the user's version.
+    assert_eq!(code(&mut api, "archive.writeBack", json!({ "author": "Ewa" })), "original_changed");
+    let preview = run(&mut api, "archive.rebase", json!({ "preview": true }))["result"].clone();
+    let conflicts = preview["conflicts"].as_array().unwrap();
+    assert_eq!(conflicts.len(), 1, "{preview}");
+    assert_eq!(conflicts[0]["mineChanges"][0]["new"].as_str().unwrap().contains("Jan Piotr"), true);
+    assert_eq!(conflicts[0]["theirChanges"][0]["new"].as_str().unwrap().contains("Janek"), true);
+    let theirs: Vec<String> = conflicts[0]["theirChanges"].as_array().unwrap().iter().map(|c| c["new"].as_str().unwrap_or("").to_string()).collect();
+    assert!(theirs.iter().any(|v| v.contains("Stolarz")), "their other change is listed too: {theirs:?}");
+    let key = conflicts[0]["key"].as_str().unwrap().to_string();
+    let merged = run(&mut api, "archive.rebase", json!({ "choices": { key: "mine" } }));
+    assert_eq!(merged["result"]["merged"], true);
+    let people = run(&mut api, "people.list", json!({}))["people"].clone();
+    assert!(people.as_array().unwrap().iter().any(|p| p["given"] == "Jan Piotr"));
+    // Just before the write-back.
+    let before = contents(&original);
+    let done = run(&mut api, "archive.writeBack", json!({ "author": "Ewa" }));
+    assert_eq!(done["status"]["overlay"]["canUndoWriteBack"], true);
+    let data = fs::read_to_string(original.join("rodzina.ged")).unwrap();
+    // The record is kept whole from the side chosen (A.9): the user's name; their trade shows in „Pokaż różnice” only.
+    assert!(data.contains("Jan Piotr /Kowalski/") && !data.contains("Janek /"), "{data}");
+    run(&mut api, "archive.undoWriteBack", Value::Null);
+    let after = contents(&original);
+    // The data, the history and every photo are byte for byte as before. (The copy the write-back made in kopie\ stays
+    // on purpose, and the editors' „last edited” in ustawienia.json is not taken back.)
+    for (path, bytes) in &before {
+        let rel = path.strip_prefix(&original).unwrap_or(path);
+        if rel.ends_with("ustawienia.json") {
+            eprintln!("ustawienia.json {} after the undo", if after.get(path) == Some(bytes) { "is the same" } else { "differs (editors)" });
+            continue;
+        }
+        assert_eq!(after.get(path), Some(bytes), "{} differs after the undo", rel.display());
+    }
+    let extra: Vec<String> = after.keys().filter(|p| !before.contains_key(*p)).map(|p| p.strip_prefix(&original).unwrap().display().to_string()).collect();
+    assert!(extra.iter().all(|p| p.contains("kopie")), "only the safety copy is new: {extra:?}");
+    assert_eq!(run(&mut api, "archive.status", Value::Null)["overlay"]["pending"].as_u64().unwrap() > 0, true, "the user's changes wait again");
+    assert!(mine.is_dir());
+}
