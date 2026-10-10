@@ -181,6 +181,16 @@ export interface RebaseConflict {
   mine: string | null;
   theirs: string | null;
   base: string | null;
+  /** What each side changed from the base, worded like the history feed („Pokaż różnice”). */
+  mineChanges: FieldChange[];
+  theirChanges: FieldChange[];
+}
+
+/** One field of a record changed: „Urodzenie · data”: „1878” → „12.03.1878”. null: not there. */
+export interface FieldChange {
+  field: string;
+  old: string | null;
+  new: string | null;
 }
 
 /** `archive.rebase` → { result, status }. `merged: false` with `conflicts`: nothing was changed, choose and call again with
@@ -188,7 +198,7 @@ export interface RebaseConflict {
 export interface RebaseResult {
   result:
     | { merged: true; fastForward: boolean; changes: number; conflicts: [] }
-    | { merged: false; conflicts: RebaseConflict[]; theirChanges: number; myChanges: number };
+    | { merged: false; conflicts: RebaseConflict[]; theirChanges: number; myChanges: number; /** RFC 3339: the last time the archive and „Twoje zmiany” were the same. */ since: string };
   status: ArchiveStatus;
 }
 
@@ -220,6 +230,8 @@ export interface CombinedArchive {
   dataPath: string | null;
   /** Shown in the user's version („Nie ruszaj oryginału” on this computer). */
   withChanges?: boolean;
+  /** With `withChanges`: how many records of the user's version the archive doesn't have yet. */
+  pending?: number;
 }
 
 /** A name offered by „Kto edytuje?”. */

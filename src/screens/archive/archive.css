@@ -134,3 +134,82 @@
   color: var(--text);
   font-size: 13px;
 }
+
+/* „Archiwum zmieniło się”: one row for each record changed on both sides (DESIGN A.9). */
+.rebase-list {
+  max-height: 340px;
+  overflow: auto;
+}
+.rebase-row {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+.rebase-row:first-child {
+  border-top: none;
+}
+.rebase-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.rebase-name {
+  flex: 1 1 0;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 14px;
+}
+.rebase-choices {
+  display: flex;
+  gap: 16px;
+  flex: none;
+}
+.rebase-choice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.rebase-choice input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+.rebase-note {
+  font-size: 12px;
+  color: var(--text3);
+}
+.rebase-diff {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--surface2);
+  border-radius: 8px;
+}
+.rebase-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.rebase-line {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 13px;
+}
+.rebase-field {
+  color: var(--text2);
+}
+.rebase-values {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.rebase-none {
+  font-size: 13px;
+  color: var(--text3);
+}

@@ -105,7 +105,7 @@ export async function askPendingSwitch() {
 }
 
 /** „Zachowaj je jako osobne archiwum…”: the user's version becomes an archive of its own; the folder of changes is retired. */
-async function keepAsNewArchive() {
+export async function keepAsNewArchive() {
   const before = store().archive;
   const folder = await pickFolder("Nowe archiwum: wybierz pusty folder");
   if (!folder || !before) return;

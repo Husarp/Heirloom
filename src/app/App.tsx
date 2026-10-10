@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useStore } from "./store";
 import { Sidebar } from "../shell/Sidebar";
 import { TopBar } from "../shell/TopBar";
+import { RebaseDialog } from "../screens/archive/RebaseDialog";
 import { AskDialog, ConflictDialog, ForeignConfirmDialog, WhoEditsDialog } from "../shell/Dialogs";
 import { CombinedBar, EditModeBar, ReadOnlyBar } from "../shell/Bars";
 import { Toasts } from "../shell/Toasts";
@@ -65,6 +66,7 @@ export function App() {
       {foreignConfirmOpen && <ForeignConfirmDialog />}
       {paletteOpen && phase === "ready" && <CommandPalette />}
       <AskDialog />
+      <RebaseDialog />
       {busy && <BusyDialog text={busy.text} note={busy.note} />}
       <Toasts />
     </>

@@ -34,6 +34,8 @@ export interface FinalFacts {
   changes?: number;
   bytes?: number;
   dataFile?: string;
+  /** The file was made by another program and the user hasn't confirmed saving into it: the dialog says so. */
+  foreign?: { origin: string | null; version: string | null; dataFile: string } | null;
 }
 
 export const FINAL_TITLES: Record<FinalKind, string> = {
