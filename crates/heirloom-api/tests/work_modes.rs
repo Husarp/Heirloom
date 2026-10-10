@@ -110,6 +110,10 @@ fn archives_made_here_work_in_place_without_the_question() {
     let new = run(&mut api, "archive.saveAsNew", json!({ "folder": path(&dir.path().join("trzecie")) }));
     assert_eq!(new["status"]["workMode"], "inPlace");
     run(&mut api, "archive.save", json!({ "author": "Ewa" }));
+    // The registry knows the data file's hash after the save (for finding the archive again by its content).
+    let config: Value = serde_json::from_slice(&fs::read(dir.path().join("ten").join("ustawienia").join("aplikacja.json")).unwrap()).unwrap();
+    let record = config["archives"].as_object().unwrap().values().find(|r| r["opened"] == path(&dir.path().join("nowe")).as_str()).unwrap();
+    assert_eq!(record["hash"], blake3::hash(&fs::read(dir.path().join("nowe").join("rodzina.ged")).unwrap()).to_hex().to_string().as_str());
     let zip = run(&mut api, "archive.backupAuto", json!({}))["path"].as_str().unwrap().to_string();
     let restored = run(&mut api, "archive.restore", json!({ "zip": zip, "folder": path(&dir.path().join("przywrocone")) }));
     assert_eq!((restored["workMode"].as_str(), restored["people"].as_u64()), (Some("inPlace"), Some(1)));
@@ -595,7 +599,8 @@ fn switching_modes() {
     assert_eq!((status["people"].as_u64(), status["overlay"]["pending"].as_u64()), (Some(1), Some(0)));
     let parent = mine.parent().unwrap();
     let kept: Vec<String> = fs::read_dir(parent).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
-    assert!(kept.iter().any(|n| n.starts_with("Rodzina Kowalskich (porzucone ")), "{kept:?}");
+    let day = kept.iter().find_map(|n| n.strip_prefix("Rodzina Kowalskich (porzucone ")?.strip_suffix(')')).unwrap_or_else(|| panic!("{kept:?}")).to_string();
+    assert_eq!(day.len(), 10, "just the date, once: {kept:?}");
     // After a write-back, switching to in place retires the folder.
     run(&mut api, "person.create", json!({ "given": "Piotr" }));
     run(&mut api, "archive.save", json!({ "author": "Ewa" }));
@@ -604,7 +609,7 @@ fn switching_modes() {
     assert_eq!((status["workMode"].as_str(), status["people"].as_u64()), (Some("inPlace"), Some(2)));
     assert_eq!(status["notice"], "Od teraz zmiany zapisują się w archiwum.");
     let names: Vec<String> = fs::read_dir(parent).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
-    assert!(names.iter().any(|n| n.contains("przeniesione do archiwum")), "{names:?}");
+    assert!(names.iter().any(|n| *n == format!("Rodzina Kowalskich (przeniesione do archiwum {day} – można usunąć)")), "{names:?}");
     assert!(!mine.exists());
     // And back: nothing is written into the archive.
     let before = snapshot(&original);

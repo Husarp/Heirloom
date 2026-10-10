@@ -1157,7 +1157,14 @@ impl Api {
         let saved_at = heirloom_core::history::now();
         s.last_saved = Some(saved_at.clone());
         s.changed();
-        self.update_config(|c| c.last_editor = Some(author));
+        // The data file's hash on this computer (A.2), for finding the archive again by its content.
+        let record = s.overlay.is_none().then(|| (data_key(&s.archive.data_path()), s.archive.fingerprint_hex()));
+        self.update_config(|c| {
+            c.last_editor = Some(author);
+            if let Some(r) = record.and_then(|(key, hash)| c.archives.get_mut(&key).filter(|u| u.mode == IN_PLACE).map(|u| (u, hash))) {
+                r.0.hash = Some(r.1);
+            }
+        });
         Ok(json!({
             "backup": report.backup.map(|p| p.display().to_string()),
             "changes": report.history_entries,
