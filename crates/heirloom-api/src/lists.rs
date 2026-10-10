@@ -495,6 +495,8 @@ fn media_json(d: &Derived, id: &str, roots: &FileRoots, people_of: &HashMap<&str
         "translation": m.translation,
         "note": m.note,
         "missing": meta.is_none() && m.file.is_some(),
+        // Not where the path says, but the scan found it elsewhere in the archive (Part B).
+        "foundElsewhere": m.file.as_deref().is_some_and(|f| roots.found_elsewhere(f)),
         "size": meta.as_ref().map(|x| x.len()),
         "layer": path.as_deref().filter(|_| meta.is_some()).and_then(|p| roots.layer_of(p)),
         "absolute": path.map(|p| p.display().to_string()),

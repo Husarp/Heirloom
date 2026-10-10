@@ -406,7 +406,7 @@ impl Combined {
                 let root = p.root.clone().filter(|_| p.doc.is_some())?;
                 // Thumbnails per archive, as when it is opened alone (an archive without settings: per set and key).
                 let id = if p.id.is_empty() { format!("{}-{}", self.set.id, p.key) } else { p.id.clone() };
-                Some(media::Roots { archive: root, fallback: p.fallback.clone(), thumbs: cache_root.map(|c| c.join(id).join("miniatury")), key: Some(p.key.clone()) })
+                Some(media::Roots { archive: root, fallback: p.fallback.clone(), thumbs: cache_root.map(|c| c.join(id).join("miniatury")), key: Some(p.key.clone()), moved: Default::default() })
             })
             .collect()
     }
