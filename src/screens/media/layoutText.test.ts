@@ -7,6 +7,7 @@ import {
   heldText,
   interruptedText,
   lastRunText,
+  moreFoldersQuestion,
   layoutAsInArchive,
   layoutJournal,
   layoutNow,
@@ -115,6 +116,15 @@ describe("results", () => {
 });
 
 describe("the Start banner", () => {
+  it("does not count a folder's files twice", () => {
+    const s = scan({
+      unknown: [file("media/a.jpg", "media"), file("media/D/b.jpg", "media/D"), file("media/D/c.jpg", "media/D")],
+      folders: [folder({ path: "media/D", question: "whose" })],
+      counts: counts({ unknown: 3, folders: 1 }),
+    });
+    expect(bannerText(s)).toBe(`W folderze media jest coś do uporządkowania: 1${NB}plik bez przypisania, 1${NB}folder.`);
+    expect(tidyNote(s)).toBe(`Do uporządkowania: 1${NB}plik, 1${NB}folder`);
+  });
   it("lists what was found", () => {
     expect(bannerText(scan({ counts: counts({ unknown: 5, folders: 1 }) }))).toBe(`W folderze media jest coś do uporządkowania: 5${NB}plików bez przypisania, 1${NB}folder.`);
     expect(bannerText(scan({ counts: counts({ moved: 12, looseLinked: 8, outside: 4, folders: 2 }) }))).toContain(`8${NB}plików luzem, 12${NB}plików w innym miejscu, 4${NB}pliki poza archiwum, 2${NB}foldery`);
@@ -135,6 +145,10 @@ describe("the tidy dialog", () => {
       `W folderze media jest folder „Kowalski Józef” (23${NB}pliki, w tym 5 nieznanych programowi). Może ktoś odłożył go tam na chwilę.`,
     );
     expect(whoseQuestion({ name: "Dziadek Józek", files: 23 })).toBe(`Folder „Dziadek Józek” (23${NB}pliki) — czyj to folder?`);
+  });
+  it("asks about many folders together", () => {
+    expect(moreFoldersQuestion([{ files: 1 }, { files: 4 }])).toBe(`W folderze media są jeszcze 2${NB}foldery (5${NB}plików). Może ktoś odłożył je tam na chwilę.`);
+    expect(moreFoldersQuestion([{ files: 1 }, { files: 1 }, { files: 1 }, { files: 1 }, { files: 1 }])).toContain(`jest jeszcze 5${NB}folderów (5${NB}plików)`);
   });
   it("years", () => {
     expect(yearsOf("12 marca 1878", "1944")).toBe("1878–1944");

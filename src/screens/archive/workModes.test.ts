@@ -64,6 +64,7 @@ describe("finalChangeText", () => {
     );
     expect(finalChangeText("writeBack", { name: "R", changes: 2, people: 1 })).toContain("trafią: 2 zmiany (1 osoba).");
     expect(finalChangeText("restructure", { name: "R", files: 1204, dataFile: "rodzina.ged" })).toContain("przeniesie 1 204 pliki w folderze media i zmieni ich ścieżki w pliku rodzina.ged");
+    expect(finalChangeText("restructure", { name: "R", files: 1, dataFile: "rodzina.ged" })).toContain("przeniesie 1 plik w folderze media i zmieni jego ścieżkę w pliku rodzina.ged");
   });
   it("says how many changes wait", () => {
     expect(pendingText(14)).toBe("Masz 14 zmian, których nie ma jeszcze w archiwum.");

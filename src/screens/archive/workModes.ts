@@ -65,7 +65,7 @@ export function finalChangeText(kind: FinalKind, f: FinalFacts): string {
     if (files > 0) what += ` i ${count(files, "plik", "pliki", "plików")}${f.bytes ? ` (${bytes(f.bytes)})` : ""}`;
     return `Do archiwum „${f.name}”${f.root ? ` (${f.root})` : ""} ${plural(changes + files, "trafi", "trafią", "trafi")}: ${what}. Zobaczy je każdy, kto otworzy to archiwum. Przeniesienie można cofnąć, dopóki nikt inny nie zmieni archiwum.`;
   }
-  return `Heirloom przeniesie ${num(files)} ${plural(files, "plik", "pliki", "plików")} w folderze media i zmieni ich ścieżki w pliku ${f.dataFile ?? ""}. Porządkowanie można cofnąć („Cofnij porządkowanie”).`;
+  return `Heirloom przeniesie ${num(files)} ${plural(files, "plik", "pliki", "plików")} w folderze media i zmieni ${files === 1 ? "jego ścieżkę" : "ich ścieżki"} w pliku ${f.dataFile ?? ""}. Porządkowanie można cofnąć („Cofnij porządkowanie”).`;
 }
 
 /** „Plik drzewo.ged utworzył program MyHeritage (GEDCOM 5.5.1). Po zapisie będzie w formacie GEDCOM 7 — …” */

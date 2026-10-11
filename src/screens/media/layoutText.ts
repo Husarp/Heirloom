@@ -26,14 +26,20 @@ export function layoutAsInArchive(layout: MediaLayout): string {
   return `Jak w archiwum: ${layout === "perPerson" ? "w folderach osób" : "wszystkie razem"}. Pliki w archiwum przeniesiesz w trybie „Pracuj na archiwum”.`;
 }
 
+/** Unknown files that are not in a folder being asked about (those belong to the folder's question, not counted twice). */
+export function looseUnknown(scan: Pick<MediaScan, "unknown" | "folders" | "counts">, overlay = false): number {
+  const asked = new Set(scan.folders.filter((f) => f.question && !(overlay && f.question === "unpack")).map((f) => f.path));
+  return scan.unknown.length === scan.counts.unknown ? scan.unknown.filter((u) => !asked.has(u.folder)).length : scan.counts.unknown;
+}
+
 /** Files (not folders) waiting to be tidied. */
-export function tidyFiles(scan: Pick<MediaScan, "counts">): number {
+export function tidyFiles(scan: Pick<MediaScan, "unknown" | "folders" | "counts">): number {
   const c = scan.counts;
-  return c.moved + c.looseLinked + c.unknown + c.outside;
+  return c.moved + c.looseLinked + looseUnknown(scan) + c.outside;
 }
 
 /** „Do uporządkowania: 14 plików” (+ „, 1 folder”), or „nic”. */
-export function tidyNote(scan: Pick<MediaScan, "counts">): string {
+export function tidyNote(scan: Pick<MediaScan, "unknown" | "folders" | "counts">): string {
   const files = tidyFiles(scan);
   const folders = scan.counts.folders;
   const parts = [files > 0 ? filesWord(files) : null, folders > 0 ? foldersWord(folders) : null].filter(Boolean);
@@ -118,10 +124,11 @@ export function interruptedText(i: Pick<LayoutInterrupted, "done" | "total">): s
 // ---- Start banner (B.5) ----
 
 /** „5 plików bez przypisania, 1 folder”. */
-export function bannerParts(scan: Pick<MediaScan, "counts">): string {
+export function bannerParts(scan: Pick<MediaScan, "unknown" | "folders" | "counts">): string {
   const c = scan.counts;
   const parts: string[] = [];
-  if (c.unknown > 0) parts.push(`${filesWord(c.unknown)} bez przypisania`);
+  const unknown = looseUnknown(scan);
+  if (unknown > 0) parts.push(`${filesWord(unknown)} bez przypisania`);
   if (c.looseLinked > 0) parts.push(`${filesWord(c.looseLinked)} luzem`);
   if (c.moved > 0) parts.push(`${filesWord(c.moved)} w innym miejscu`);
   if (c.outside > 0) parts.push(`${filesWord(c.outside)} poza archiwum`);
@@ -129,7 +136,7 @@ export function bannerParts(scan: Pick<MediaScan, "counts">): string {
   return parts.join(", ");
 }
 
-export function bannerText(scan: Pick<MediaScan, "counts">): string {
+export function bannerText(scan: Pick<MediaScan, "unknown" | "folders" | "counts">): string {
   return `W folderze media jest coś do uporządkowania: ${bannerParts(scan)}.`;
 }
 
@@ -160,6 +167,16 @@ export const outsideSection = (n: number) =>
 export function unpackQuestion(f: Pick<ScanFolder, "name" | "files" | "unknown">): string {
   const unknown = f.unknown > 0 ? `, w tym ${f.unknown} ${plural(f.unknown, "nieznany", "nieznane", "nieznanych")} programowi` : "";
   return `W folderze media jest folder „${f.name}” (${filesWord(f.files)}${unknown}). Może ktoś odłożył go tam na chwilę.`;
+}
+
+/** How many folders are asked about one by one; the rest are asked together (a flat archive that still has a folder for each person). */
+export const FOLDERS_ONE_BY_ONE = 3;
+
+/** „Jest tu jeszcze 38 folderów (41 plików). Może ktoś odłożył je tam na chwilę.” */
+export function moreFoldersQuestion(folders: Pick<ScanFolder, "files">[]): string {
+  const n = folders.length;
+  const files = folders.reduce((sum, f) => sum + f.files, 0);
+  return `W folderze media ${plural(n, "jest jeszcze", "są jeszcze", "jest jeszcze")} ${foldersWord(n)} (${filesWord(files)}). Może ktoś ${plural(n, "odłożył go", "odłożył je", "odłożył je")} tam na chwilę.`;
 }
 
 /** „Folder „Dziadek Józek” (23 pliki) — czyj to folder?” */

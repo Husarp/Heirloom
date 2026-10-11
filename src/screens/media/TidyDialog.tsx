@@ -16,7 +16,9 @@ import {
   TIDY_TITLE,
   UNKNOWN_FOOTER,
   filesWord,
+  FOLDERS_ONE_BY_ONE,
   looseSection,
+  moreFoldersQuestion,
   movedSection,
   outsideSection,
   personLabel,
@@ -107,9 +109,10 @@ function Body({ scan }: { scan: MediaScan }) {
         {sections.moved && <MovedSection scan={scan} />}
         {sections.loose && <LooseSection scan={scan} onLeave={() => dismiss("loose")} />}
         {sections.unknown.length > 0 && <UnknownSection files={sections.unknown} />}
-        {sections.unpack.map((f) => (
+        {sections.unpack.slice(0, FOLDERS_ONE_BY_ONE).map((f) => (
           <UnpackSection key={f.path} folder={f} />
         ))}
+        {sections.unpack.length > FOLDERS_ONE_BY_ONE && <UnpackMany folders={sections.unpack.slice(FOLDERS_ONE_BY_ONE)} />}
         {sections.whose.map((f) => (
           <WhoseSection key={f.path} folder={f} files={scan.unknown.filter((u) => u.folder === f.path)} onLeave={() => dismiss(f.path)} />
         ))}
@@ -282,7 +285,7 @@ function UnknownSection({ files }: { files: ScanUnknown[] }) {
           return (
             <div key={u.path} className="row" style={{ gap: 10, padding: "8px 10px", borderBottom: "1px solid var(--border)", alignItems: "center" }}>
               <Checkbox on={ticked(u)} disabled={c == null} onChange={(on) => setOff((o) => { const n = new Set(o); if (on) n.delete(u.path); else n.add(u.path); return n; })} />
-              <Thumb path={u.path} size={96} icon={<FileQuestion size={18} />} style={{ width: 44, height: 44, flex: "none" }} />
+              <Thumb path={u.path} size={128} icon={<FileQuestion size={18} />} style={{ width: 44, height: 44, flex: "none" }} />
               <span className="col grow" style={{ minWidth: 0, gap: 1 }}>
                 <span className="ellipsis" style={{ fontSize: 14, fontWeight: 500 }} title={u.path}>
                   {u.name}
@@ -297,7 +300,7 @@ function UnknownSection({ files }: { files: ScanUnknown[] }) {
               <select
                 aria-label={`Co zrobić z plikiem ${u.name}`}
                 value={value}
-                style={{ maxWidth: 270, minWidth: 210, height: 32 }}
+                style={{ width: 270, height: 32, flex: "none" }}
                 onChange={(e) => {
                   const v = e.target.value;
                   if (v === "other") void other(u);
@@ -370,6 +373,40 @@ function UnpackSection({ folder }: { folder: ScanFolder }) {
         </button>
         <button className="btn ghost sm" onClick={() => void leaveFolder(folder)}>
           Zostaw folder, jak jest
+        </button>
+      </div>
+    </Block>
+  );
+}
+
+/** The folders beyond the first few (a flat archive that kept a folder for each person): one question for all of them. */
+function UnpackMany({ folders }: { folders: ScanFolder[] }) {
+  const [busy, setBusy] = useState(false);
+  const unpack = async () => {
+    setBusy(true);
+    try {
+      const args = { to: "flat" as const, folders: folders.map((f) => f.path), only: true };
+      const plan = await previewMove(args);
+      moveFiles(args, plan.count);
+    } catch (e) {
+      done(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const leave = () =>
+    call("media.leaveAlone", { items: folders.map((f) => ({ path: f.path, kind: "folder" })) })
+      .then(() => scanSoon(0))
+      .catch(done);
+  return (
+    <Block>
+      <Text>{moreFoldersQuestion(folders)}</Text>
+      <div className="row" style={{ gap: 8 }}>
+        <button className="btn secondary sm" disabled={busy} onClick={unpack}>
+          Wypakuj do folderu media
+        </button>
+        <button className="btn ghost sm" onClick={() => void leave()}>
+          Zostaw te foldery, jak są
         </button>
       </div>
     </Block>
