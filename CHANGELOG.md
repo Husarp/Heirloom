@@ -3,7 +3,7 @@
 Format: `X.Y.Z — YYYY-MM-DD HH:MM: description`. Newest on top.
 X = major change, Y = feature / bigger change, Z = small change.
 
-## 0.7.0 — 2026-10-11 02:30: DRAFT — Two ways of working with an archive; automatic backups; photos in folders per person
+## 0.7.0 — 2026-10-11 03:16: Two ways of working with an archive; automatic backups; photos in folders per person
 - **Two ways of working.** The first time you open an archive on a computer, Heirloom asks how you want to work with
   it (it can be changed later in Ustawienia › Archiwum › „Sposób pracy”):
   - **„Pracuj na archiwum”:** as before, changes are saved in the archive itself.
