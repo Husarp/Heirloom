@@ -757,16 +757,26 @@ pub fn rebase(s: &mut Session, choices: Option<HashMap<String, Side>>, preview: 
                     };
                     crate::activity::changes(&d, &entry)
                 };
+                let (mine_changes, their_changes) = (from_base(&c.mine), from_base(&c.theirs));
+                // The fields the choice is about: changed on both sides (else whatever either side changed there).
+                let labels = |v: &[Value]| v.iter().filter_map(|l| l["field"].as_str().map(str::to_string)).collect::<Vec<_>>();
+                let (lm, lt) = (labels(&mine_changes), labels(&their_changes));
+                let mut clashing: Vec<String> = lm.iter().filter(|l| lt.contains(l)).cloned().collect();
+                if clashing.is_empty() && !c.fields.is_empty() {
+                    clashing = lm.iter().chain(&lt).cloned().collect();
+                }
+                clashing.dedup();
                 json!({
                     "key": c.key,
                     "tag": c.tag,
+                    "fields": clashing,
                     "name": name,
                     "default": if c.default == Side::Mine { "mine" } else { "theirs" },
                     "mine": side(&c.mine),
                     "theirs": side(&c.theirs),
                     "base": side(&c.base),
-                    "mineChanges": from_base(&c.mine),
-                    "theirChanges": from_base(&c.theirs),
+                    "mineChanges": mine_changes,
+                    "theirChanges": their_changes,
                 })
             })
             .collect();

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { create } from "zustand";
 import type { FieldChange, RebaseConflict, RebaseResult } from "../../api/types";
 import { Dialog } from "../../components/Dialog";
-import { REBASE_TITLE, conflictsText, defaultChoices, rebaseText, sideNote, type Choice } from "./writeBack";
+import { REBASE_TITLE, conflictsText, defaultChoices, fieldsLine, keepRestNote, rebaseText, sideNote, type Choice } from "./writeBack";
 
 type Preview = Extract<RebaseResult["result"], { merged: false }>;
 
@@ -106,6 +106,8 @@ function ConflictRow({ conflict: c, choice, open, onChoose, onToggle }: { confli
           {open ? "Ukryj różnice" : "Pokaż różnice"}
         </button>
       </div>
+      <div className="rebase-fields">{fieldsLine(c)}</div>
+      {keepRestNote(c) && <div className="rebase-fields">{keepRestNote(c)}</div>}
       {open && (
         <div className="rebase-diff">
           <Column title="U Ciebie" changes={c.mineChanges} />

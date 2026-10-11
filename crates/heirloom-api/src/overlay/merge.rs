@@ -17,6 +17,9 @@ pub struct Conflict {
     pub base: Option<Node>,
     /// What is kept unless the user chooses otherwise: mine, or for a record deleted on one side the changed one.
     pub default: Side,
+    /// The clashing places inside a record changed on both sides (`BIRT/DATE`); empty for a record deleted on one side.
+    /// The choice applies to these only: every other change of both sides is kept either way.
+    pub fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,12 +89,21 @@ pub fn merge3(base: &[Node], mine: &[Node], theirs: &[Node], choices: &HashMap<S
         } else if tn == bn || mn == tn {
             mn.cloned()
         } else {
+            let head = mn.or(tn).is_some_and(|n| n.tag == "HEAD");
+            let side = if head { Side::Mine } else { choices.get(&key.0).copied().unwrap_or(Side::Mine) };
+            let mut fields = Vec::new();
             let merged = match (bn, mn, tn) {
-                (Some(bn), Some(mn), Some(tn)) => merge_node(bn, mn, tn),
+                (Some(bn), Some(mn), Some(tn)) => merge_node(bn, mn, tn, side, &mut fields),
                 _ => None,
             };
             match merged {
-                Some(node) => Some(node),
+                Some(node) => {
+                    // HEAD: mine, silently (no question for the user).
+                    if !fields.is_empty() && !head {
+                        conflicts.push(Conflict { key: key.0.clone(), tag: node.tag.clone(), mine: mn.cloned(), theirs: tn.cloned(), base: bn.cloned(), default: Side::Mine, fields });
+                    }
+                    Some(node)
+                }
                 None => {
                     // A record deleted on one side and changed on the other: keep the changed one, so nothing is lost.
                     let default = if mn.is_none() { Side::Theirs } else { Side::Mine };
@@ -101,7 +113,7 @@ pub fn merge3(base: &[Node], mine: &[Node], theirs: &[Node], choices: &HashMap<S
                         mn.cloned()
                     } else {
                         let side = choices.get(&key.0).copied().unwrap_or(default);
-                        conflicts.push(Conflict { key: key.0.clone(), tag, mine: mn.cloned(), theirs: tn.cloned(), base: bn.cloned(), default });
+                        conflicts.push(Conflict { key: key.0.clone(), tag, mine: mn.cloned(), theirs: tn.cloned(), base: bn.cloned(), default, fields: Vec::new() });
                         match side {
                             Side::Mine => mn.cloned(),
                             Side::Theirs => tn.cloned(),
@@ -186,15 +198,20 @@ pub fn rewrite_pointers(node: &mut Node, map: &HashMap<&str, &str>) {
     }
 }
 
-/// One record changed on both sides, merged child by child; None when the two changes clash.
-fn merge_node(base: &Node, mine: &Node, theirs: &Node) -> Option<Node> {
+/// One record (or child) changed on both sides, merged child by child. Where the two changes clash, `side` wins in that
+/// place only and the place is added to `clashes`; None only when the two are not the same kind of record.
+fn merge_node(base: &Node, mine: &Node, theirs: &Node, side: Side, clashes: &mut Vec<String>) -> Option<Node> {
+    merge_at(base, mine, theirs, side, clashes, "")
+}
+
+fn merge_at(base: &Node, mine: &Node, theirs: &Node, side: Side, clashes: &mut Vec<String>, path: &str) -> Option<Node> {
     if mine.tag != theirs.tag || mine.xref != theirs.xref {
         return None;
     }
-    let value = merge_value(&base.value, &mine.value, &theirs.value)?;
+    let value = merge_value(&base.value, &mine.value, &theirs.value, side, clashes, path);
     // CHAN is never a conflict: the later change wins.
     let strip = |n: &Node| n.children.iter().filter(|c| c.tag != "CHAN").cloned().collect::<Vec<_>>();
-    let mut children = merge_children(&strip(base), &strip(mine), &strip(theirs))?;
+    let mut children = merge_children(&strip(base), &strip(mine), &strip(theirs), side, clashes, path);
     let chan = later_chan(mine.child("CHAN"), theirs.child("CHAN"));
     if let Some(chan) = chan {
         let at = mine.children.iter().position(|c| c.tag == "CHAN").unwrap_or(children.len()).min(children.len());
@@ -203,13 +220,14 @@ fn merge_node(base: &Node, mine: &Node, theirs: &Node) -> Option<Node> {
     Some(Node { value, children, ..mine.clone() })
 }
 
-fn merge_value(base: &Option<String>, mine: &Option<String>, theirs: &Option<String>) -> Option<Option<String>> {
+fn merge_value(base: &Option<String>, mine: &Option<String>, theirs: &Option<String>, side: Side, clashes: &mut Vec<String>, path: &str) -> Option<String> {
     if mine == base {
-        Some(theirs.clone())
+        theirs.clone()
     } else if theirs == base || mine == theirs {
-        Some(mine.clone())
+        mine.clone()
     } else {
-        None
+        clashes.push(path.to_string());
+        if side == Side::Mine { mine.clone() } else { theirs.clone() }
     }
 }
 
@@ -245,13 +263,51 @@ fn hunks(base: &[Node], side: &[Node]) -> Vec<Hunk> {
             Some(b) => (b, map[b].expect("found")),
             None => (base.len(), side.len()),
         };
-        if bend > i || send > j {
+        if bend > i && send > j {
+            refine(&base[i..bend], &side[j..send], i, &mut out);
+        } else if bend > i || send > j {
             out.push(Hunk { start: i, end: bend, with: side[j..send].to_vec() });
         }
         match next {
             Some(b) => (i, j) = (b + 1, send + 1),
             None => return out,
         }
+    }
+}
+
+/// A run replaced by another run, split by tag: a fact edited and a neighbouring fact added are two changes, not one,
+/// so a clash over the edited fact never swallows the added one. `at`: the run's place in the base.
+fn refine(base: &[Node], side: &[Node], at: usize, out: &mut Vec<Hunk>) {
+    let (n, m) = (base.len(), side.len());
+    let mut table = vec![vec![0u32; m + 1]; n + 1];
+    for x in (0..n).rev() {
+        for y in (0..m).rev() {
+            table[x][y] = if base[x].tag == side[y].tag { table[x + 1][y + 1] + 1 } else { table[x + 1][y].max(table[x][y + 1]) };
+        }
+    }
+    let (mut x, mut y) = (0, 0);
+    let (mut px, mut py) = (0, 0);
+    let mut pairs = Vec::new();
+    while x < n && y < m {
+        if base[x].tag == side[y].tag {
+            pairs.push((x, y));
+            x += 1;
+            y += 1;
+        } else if table[x + 1][y] >= table[x][y + 1] {
+            x += 1;
+        } else {
+            y += 1;
+        }
+    }
+    for (x, y) in pairs {
+        if x > px || y > py {
+            out.push(Hunk { start: at + px, end: at + x, with: side[py..y].to_vec() });
+        }
+        out.push(Hunk { start: at + x, end: at + x + 1, with: vec![side[y].clone()] });
+        (px, py) = (x + 1, y + 1);
+    }
+    if n > px || m > py {
+        out.push(Hunk { start: at + px, end: at + n, with: side[py..m].to_vec() });
     }
 }
 
@@ -267,44 +323,72 @@ fn overlap(a: &Hunk, b: &Hunk) -> bool {
 
 /// diff3 over children: a change made on one side only is taken; changes on both sides to different children are
 /// both taken (two new facts added at one place: mine, then theirs); the same change on both is taken once; one child
-/// changed on each side (same tag) is merged further down. Anything else clashes.
-fn merge_children(base: &[Node], mine: &[Node], theirs: &[Node]) -> Option<Vec<Node>> {
+/// changed on each side (same tag) is merged further down. Anything else clashes: there `side` wins and the place is
+/// added to `clashes`; nothing outside the clash is ever dropped.
+fn merge_children(base: &[Node], mine: &[Node], theirs: &[Node], side: Side, clashes: &mut Vec<String>, path: &str) -> Vec<Node> {
     if mine == base {
-        return Some(theirs.to_vec());
+        return theirs.to_vec();
     }
     if theirs == base || mine == theirs {
-        return Some(mine.to_vec());
+        return mine.to_vec();
     }
     let (hm, ht) = (hunks(base, mine), hunks(base, theirs));
     let mut resolved: Vec<Hunk> = Vec::new();
     let mut used_theirs = vec![false; ht.len()];
+    // The tag the hunks are about, for naming the clash.
+    let place = |hs: &[&Hunk]| {
+        let tag = hs.iter().find_map(|h| base[h.start..h.end].iter().chain(h.with.iter()).map(|n| n.tag.clone()).next()).unwrap_or_default();
+        if path.is_empty() { tag } else { format!("{path}/{tag}") }
+    };
     for m in &hm {
         let clashing: Vec<usize> = (0..ht.len()).filter(|&k| overlap(m, &ht[k])).collect();
         match clashing.as_slice() {
             [] => resolved.push(m.clone()),
-            [k] => {
+            [k] if !used_theirs[*k] && m == &ht[*k] => {
+                used_theirs[*k] = true;
+                resolved.push(m.clone());
+            }
+            [k] if !used_theirs[*k] && m.start == m.end && ht[*k].start == ht[*k].end => {
+                used_theirs[*k] = true;
+                resolved.push(Hunk { start: m.start, end: m.end, with: m.with.iter().chain(&ht[*k].with).cloned().collect() });
+            }
+            [k] if !used_theirs[*k] && {
+                let t = &ht[*k];
+                (m.start, m.end) == (t.start, t.end) && m.end == m.start + 1 && m.with.len() == 1 && t.with.len() == 1 && m.with[0].tag == t.with[0].tag && base[m.start].tag == m.with[0].tag
+            } =>
+            {
                 let t = &ht[*k];
                 used_theirs[*k] = true;
-                if m == t {
+                let child = format!("{}{}{}", path, if path.is_empty() { "" } else { "/" }, m.with[0].tag);
+                let node = merge_at(&base[m.start], &m.with[0], &t.with[0], side, clashes, &child).unwrap_or_else(|| if side == Side::Mine { m.with[0].clone() } else { t.with[0].clone() });
+                resolved.push(Hunk { start: m.start, end: m.end, with: vec![node] });
+            }
+            ks => {
+                let mut all: Vec<&Hunk> = vec![m];
+                all.extend(ks.iter().map(|&k| &ht[k]));
+                clashes.push(place(&all));
+                if side == Side::Mine {
                     resolved.push(m.clone());
-                } else if m.start == m.end && t.start == t.end {
-                    resolved.push(Hunk { start: m.start, end: m.end, with: m.with.iter().chain(&t.with).cloned().collect() });
-                } else if (m.start, m.end) == (t.start, t.end) && m.end == m.start + 1 && m.with.len() == 1 && t.with.len() == 1 && m.with[0].tag == t.with[0].tag && base[m.start].tag == m.with[0].tag {
-                    resolved.push(Hunk { start: m.start, end: m.end, with: vec![merge_node(&base[m.start], &m.with[0], &t.with[0])?] });
-                } else {
-                    return None;
+                    for &k in ks {
+                        used_theirs[k] = true;
+                    }
                 }
             }
-            _ => return None,
         }
     }
     for (k, t) in ht.into_iter().enumerate() {
-        if !used_theirs[k] {
-            if resolved.iter().any(|r| overlap(r, &t)) {
-                return None;
-            }
-            resolved.push(t);
+        if used_theirs[k] {
+            continue;
         }
+        if resolved.iter().any(|r| overlap(r, &t)) {
+            // Only reachable after a widened merge above: the side chosen wins that place.
+            clashes.push(place(&[&t]));
+            if side == Side::Mine {
+                continue;
+            }
+            resolved.retain(|r| !overlap(r, &t));
+        }
+        resolved.push(t);
     }
     // Insertions at a place come before a run replaced from that place.
     resolved.sort_by_key(|h| (h.start, h.end != h.start));
@@ -316,7 +400,7 @@ fn merge_children(base: &[Node], mine: &[Node], theirs: &[Node]) -> Option<Vec<N
         at = at.max(h.end);
     }
     out.extend_from_slice(&base[at.min(base.len())..]);
-    Some(out)
+    out
 }
 
 /// For each element of `a`, its index in `b` along a longest common subsequence.
@@ -417,6 +501,54 @@ mod tests {
         assert!(text(&merged.records).contains("DATE 1879"));
         let theirs_chosen = merge3(&base, &mine, &theirs, &HashMap::from([("@I1@".to_string(), Side::Theirs)])).unwrap();
         assert!(text(&theirs_chosen.records).contains("DATE 1880"));
+    }
+
+    /// Both changed Jan's birth date (a clash); mine also added a SEX, theirs an OCCU: both are kept, whatever is chosen.
+    #[test]
+    fn a_choice_covers_only_the_clashing_field() {
+        let base = parse(BASE);
+        let mine = parse(&BASE.replace("2 DATE 1878", "2 DATE 1879").replace("1 NAME Jan /Nowak/\n", "1 NAME Jan /Nowak/\n1 SEX M\n"));
+        let theirs = parse(&BASE.replace("2 DATE 1878", "2 DATE 1880").replace("1 BIRT", "1 OCCU Stolarz\n1 BIRT"));
+        for (side, date, other) in [(Side::Mine, "DATE 1879", "DATE 1880"), (Side::Theirs, "DATE 1880", "DATE 1879")] {
+            let merged = merge3(&base, &mine, &theirs, &HashMap::from([("@I1@".to_string(), side)])).unwrap();
+            assert_eq!(merged.conflicts.len(), 1);
+            assert_eq!(merged.conflicts[0].fields, ["BIRT/DATE"]);
+            let out = text(&merged.records);
+            assert!(out.contains(date) && !out.contains(other), "{out}");
+            assert!(out.contains("1 SEX M") && out.contains("1 OCCU Stolarz"), "both sides' other edits are kept: {out}");
+            // Merging the result again changes nothing.
+            let again = merge3(&theirs, &merged.records, &theirs, &none()).unwrap();
+            assert_eq!(again.records, merged.records);
+            assert!(again.conflicts.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_clash_of_a_whole_run_of_children_follows_the_choice() {
+        let base = parse(BASE);
+        // Both rewrote the name; each also added a separate fact.
+        let mine = parse(&BASE.replace("Jan /Nowak/", "Jan Paweł /Nowak/").replace("0 @I2@ INDI", "1 NOTE moja\n0 @I2@ INDI"));
+        let theirs = parse(&BASE.replace("Jan /Nowak/", "Janek /Nowak/").replace("0 @I2@ INDI", "1 OCCU Stolarz\n0 @I2@ INDI"));
+        for side in [Side::Mine, Side::Theirs] {
+            let merged = merge3(&base, &mine, &theirs, &HashMap::from([("@I1@".to_string(), side)])).unwrap();
+            let out = text(&merged.records);
+            assert!(out.contains("NOTE moja") && out.contains("OCCU Stolarz"), "{out}");
+            assert_eq!(out.contains("Jan Paweł"), side == Side::Mine, "{out}");
+            assert_eq!(out.contains("Janek"), side == Side::Theirs, "{out}");
+        }
+    }
+
+    #[test]
+    fn a_fact_deleted_on_one_side_and_edited_on_the_other_follows_the_choice_and_keeps_the_rest() {
+        let base = parse(BASE);
+        let mine = parse(&BASE.replace("2 DATE 1878", "2 DATE 1879").replace("0 @I2@ INDI", "1 NOTE moja\n0 @I2@ INDI"));
+        let theirs = parse(&BASE.replace("1 BIRT\n2 DATE 1878\n", "").replace("1 NAME Jan /Nowak/", "1 NAME Janek /Nowak/"));
+        let kept = merge3(&base, &mine, &theirs, &none()).unwrap();
+        let out = text(&kept.records);
+        assert!(out.contains("DATE 1879") && out.contains("NOTE moja") && out.contains("Janek"), "{out}");
+        let gone = merge3(&base, &mine, &theirs, &HashMap::from([("@I1@".to_string(), Side::Theirs)])).unwrap();
+        let out = text(&gone.records);
+        assert!(!out.contains("BIRT") && out.contains("NOTE moja") && out.contains("Janek"), "{out}");
     }
 
     #[test]

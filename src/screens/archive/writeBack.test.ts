@@ -5,6 +5,8 @@ import {
   choicesToSend,
   conflictsText as rawConflicts,
   defaultChoices,
+  fieldsLine,
+  keepRestNote,
   rebaseText as rawRebase,
   sideNote,
   undoConfirm,
@@ -29,6 +31,7 @@ const conflict = (patch: Partial<RebaseConflict>): RebaseConflict => ({
   mine: "0 @I1@ INDI",
   theirs: "0 @I1@ INDI",
   base: "0 @I1@ INDI",
+  fields: ["Imię"],
   mineChanges: [],
   theirChanges: [],
   ...patch,
@@ -82,6 +85,14 @@ describe("the rebase dialog", () => {
     expect(conflictsText(p(2))).toMatch(/^U 2 osób /);
     expect(conflictsText([{ tag: "INDI" }, { tag: "SOUR" }])).toMatch(/^U 2 wpisów /);
     expect(conflictsText([{ tag: "NOTE" }])).toMatch(/^U 1 wpisu /);
+  });
+  it("names the clashing fields and promises to keep the rest", () => {
+    expect(fieldsLine(conflict({ fields: ["Urodzenie · data"] }))).toBe("Zmieniono po obu stronach: Urodzenie · data");
+    expect(fieldsLine(conflict({ fields: ["Imię", "Nazwisko"] }))).toBe("Zmieniono po obu stronach: Imię, Nazwisko");
+    expect(fieldsLine(conflict({ fields: [], mine: null }))).toBe("Usunięto u Ciebie, a w archiwum zmieniono.");
+    expect(fieldsLine(conflict({ fields: [], theirs: null }))).toBe("Usunięto w archiwum, a u Ciebie zmieniono.");
+    expect(keepRestNote(conflict({}))).toBe("Pozostałe zmiany z obu stron zostaną zachowane.");
+    expect(keepRestNote(conflict({ fields: [], mine: null }))).toBeNull();
   });
   it("preselects the backend's default and sends a choice for every conflict", () => {
     const list = [conflict({ key: "@I1@" }), conflict({ key: "@I2@", default: "theirs", mine: null })];

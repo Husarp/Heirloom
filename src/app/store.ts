@@ -501,6 +501,8 @@ export const useStore = create<Store>((set, get) => ({
         // What a section changed is saved now: its „Anuluj” no longer takes it back.
         section: open ? { ...open, base: result.status.undoDepth } : null,
         dataVersion: get().dataVersion + 1,
+        // „…zmiana czeka na zapis” is stale once it is saved.
+        toasts: get().toasts.filter((t) => !t.text.includes("czeka na zapis")),
       });
       return true;
     } catch (e) {

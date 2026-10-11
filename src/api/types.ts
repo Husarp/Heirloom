@@ -183,6 +183,8 @@ export interface RebaseConflict {
   mine: string | null;
   theirs: string | null;
   base: string | null;
+  /** The places both sides changed („Urodzenie · data”): the choice covers only these. Empty when a side deleted the record. */
+  fields: string[];
   /** What each side changed from the base, worded like the history feed („Pokaż różnice”). */
   mineChanges: FieldChange[];
   theirChanges: FieldChange[];

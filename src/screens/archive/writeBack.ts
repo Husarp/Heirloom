@@ -78,6 +78,17 @@ export function choicesToSend(conflicts: RebaseConflict[], chosen: Record<string
   return Object.fromEntries(conflicts.map((c) => [c.key, chosen[c.key] ?? c.default]));
 }
 
+/** What the choice is about: „Zmieniono po obu stronach: Urodzenie · data”, or who deleted the record. */
+export function fieldsLine(c: RebaseConflict): string {
+  if (c.fields.length > 0) return `Zmieniono po obu stronach: ${c.fields.join(", ")}`;
+  return c.mine == null ? "Usunięto u Ciebie, a w archiwum zmieniono." : c.theirs == null ? "Usunięto w archiwum, a u Ciebie zmieniono." : "Zmieniono po obu stronach.";
+}
+
+/** Under a record changed on both sides: the choice never costs anyone's other changes. Not for a deleted record. */
+export function keepRestNote(c: RebaseConflict): string | null {
+  return c.fields.length > 0 ? "Pozostałe zmiany z obu stron zostaną zachowane." : null;
+}
+
 /** A word under the choice when a side deleted the record. */
 export function sideNote(c: RebaseConflict, side: Choice): string | null {
   if (side === "mine" && c.mine == null) return "usunięte u Ciebie";
