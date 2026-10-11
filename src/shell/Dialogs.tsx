@@ -6,6 +6,7 @@ import { useStore } from "../app/store";
 import { Dialog } from "../components/Dialog";
 import { count, displayPath, shortWhen } from "../lib/format";
 import { pickFolder } from "../lib/native";
+import { BackupBlock, useBackupBlock } from "./BackupBlock";
 import { useWizard } from "../screens/import/types";
 
 /** „Kto edytuje?” (spec §4.20): a name from the archive's list, or a new one. No passwords. */
@@ -199,51 +200,63 @@ export function ConflictDialog() {
   );
 }
 
+/** „Zapisz jako nowe archiwum…”: the archive goes on in a new folder and the file from the other program stays as it was.
+ *  True when the new archive is open. */
+export async function saveAsNewArchive(): Promise<boolean> {
+  const { archive, notify, refreshApp } = useStore.getState();
+  if (!archive) return false;
+  const folder = await pickFolder("Nowe archiwum: wybierz pusty folder");
+  if (!folder) return false;
+  try {
+    const result = await call<{ status: ArchiveStatus; copied: number; failed: number; missing: number }>("archive.saveAsNew", { folder });
+    // A section still open stays open; its undo steps start again with the new archive.
+    const open = useStore.getState().section;
+    useStore.setState({ lastSave: null, section: open ? { ...open, base: result.status.undoDepth } : null });
+    // The same family goes on in the new archive, and so does an import in progress (the backend keeps it too).
+    if (useWizard.getState().archiveId === archive.archiveId) useWizard.getState().set({ archiveId: result.status.archiveId });
+    useStore.getState().changed(result.status);
+    await refreshApp();
+    notify(`Utworzono nowe archiwum w ${folder}.`, {
+      detail: [
+        `Plik ${archive.dataFile} został bez zmian.`,
+        result.copied ? `Skopiowano ${count(result.copied, "plik", "pliki", "plików")}.` : "",
+        result.failed ? `${count(result.failed, "pliku", "plików", "plików")} nie udało się skopiować — zostały tam, gdzie były.` : "",
+        result.missing ? `Brakuje ${count(result.missing, "pliku", "plików", "plików")}.` : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    });
+    return true;
+  } catch (e) {
+    notify((e as Error).message, { kind: "err" });
+    return false;
+  }
+}
+
 /** The first save into a file made by another program asks first (design 17b, PLAN §11.2 rule 4); once per archive.
  *  „Anuluj” stands apart on the left, so it isn't read as one of the two choices. */
 export function ForeignConfirmDialog() {
   const archive = useStore((s) => s.archive);
   const close = useStore((s) => s.closeForeignConfirm);
   const save = useStore((s) => s.save);
-  const notify = useStore((s) => s.notify);
-  const refreshApp = useStore((s) => s.refreshApp);
   const [busy, setBusy] = useState(false);
+  const bb = useBackupBlock("archive");
   if (!archive) return null;
+  const running = bb.phase === "running";
   const backups = `${displayPath(archive.sidecar)}\\kopie`;
 
   const saveAsNew = async () => {
-    const folder = await pickFolder("Nowe archiwum: wybierz pusty folder");
-    if (!folder) return;
     setBusy(true);
-    try {
-      const result = await call<{ status: ArchiveStatus; copied: number; failed: number; missing: number }>("archive.saveAsNew", { folder });
-      close();
-      // A section still open stays open; its undo steps start again with the new archive.
-      const open = useStore.getState().section;
-      useStore.setState({ lastSave: null, section: open ? { ...open, base: result.status.undoDepth } : null });
-      // The same family goes on in the new archive, and so does an import in progress (the backend keeps it too).
-      if (useWizard.getState().archiveId === archive.archiveId) useWizard.getState().set({ archiveId: result.status.archiveId });
-      useStore.getState().changed(result.status);
-      await refreshApp();
-      notify(`Utworzono nowe archiwum w ${folder}.`, {
-        detail: [
-          `Plik ${archive.dataFile} został bez zmian.`,
-          result.copied ? `Skopiowano ${count(result.copied, "plik", "pliki", "plików")}.` : "",
-          result.failed ? `${count(result.failed, "pliku", "plików", "plików")} nie udało się skopiować — zostały tam, gdzie były.` : "",
-          result.missing ? `Brakuje ${count(result.missing, "pliku", "plików", "plików")}.` : "",
-        ]
-          .filter(Boolean)
-          .join(" "),
-      });
-    } catch (e) {
-      notify((e as Error).message, { kind: "err" });
-    } finally {
-      setBusy(false);
-    }
+    if (await saveAsNewArchive()) close();
+    setBusy(false);
+  };
+  const saveHere = async () => {
+    close();
+    await save(true);
   };
 
   return (
-    <Dialog width={540} onClose={close} labelledBy="foreign-title">
+    <Dialog width={640} onClose={running ? undefined : close} labelledBy="foreign-title">
       <div style={{ padding: "22px 24px 16px", display: "flex", gap: 14 }}>
         <div className="dialog-icon" style={{ flex: "none" }}>
           <FileInput size={19} />
@@ -253,7 +266,7 @@ export function ForeignConfirmDialog() {
             {archive.origin ? `Ten plik pochodzi z programu ${archive.origin}.` : "Ten plik pochodzi z innego programu."}
           </div>
           <div className="dialog-text">
-            Zmiany zapiszą się bezpośrednio w nim: <b style={{ fontWeight: 600, color: "var(--text)" }}>{archive.dataFile}</b>. Najpierw zrobimy kopię zapasową.
+            Zmiany zapiszą się bezpośrednio w nim: <b style={{ fontWeight: 600, color: "var(--text)" }}>{archive.dataFile}</b>. Zalecamy najpierw zrobić kopię zapasową całego archiwum.
           </div>
         </div>
       </div>
@@ -261,7 +274,7 @@ export function ForeignConfirmDialog() {
         <span className="row" style={{ gap: 8, alignItems: "flex-start" }}>
           <Archive size={14} style={{ marginTop: 3, flex: "none" }} />
           <span>
-            Kopia trafi do <span className="mono selectable">{backups}</span>. Przywrócisz ją w Ustawienia › Kopie zapasowe.
+            Kopia pliku danych trafi do <span className="mono selectable">{backups}</span>.
           </span>
         </span>
         <span className="row" style={{ gap: 8, alignItems: "flex-start" }}>
@@ -269,24 +282,29 @@ export function ForeignConfirmDialog() {
           Pola, których Heirloom nie zna, zostaną w pliku bez zmian.
         </span>
       </div>
+      <BackupBlock bb={bb} />
       <div className="dialog-foot">
-        <button className="btn ghost" disabled={busy} onClick={close}>
+        <button className="btn ghost" disabled={busy || running} onClick={close}>
           Anuluj
         </button>
         <span className="grow" />
-        <button className="btn secondary" disabled={busy} onClick={saveAsNew} title="Plik z innego programu zostanie bez zmian">
+        <button className="btn secondary" disabled={busy || running} onClick={saveAsNew} title="Plik z innego programu zostanie bez zmian">
           Zapisz jako nowe archiwum
         </button>
-        <button
-          className="btn primary"
-          disabled={busy}
-          onClick={async () => {
-            close();
-            await save(true);
-          }}
-        >
-          Zapisz w tym pliku
-        </button>
+        {bb.covered ? (
+          <button className="btn primary" disabled={busy || running} onClick={saveHere}>
+            Zapisz w tym pliku
+          </button>
+        ) : (
+          <>
+            <button className="btn secondary" disabled={busy || running} onClick={saveHere}>
+              Dalej bez kopii
+            </button>
+            <button className="btn primary" disabled={busy || running || !bb.canStart} onClick={bb.start}>
+              Zrób kopię zapasową
+            </button>
+          </>
+        )}
       </div>
     </Dialog>
   );
@@ -300,7 +318,7 @@ export function AskDialog() {
   const [busy, setBusy] = useState(false);
   if (!ask) return null;
   return (
-    <Dialog width={480} onClose={() => setAsk(null)}>
+    <Dialog width={ask.wide ? 600 : 480} onClose={() => setAsk(null)}>
       <div className="dialog-body">
         {ask.icon && (
           <div className="dialog-icon" style={ask.icon === "info" ? { background: "var(--accent-soft)", color: "var(--accent-text)" } : undefined}>

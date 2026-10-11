@@ -42,7 +42,7 @@ function ToastItem({ toast: t }: { toast: Toast }) {
       onFocus={() => setPaused(true)}
       onBlur={() => setPaused(false)}
     >
-      {t.kind === "err" ? <CircleAlert size={17} /> : <CircleCheck size={17} />}
+      {t.kind === "err" || t.kind === "warn" ? <CircleAlert size={17} /> : <CircleCheck size={17} />}
       <div className="toast-body">
         <span className="toast-title">{t.text}</span>
         {t.detail && <span className="toast-detail">{t.detail}</span>}

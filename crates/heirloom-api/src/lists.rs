@@ -139,9 +139,9 @@ fn owner_of_record(d: &Derived, record: &str) -> Option<usize> {
 // ---------- First open ----------
 
 /// "Pierwsze otwarcie" (spec §4.18): what was found, what's missing, suggested start people.
-pub fn first_open(d: &Derived, root: &Path) -> Value {
+pub fn first_open(d: &Derived, roots: &FileRoots) -> Value {
     let photos = d.view.media.values().filter(|m| m.kind == MediaKind::Photo).count();
-    let missing = missing_files(d, &FileRoots::One(root.to_path_buf())).len();
+    let missing = missing_files(d, roots).len();
     let other_fields: usize = d.view.people.iter().map(|p| p.other.len()).sum();
     // Suggestions: most connections, the youngest generation, the oldest with dates.
     let mut suggestions = Vec::new();
@@ -495,7 +495,10 @@ fn media_json(d: &Derived, id: &str, roots: &FileRoots, people_of: &HashMap<&str
         "translation": m.translation,
         "note": m.note,
         "missing": meta.is_none() && m.file.is_some(),
-        "size": meta.map(|x| x.len()),
+        // Not where the path says, but the scan found it elsewhere in the archive (Part B).
+        "foundElsewhere": m.file.as_deref().is_some_and(|f| roots.found_elsewhere(f)),
+        "size": meta.as_ref().map(|x| x.len()),
+        "layer": path.as_deref().filter(|_| meta.is_some()).and_then(|p| roots.layer_of(p)),
         "absolute": path.map(|p| p.display().to_string()),
         "people": people,
         "profileOf": profile_of,
@@ -735,13 +738,13 @@ mod tests {
         let p = places(&d);
         let first = p["places"][0]["path"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect::<Vec<_>>();
         assert!(place(&d, &first).unwrap()["events"].as_u64().unwrap() > 0);
-        let m = media_list(&d, &FileRoots::One(root.clone()));
+        let m = media_list(&d, &FileRoots::one(root.clone()));
         assert_eq!(m["items"].as_array().unwrap().len(), 3);
-        assert!(missing_files(&d, &FileRoots::One(root.clone())).is_empty());
+        assert!(missing_files(&d, &FileRoots::one(root.clone())).is_empty());
         let src = sources(&d);
         let first_source = src["items"][0]["id"].as_str().unwrap();
         assert!(source(&d, first_source).unwrap()["facts"].as_array().unwrap().len() > 0);
-        let open = first_open(&d, &root);
+        let open = first_open(&d, &FileRoots::one(root.clone()));
         assert_eq!(open["people"], 200);
         assert!(!open["suggestions"].as_array().unwrap().is_empty());
         let _ = start(&d, &[], "T");

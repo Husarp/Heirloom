@@ -1,7 +1,11 @@
 import { useEffect } from "react";
 import { useStore } from "./store";
+import { cancelJob } from "./progress";
 import { Sidebar } from "../shell/Sidebar";
 import { TopBar } from "../shell/TopBar";
+import { TidyDialog } from "../screens/media/TidyDialog";
+import { FinalChangeDialog } from "../shell/FinalChangeDialog";
+import { RebaseDialog } from "../screens/archive/RebaseDialog";
 import { AskDialog, ConflictDialog, ForeignConfirmDialog, WhoEditsDialog } from "../shell/Dialogs";
 import { CombinedBar, EditModeBar, ReadOnlyBar } from "../shell/Bars";
 import { Toasts } from "../shell/Toasts";
@@ -15,6 +19,8 @@ import { Screen } from "./Screen";
 import { ArchivePicker } from "../screens/archive/ArchivePicker";
 import { LoadingArchive } from "../screens/archive/LoadingArchive";
 import { FirstOpen } from "../screens/archive/FirstOpen";
+import { ChooseMode } from "../screens/archive/ChooseMode";
+import { BusyDialog } from "../screens/settings/dialogs";
 
 export function App() {
   const phase = useStore((s) => s.phase);
@@ -26,6 +32,8 @@ export function App() {
   const conflictOpen = useStore((s) => s.conflictOpen);
   const foreignConfirmOpen = useStore((s) => s.foreignConfirmOpen);
   const paletteOpen = useStore((s) => s.paletteOpen);
+  const busy = useStore((s) => s.busy);
+  const finalChange = useStore((s) => s.finalChange);
   useAppearance();
   useShortcuts();
   useCloseGuard();
@@ -53,14 +61,19 @@ export function App() {
           </div>
         </div>
       )}
+      {phase === "ready" && <TidyDialog />}
       {phase === "picker" && <ArchivePicker />}
       {phase === "loading" && <LoadingArchive />}
+      {phase === "chooseMode" && <ChooseMode />}
       {phase === "firstOpen" && <FirstOpen />}
       {whoEditsOpen && <WhoEditsDialog />}
       {conflictOpen && <ConflictDialog />}
       {foreignConfirmOpen && <ForeignConfirmDialog />}
       {paletteOpen && phase === "ready" && <CommandPalette />}
       <AskDialog />
+      {finalChange && <FinalChangeDialog />}
+      <RebaseDialog />
+      {busy && <BusyDialog text={busy.text} note={busy.note} done={busy.done} total={busy.total} onCancel={busy.cancellable && !busy.cancelling ? cancelJob : undefined} />}
       <Toasts />
     </>
   );

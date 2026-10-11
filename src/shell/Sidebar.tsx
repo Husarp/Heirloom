@@ -5,6 +5,8 @@ import { useStore, type Route, type TreeView } from "../app/store";
 import { ArchiveDot, BrandMark, useDismiss } from "../components/bits";
 import { displayPath, num, people as peopleCount, relativeTime } from "../lib/format";
 import { OpenTogether } from "../screens/archive/OpenTogether";
+import { sidebarTip } from "../screens/archive/workModes";
+import { withChangesLabel } from "../screens/archive/writeBack";
 
 interface NavItem {
   icon: ComponentType<{ size?: number }>;
@@ -80,7 +82,7 @@ export function Sidebar() {
           </button>
         );
       })}
-      <div className="sidebar-foot" title={archive ? displayPath(archive.dataPath) : undefined}>
+      <div className="sidebar-foot" title={archive ? sidebarTip(archive) : undefined}>
         <Archive size={15} style={{ flex: "none" }} />
         <span className="ellipsis">{status}</span>
       </div>
@@ -135,7 +137,7 @@ function Switcher() {
                     <ArchiveDot from={[a.key]} size={12} style={{ boxShadow: "none" }} />
                     <span className="col grow" style={{ minWidth: 0, textAlign: "left" }}>
                       <span className="ellipsis">{a.name}</span>
-                      <span style={{ fontSize: 12, color: "var(--text3)" }}>{a.state === "ok" ? peopleCount(a.people) : "nie znaleziono"}</span>
+                      <span style={{ fontSize: 12, color: "var(--text3)" }}>{a.state === "ok" ? [peopleCount(a.people), withChangesLabel(a)].filter(Boolean).join(" ") : "nie znaleziono"}</span>
                     </span>
                   </button>
                   <button className="icon-btn" style={{ width: 30, height: 30 }} disabled={!a.path || a.state !== "ok"} title="Otwórz w nowym oknie" aria-label={`${a.name}: otwórz w nowym oknie`} onClick={() => run(() => openElsewhere(a.path!))}>

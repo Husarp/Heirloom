@@ -18,10 +18,45 @@ use std::sync::{Arc, RwLock};
 #[derive(Debug, Clone)]
 pub struct Roots {
     pub archive: PathBuf,
+    /// „Nie ruszaj oryginału”: `archive` is the folder of the user's changes, and a file it doesn't have is served
+    /// from the original archive's folder.
+    pub fallback: Option<PathBuf>,
     /// Where thumbnails are kept; none = made every time.
     pub thumbs: Option<PathBuf>,
     /// The archive's key in a set of archives opened together; none for an archive opened on its own.
     pub key: Option<String>,
+    /// Files someone moved in Explorer, found by the scan (Part B): served only after both folders miss.
+    pub moved: Moved,
+}
+
+/// Where the scan found files whose written path is missing (FILE value → the file's real path). Only paths the walk
+/// found under the archive's folders are in it, so it opens no way out of the archive. Shared between the command
+/// handler (the scan writes it) and the file server.
+#[derive(Debug, Clone, Default)]
+pub struct Moved(Arc<RwLock<std::collections::HashMap<String, PathBuf>>>);
+
+impl Moved {
+    pub fn set(&self, map: std::collections::HashMap<String, PathBuf>) {
+        *self.0.write().unwrap_or_else(|e| e.into_inner()) = map;
+    }
+
+    /// The real path of a file written as `file` (compared as [`moved_key`] does).
+    pub fn get(&self, file: &str) -> Option<PathBuf> {
+        self.0.read().unwrap_or_else(|e| e.into_inner()).get(&moved_key(file)).cloned()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.read().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// A FILE value as the "moved" map keys it: `/` as the separator, NFC, lowercase.
+pub fn moved_key(file: &str) -> String {
+    crate::fsx::name_key(file.replace('\\', "/").trim_start_matches("./"))
 }
 
 /// The folders of the open archive (or of every archive of an open set), shared between the command handler and the
@@ -79,14 +114,29 @@ pub fn serve(roots: &MediaRoots, url_path: &str) -> Served {
     }
     let (kind, rest) = url_path.split_once('/').unwrap_or((url_path, ""));
     // Which archive: the only one, or in a set the one named by the path's first segment (`~b`).
+    // The file in the folder of the user's changes, else in the original archive (the same checks for both).
+    let locate = |roots: &Roots, rest: &str| -> Option<PathBuf> {
+        let path = resolve(&roots.archive, rest)?;
+        let found = match &roots.fallback {
+            Some(fallback) if !path.is_file() => Some(resolve(fallback, rest)?).filter(|p| p.is_file()).unwrap_or(path),
+            _ => path,
+        };
+        // Both folders miss: a file someone moved in Explorer (the scan knows where it is).
+        if !found.is_file() {
+            if let Some(there) = decode_path(rest).and_then(|p| roots.moved.get(&p)).filter(|p| p.is_file()) {
+                return Some(there);
+            }
+        }
+        Some(found)
+    };
     let pick = |rest: &str| -> Option<(Roots, PathBuf)> {
         if all.len() == 1 && shared.key.is_none() {
-            return Some((shared.clone(), resolve(&shared.archive, rest)?));
+            return Some((shared.clone(), locate(&shared, rest)?));
         }
         let (first, rest) = rest.trim_start_matches('/').split_once('/')?;
         let key = first.strip_prefix('~')?;
         let roots = all.iter().find(|r| r.key.as_deref() == Some(key))?.clone();
-        let path = resolve(&roots.archive, rest)?;
+        let path = locate(&roots, rest)?;
         Some((roots, path))
     };
     let result = match kind {
@@ -114,7 +164,7 @@ fn resolve(root: &Path, encoded: &str) -> Option<PathBuf> {
         let segment = percent_decode(segment)?;
         // A colon names a stream of a file (`x.jpg:ukryty`) or a drive, and a device name (`NUL`, `COM1.jpg`) opens a
         // device: neither is a file of the archive.
-        if segment.contains(':') || is_device_name(&segment) {
+        if segment.contains(':') || crate::fsx::is_device_name(&segment) {
             return None;
         }
         let component = Path::new(&segment).components().collect::<Vec<_>>();
@@ -126,11 +176,10 @@ fn resolve(root: &Path, encoded: &str) -> Option<PathBuf> {
     (path != root).then_some(path)
 }
 
-/// A name Windows keeps for a device, with any extension: `CON`, `nul.txt`, `COM1.jpg`, `LPT¹`.
-fn is_device_name(name: &str) -> bool {
-    let stem = name.split('.').next().unwrap_or(name).trim_end_matches(' ').to_ascii_uppercase();
-    let numbered = |prefix: &str| stem.strip_prefix(prefix).is_some_and(|n| matches!(n, "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"));
-    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") || numbered("COM") || numbered("LPT")
+/// The URL path (segments percent-encoded) as plain text with `/` between the segments.
+fn decode_path(encoded: &str) -> Option<String> {
+    let segments: Option<Vec<String>> = encoded.split('/').filter(|s| !s.is_empty()).map(percent_decode).collect();
+    segments.map(|s| s.join("/"))
 }
 
 fn percent_decode(text: &str) -> Option<String> {
@@ -241,7 +290,7 @@ mod tests {
 
     fn roots(dir: &Path) -> MediaRoots {
         let roots = MediaRoots::default();
-        roots.set(Some(Roots { archive: dir.join("a"), thumbs: Some(dir.join("thumbs")), key: None }));
+        roots.set(Some(Roots { archive: dir.join("a"), fallback: None, thumbs: Some(dir.join("thumbs")), key: None, moved: Moved::default() }));
         roots
     }
 
@@ -273,7 +322,7 @@ mod tests {
         std::fs::write(dir.path().join("secret.txt"), "nie").unwrap();
         image::RgbImage::from_pixel(300, 300, image::Rgb([1, 2, 3])).save(dir.path().join("b/media/p.png")).unwrap();
         let roots = MediaRoots::default();
-        roots.set_many(["a", "b"].iter().map(|k| Roots { archive: dir.path().join(k), thumbs: Some(dir.path().join("thumbs").join(k)), key: Some(k.to_string()) }).collect());
+        roots.set_many(["a", "b"].iter().map(|k| Roots { archive: dir.path().join(k), fallback: None, thumbs: Some(dir.path().join("thumbs").join(k)), key: Some(k.to_string()), moved: Moved::default() }).collect());
         assert_eq!(serve(&roots, "file/~b/media/x.txt"), Served::Ok { body: b"z b".to_vec(), mime: "text/plain; charset=utf-8" });
         assert_eq!(serve(&roots, "file/~a/media/x.txt"), Served::Ok { body: b"z a".to_vec(), mime: "text/plain; charset=utf-8" });
         assert!(matches!(serve(&roots, "thumb/256/~b/media/p.png"), Served::Ok { mime: "image/jpeg", .. }));
@@ -295,6 +344,24 @@ mod tests {
             assert_eq!(serve(&roots, path), Served::BadRequest, "{path}");
         }
         assert!(matches!(serve(&roots, "file/media/x.txt"), Served::Ok { .. }));
+    }
+
+    #[test]
+    fn the_original_archive_serves_what_the_changes_folder_lacks() {
+        let dir = tempfile::tempdir().unwrap();
+        for (folder, name, text) in [("zmiany", "nowe.txt", "moje"), ("oryginal", "stare.txt", "z archiwum"), ("oryginal", "nowe.txt", "stare")] {
+            std::fs::create_dir_all(dir.path().join(folder).join("media")).unwrap();
+            std::fs::write(dir.path().join(folder).join("media").join(name), text).unwrap();
+        }
+        std::fs::write(dir.path().join("secret.txt"), "nie").unwrap();
+        let roots = MediaRoots::default();
+        roots.set(Some(Roots { archive: dir.path().join("zmiany"), fallback: Some(dir.path().join("oryginal")), thumbs: None, key: None, moved: Moved::default() }));
+        let text = |body: &str| Served::Ok { body: body.as_bytes().to_vec(), mime: "text/plain; charset=utf-8" };
+        assert_eq!(serve(&roots, "file/media/nowe.txt"), text("moje"), "the user's file wins");
+        assert_eq!(serve(&roots, "file/media/stare.txt"), text("z archiwum"));
+        assert_eq!(serve(&roots, "file/media/brak.txt"), Served::NotFound);
+        assert_eq!(serve(&roots, "file/../secret.txt"), Served::BadRequest);
+        assert_eq!(serve(&roots, "file/media/..%2F..%2Fsecret.txt"), Served::BadRequest, "no way out through the original either");
     }
 
     #[test]

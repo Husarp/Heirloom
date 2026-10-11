@@ -3,9 +3,12 @@
 
 import { create } from "zustand";
 import { call, ApiError } from "../api/transport";
-import type { AppState, ArchiveStatus, PersonSummary, SaveResult } from "../api/types";
+import type { AppState, ArchiveStatus, MediaScan, PersonSummary, SaveResult } from "../api/types";
 import { count } from "../lib/format";
+import { savesWhere, type FinalFacts, type FinalKind } from "../screens/archive/workModes";
+import { startRebase, startWriteBack, undoWriteBack } from "./writeBack";
 import { openInNewWindow } from "../lib/native";
+import { scanSoon } from "./layout";
 
 export type TreeView = "family" | "ancestors" | "descendants" | "overview";
 
@@ -53,7 +56,7 @@ export interface PaletteOptions {
 }
 
 /** Full-window states before an archive is ready. */
-export type Phase = "boot" | "picker" | "loading" | "firstOpen" | "ready";
+export type Phase = "boot" | "picker" | "loading" | "chooseMode" | "firstOpen" | "ready";
 
 export interface ViewedPerson {
   id: string;
@@ -68,7 +71,7 @@ export interface Toast {
   text: string;
   /** A second, smaller line ("Nowakowie z Ciechanek · 4 zdjęcia, 3 źródła"). */
   detail?: string;
-  kind?: "info" | "err";
+  kind?: "info" | "err" | "warn";
   action?: { label: string; run: () => void };
   /** More than one action ("Cofnij import", "Pokaż w drzewie"). */
   actions?: { label: string; run: () => void }[];
@@ -91,9 +94,31 @@ export interface OpenSection {
 /** A question with buttons (e.g. unsaved changes before leaving edit mode). */
 export interface Ask {
   title: string;
+  /** A wider window, for three buttons with long names. */
+  wide?: boolean;
   text?: string;
   icon?: "warn" | "info";
   buttons: { label: string; kind?: "primary" | "secondary" | "ghost" | "danger"; run?: () => void | Promise<void> }[];
+}
+
+/** A job the whole window waits for; the numbers come from `job.progress` (src/app/progress.ts). */
+export interface Busy {
+  text: string;
+  note?: string;
+  done?: number;
+  total?: number;
+  /** Shows „Przerwij” (only the backup zip can be stopped). */
+  cancellable?: boolean;
+  cancelling?: boolean;
+}
+
+export type FinalRun = (options: { allowForeign: boolean }) => void | Promise<void>;
+
+/** What the final-change dialog is asked for. */
+export interface FinalChange {
+  kind: FinalKind;
+  run: FinalRun;
+  extra?: Partial<FinalFacts>;
 }
 
 interface Store {
@@ -126,6 +151,19 @@ interface Store {
   /** The last part of the breadcrumb, set by the screen (e.g. the person's name). */
   crumb: string | null;
   ask: Ask | null;
+  /** „Jak chcesz pracować z tym archiwum?” is answered: where to go on (the first-open page, or the archive). */
+  afterMode: "firstOpen" | "ready";
+  /** A job the whole window waits for („Przygotowuję folder na Twoje zmiany…”). */
+  busy: Busy | null;
+  /** The final-change dialog is open (src/shell/FinalChangeDialog.tsx). */
+  finalChange: FinalChange | null;
+  /** What is lying in media/ that Heirloom doesn't know or that is in the wrong place (media.scan, DESIGN B.4); null
+   *  until the first scan, and for archives opened together. */
+  scan: MediaScan | null;
+  /** „Porządek w zdjęciach” (src/screens/media/TidyDialog.tsx) is open. */
+  tidyOpen: boolean;
+  /** Start banners the user closed with ✕ (a kind of banner each); they come back at the next start. */
+  hiddenBanners: string[];
   /** Set by the tree: its camera and selection, added to its route when the tree is left. */
   treeSnapshot: (() => Pick<TreeRoute, "person" | "cam" | "sel">) | null;
   setTreeSnapshot: (take: (() => Pick<TreeRoute, "person" | "cam" | "sel">) | null) => void;
@@ -146,6 +184,24 @@ interface Store {
   createArchive: (folder: string, name: string) => Promise<boolean>;
   closeArchive: () => Promise<void>;
   finishFirstOpen: () => void;
+  /** The answer to the mode question is in `status`: go on to the first-open page or the archive. */
+  finishChooseMode: (status: ArchiveStatus) => void;
+  /** A status that replaced the archive's state as a whole (mode switched, changes discarded, original found again):
+   *  every screen reads again, editing ends, and a notice of the status is said. */
+  adoptStatus: (status: ArchiveStatus) => Promise<void>;
+  hideBanner: (kind: string) => void;
+  /** „Przenieś zmiany do archiwum…” — the preview, the final-change dialog and the write-back. `then` runs once the
+   *  changes are in the archive (switching to „Pracuj na archiwum” continues there). */
+  startWriteBack: (then?: () => void) => void;
+  /** „Wczytaj zmiany” — takes in what someone changed in the archive (the rebase dialog). */
+  startRebase: () => void;
+  /** [Cofnij] after a write-back (archive.undoWriteBack with its confirmation). */
+  undoWriteBack: () => void;
+  /** The final-change dialog (DESIGN A.7) with the backup of the archive; `run` is called when the user confirms,
+   *  with `allowForeign` when the dialog asked about a file made by another program and was agreed to. */
+  confirmFinal: (kind: FinalKind, run: FinalRun, extra?: Partial<FinalFacts>) => void;
+  closeFinalChange: () => void;
+  setTidyOpen: (open: boolean) => void;
   setArchive: (status: ArchiveStatus) => void;
   go: (route: Route) => void;
   goBack: () => void;
@@ -256,6 +312,12 @@ export const useStore = create<Store>((set, get) => ({
   palette: null,
   crumb: null,
   ask: null,
+  afterMode: "ready",
+  busy: null,
+  finalChange: null,
+  scan: null,
+  tidyOpen: false,
+  hiddenBanners: [],
   treeSnapshot: null,
   setTreeSnapshot: (take) => set({ treeSnapshot: take }),
   treePlace: null,
@@ -333,10 +395,33 @@ export const useStore = create<Store>((set, get) => ({
     flushPlace();
     await call("archive.close");
     const app = await call<AppState>("app.state");
-    set({ app, archive: null, phase: "picker", mode: "browse", editor: null, lastSave: null, section: null });
+    set({ app, archive: null, phase: "picker", mode: "browse", editor: null, lastSave: null, section: null, scan: null, tidyOpen: false });
   },
 
   finishFirstOpen: () => set({ phase: "ready" }),
+
+  finishChooseMode: (status) => {
+    set({ archive: status, phase: get().afterMode, dataVersion: get().dataVersion + 1 });
+    sayNotice(status);
+    get().refreshApp().catch(() => {});
+    if (!status.combined) scanSoon(600);
+  },
+
+  adoptStatus: async (status) => {
+    set({ archive: status, mode: "browse", editor: null, lastSave: null, section: null, leaveGuard: null, dataVersion: get().dataVersion + 1 });
+    sayNotice(status);
+    await get().refreshApp().catch(() => {});
+    if (!status.combined) scanSoon();
+  },
+
+  hideBanner: (kind) => set({ hiddenBanners: [...get().hiddenBanners, kind] }),
+
+  startWriteBack: (then) => startWriteBack(then),
+  startRebase: () => startRebase(),
+  undoWriteBack: () => undoWriteBack(),
+  confirmFinal: (kind, run, extra) => set({ finalChange: { kind, run, extra } }),
+  closeFinalChange: () => set({ finalChange: null }),
+  setTidyOpen: (open) => set({ tidyOpen: open }),
 
   setArchive: (status) => set({ archive: status }),
 
@@ -416,6 +501,8 @@ export const useStore = create<Store>((set, get) => ({
         // What a section changed is saved now: its „Anuluj” no longer takes it back.
         section: open ? { ...open, base: result.status.undoDepth } : null,
         dataVersion: get().dataVersion + 1,
+        // „…zmiana czeka na zapis” is stale once it is saved.
+        toasts: get().toasts.filter((t) => !t.text.includes("czeka na zapis")),
       });
       return true;
     } catch (e) {
@@ -457,6 +544,7 @@ export const useStore = create<Store>((set, get) => ({
     set({ leaveGuard: null, section: null, lastSave: null });
     get().changed(status);
     set({ mode: "browse" });
+    scanSoon();
   },
 
   outsideSection: (then) => {
@@ -563,7 +651,7 @@ export const useStore = create<Store>((set, get) => ({
     set({
       ask: {
         title: `Masz ${changes}`,
-        text: `${what}: zapisać je w pliku ${get().archive?.dataFile ?? ""}?`,
+        text: `${what}: zapisać je ${get().archive ? savesWhere(get().archive!) : ""}?`,
         icon: "warn",
         buttons: [
           { label: "Anuluj", kind: "ghost" },
@@ -575,6 +663,7 @@ export const useStore = create<Store>((set, get) => ({
               // The undo steps and the last save's changes are gone with the reload.
               set({ section: null, lastSave: null });
               get().changed(status);
+              scanSoon();
               then();
             },
           },
@@ -607,12 +696,15 @@ async function opened(path: string, open: () => Promise<ArchiveStatus>): Promise
     const app = await call<AppState>("app.state");
     // „Pierwsze otwarcie” is about one archive; archives opened together go straight to Start.
     const firstTime = status.people > 0 && !seenBefore && !status.combined;
+    // Not asked yet how to work with it: the question comes first, and nothing is written before the answer.
+    const needsMode = status.workMode == null && !status.combined;
     const [route, recentlyViewed] = await Promise.all([firstTime ? ({ name: "start" } as Route) : firstRoute(app), viewedBefore(app)]);
     set({
       app,
       archive: status,
       opening: null,
-      phase: firstTime ? "firstOpen" : "ready",
+      phase: needsMode ? "chooseMode" : firstTime ? "firstOpen" : "ready",
+      afterMode: firstTime ? "firstOpen" : "ready",
       route,
       back: [],
       forward: [],
@@ -624,13 +716,22 @@ async function opened(path: string, open: () => Promise<ArchiveStatus>): Promise
       section: null,
       recentlyViewed,
       treePlace: treePlaceOf(app),
+      scan: null,
+      tidyOpen: false,
     });
     if (status.combined) lookForPairs();
+    else if (!needsMode) scanSoon(600);
+    if (!needsMode) sayNotice(status);
     return true;
   } catch (e) {
     set({ opening: null, openError: e as ApiError, phase: "picker" });
     return false;
   }
+}
+
+/** What the backend says once after a status (changes found again, the archive's changes taken in …). */
+export function sayNotice(status: ArchiveStatus) {
+  if (status.notice) useStore.getState().notify(status.notice);
 }
 
 /** The pairs „Do sprawdzenia” of archives opened together, looked for once the view is on screen; the sidebar shows

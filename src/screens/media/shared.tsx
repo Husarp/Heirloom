@@ -38,6 +38,8 @@ export interface MediaItem {
   note: string | null;
   /** The file is described in the archive but isn't on disk. */
   missing: boolean;
+  /** The FILE value points at nothing, but the file lies elsewhere in the archive (shown all the same). */
+  foundElsewhere?: boolean;
   size: number | null;
   /** The full path on disk (for "Otwórz w programie" and "Pokaż w folderze"). */
   absolute: string | null;
@@ -45,6 +47,8 @@ export interface MediaItem {
   /** People whose profile photo this is. */
   profileOf: string[];
   format: string | null;
+  /** „Nie ruszaj oryginału”: the file is in the user's folder („mine”) or in the archive. */
+  layer?: "mine" | "archive";
   sources: { id: string; title: string | null }[];
 }
 
@@ -199,6 +203,7 @@ export function MetaRows({
       <span title={item.absolute ?? item.path}>
         {parts}
         {item.missing && <span style={{ color: "var(--warn)" }}> · brak na dysku</span>}
+        {item.foundElsewhere && !item.missing && <span style={{ color: "var(--text3)" }}> · w innym folderze archiwum</span>}
       </span>,
     ]);
   }

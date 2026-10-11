@@ -268,3 +268,15 @@
 .rich-body .ProseMirror .mention {
   background: var(--accent-soft);
 }
+
+/* „Nie ruszaj oryginału” banners (Start, Brakujące pliki): the text may be long, the buttons wrap under it. */
+.banner.overlay-banner {
+  flex-wrap: wrap;
+  padding: 10px 10px 10px 14px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.banner.overlay-banner > .grow {
+  flex: 1 1 320px;
+  min-width: 0;
+}

@@ -4,7 +4,6 @@
 use crate::edit::Changes;
 use crate::gedwrite::{file_uri, has_pointer, media_type, new_uid, remove_pointer, set_child_text, stamp};
 use crate::{ApiError, ApiResult, Session};
-use heirloom_core::archive::MEDIA_DIR;
 use heirloom_core::gedcom::Node;
 
 use serde_json::{Value, json};
@@ -45,27 +44,75 @@ pub fn resolve(root: &Path, file: &str) -> PathBuf {
     if path.is_absolute() { path.to_path_buf() } else { root.join(file.replace('/', std::path::MAIN_SEPARATOR_STR)) }
 }
 
-/// Where the files of the open data are: one archive's folder, or in archives opened together each archive's folder
-/// by its key (their files are written `~b/media/x.jpg` there).
+/// Where the files of the open data are: one archive's folders — in „Nie ruszaj oryginału” the folder of the user's
+/// changes first, then the original archive — or in archives opened together each archive's folders by its key (their
+/// files are written `~b/media/x.jpg` there).
 pub enum FileRoots {
-    One(PathBuf),
-    Many(Vec<(String, PathBuf)>),
+    /// The folders, top first, and the files the scan found moved (served when every folder misses).
+    Layers(Vec<PathBuf>, crate::media::Moved),
+    Many(Vec<(String, Vec<PathBuf>)>),
 }
 
 impl FileRoots {
+    /// One archive folder.
+    pub fn one(root: PathBuf) -> FileRoots {
+        FileRoots::Layers(vec![root], crate::media::Moved::default())
+    }
+
     pub fn resolve(&self, file: &str) -> PathBuf {
         match self {
-            FileRoots::One(root) => resolve(root, file),
+            FileRoots::Layers(layers, moved) => {
+                let path = resolve_in(layers, file);
+                match moved_file(moved, &path, file) {
+                    Some(there) => there,
+                    None => path,
+                }
+            }
             FileRoots::Many(roots) => {
                 let keyed = file.strip_prefix('~').and_then(|rest| rest.split_once('/'));
                 match keyed.and_then(|(key, rest)| Some((roots.iter().find(|(k, _)| k == key)?, rest))) {
-                    Some(((_, root), rest)) => resolve(root, rest),
+                    Some(((_, layers), rest)) => resolve_in(layers, rest),
                     // An absolute path, kept as it was written.
                     None => PathBuf::from(file),
                 }
             }
         }
     }
+
+    /// The file is not where its path says, but the scan found it elsewhere in the archive („foundElsewhere”).
+    pub fn found_elsewhere(&self, file: &str) -> bool {
+        match self {
+            FileRoots::Layers(layers, moved) => moved_file(moved, &resolve_in(layers, file), file).is_some(),
+            FileRoots::Many(_) => false,
+        }
+    }
+
+    /// `mine` when the file is in the folder of the user's changes, `archive` when only the original has it; nothing
+    /// for an archive worked on in place.
+    pub fn layer_of(&self, path: &Path) -> Option<&'static str> {
+        match self {
+            FileRoots::Layers(layers, _) if layers.len() > 1 => Some(if path.starts_with(&layers[0]) { "mine" } else { "archive" }),
+            _ => None,
+        }
+    }
+}
+
+/// Where the scan found a file that is missing at `path` (its written place), if it did.
+fn moved_file(moved: &crate::media::Moved, path: &Path, file: &str) -> Option<PathBuf> {
+    if path.is_file() || Path::new(file).is_absolute() {
+        return None;
+    }
+    moved.get(file).filter(|p| p.is_file())
+}
+
+/// A file written relative to the archive: in the first folder that has it, else where the top folder would have it
+/// (so a missing file is reported as before). An absolute path stays as written.
+pub fn resolve_in(layers: &[PathBuf], file: &str) -> PathBuf {
+    let Some(top) = layers.first() else { return PathBuf::from(file) };
+    if layers.len() == 1 || Path::new(file).is_absolute() {
+        return resolve(top, file);
+    }
+    layers.iter().map(|layer| resolve(layer, file)).find(|p| p.is_file()).unwrap_or_else(|| resolve(top, file))
 }
 
 fn is_image(name: &str) -> bool {
@@ -92,49 +139,63 @@ pub fn object_node(xref: &str, relative: &str, kind: Option<&str>, title: Option
 
 /// Copies a file into `media/`, keeping its name ("Józef 1904.jpg", or "Józef 1904 (2).jpg" when taken). Returns
 /// the path relative to the archive folder. A file already inside the archive folder is not copied.
-pub fn copy_into_archive(root: &Path, source: &Path) -> Result<String, ApiError> {
-    copy_new_into_archive(root, source).map(|(relative, _)| relative)
+pub fn copy_into_archive(layers: &[PathBuf], target_dir: &str, source: &Path) -> Result<String, ApiError> {
+    copy_new_into_archive(layers, target_dir, source).map(|(relative, _)| relative)
 }
 
 /// [`copy_into_archive`], also giving the file it created (None when the file was already inside the archive folder),
-/// so a failed import can remove exactly what it added.
-pub fn copy_new_into_archive(root: &Path, source: &Path) -> Result<(String, Option<PathBuf>), ApiError> {
-    if let (Ok(source_abs), Ok(root_abs)) = (source.canonicalize(), root.canonicalize()) {
-        if let Ok(relative) = source_abs.strip_prefix(&root_abs) {
-            return Ok((relative.to_string_lossy().replace('\\', "/"), None));
+/// so a failed import can remove exactly what it added. `layers`: the archive's folders, the one written into first
+/// (in „Nie ruszaj oryginału” the user's changes, then the original): a file inside any of them is referenced where it
+/// is, and a new name must be free in all of them, so a new file never hides an original one. `target_dir`: `media`, or
+/// `media/<folder>` for the folder of a person (Part B); the folder is made when it isn't there.
+pub fn copy_new_into_archive(layers: &[PathBuf], target_dir: &str, source: &Path) -> Result<(String, Option<PathBuf>), ApiError> {
+    let root = layers.first().ok_or_else(|| ApiError::bad_args("root"))?;
+    if let Ok(source_abs) = source.canonicalize() {
+        for layer in layers {
+            if let Some(relative) = layer.canonicalize().ok().and_then(|l| source_abs.strip_prefix(&l).ok().map(Path::to_path_buf)) {
+                return Ok((relative.to_string_lossy().replace('\\', "/"), None));
+            }
         }
     }
     let name = source.file_name().map(|n| n.to_string_lossy().into_owned()).ok_or_else(|| ApiError::bad_args("path"))?;
-    let dir = root.join(MEDIA_DIR);
+    let dir = target_dir.split('/').filter(|p| !p.is_empty()).fold(root.clone(), |dir, part| dir.join(part));
     std::fs::create_dir_all(&dir).map_err(|e| ApiError::new("io", format!("Nie można utworzyć folderu media: {e}")))?;
     let (stem, ext) = match name.rsplit_once('.') {
-        Some((s, e)) => (s.to_string(), format!(".{e}")),
-        None => (name.clone(), String::new()),
+        Some((s, e)) if !s.is_empty() => (s.to_string(), e.to_string()),
+        _ => (name.clone(), String::new()),
     };
-    let mut target = dir.join(&name);
-    let mut n = 2;
-    while target.exists() {
-        target = dir.join(format!("{stem} ({n}){ext}"));
-        n += 1;
+    let mut taken: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for layer in layers {
+        let there = target_dir.split('/').filter(|p| !p.is_empty()).fold(layer.clone(), |dir, part| dir.join(part));
+        for entry in std::fs::read_dir(there).into_iter().flatten().flatten() {
+            taken.insert(crate::fsx::name_key(&entry.file_name().to_string_lossy()));
+        }
     }
-    std::fs::copy(source, &target).map_err(|e| {
-        // A half-written copy is ours (the name was free): it goes.
-        let _ = std::fs::remove_file(&target);
-        ApiError::new("io", format!("Nie można skopiować pliku {name}: {e}"))
-    })?;
-    Ok((format!("{MEDIA_DIR}/{}", target.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or(name)), Some(target)))
+    // A name taken meanwhile (another window) is skipped: the copy never replaces a file.
+    for _ in 0..100 {
+        let free = crate::fsx::free_name(&|n| taken.contains(n), &stem, &ext);
+        let target = dir.join(&free);
+        match crate::fsx::copy_no_replace(source, &target) {
+            Ok(_) => return Ok((format!("{}/{free}", target_dir.trim_end_matches('/')), Some(target))),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                taken.insert(crate::fsx::name_key(&free));
+            }
+            Err(e) => return Err(ApiError::new("io", format!("Nie można skopiować pliku {name}: {e}"))),
+        }
+    }
+    Err(ApiError::new("io", format!("Nie można skopiować pliku {name}: brak wolnej nazwy.")))
 }
 
 /// A media object already in the archive with exactly this file's contents.
 fn duplicate_of(s: &mut Session, source: &Path) -> Option<String> {
     let size = std::fs::metadata(source).ok()?.len();
-    let root = s.archive.root().to_path_buf();
+    let roots = s.file_roots();
     let d = s.derived();
     let mut hash = None;
     // Only records can be pointed to: an object written inside a person (`@I1@#0`) is not one.
     for id in d.view.media_order.iter().filter(|id| !id.contains('#')) {
         let Some(file) = d.view.media.get(id).and_then(|m| m.file.clone()) else { continue };
-        let path = resolve(&root, &file);
+        let path = roots.resolve(&file);
         if std::fs::metadata(&path).ok().map(|m| m.len()) != Some(size) {
             continue;
         }
@@ -155,7 +216,7 @@ fn link_node(object: &str, profile: bool) -> Node {
     node
 }
 
-fn add_link(changes: &mut Changes, person: &str, object: &str, profile: bool) -> Result<(), ApiError> {
+pub(crate) fn add_link(changes: &mut Changes, person: &str, object: &str, profile: bool) -> Result<(), ApiError> {
     let indi = changes.get(person)?;
     if profile {
         for link in indi.children.iter_mut().filter(|c| c.tag == "OBJE") {
@@ -183,7 +244,9 @@ fn add(s: &mut Session, args: &Value) -> ApiResult {
     let caption = args.get("caption").and_then(Value::as_str);
     let document_type = args.get("documentType").and_then(Value::as_str);
     let profile = args.get("profile").and_then(Value::as_bool).unwrap_or(false);
-    let root = s.archive.root().to_path_buf();
+    let layers = s.layers();
+    // Part B: in „W folderach osób” a file for a person goes to that person's folder.
+    let target_dir = crate::layout::dir_for_person(s, person.as_deref());
     // Work out duplicates and copy files before building the record changes.
     let mut prepared: Vec<(Option<String>, Option<String>)> = Vec::new();
     for path in &paths {
@@ -193,7 +256,7 @@ fn add(s: &mut Session, args: &Value) -> ApiResult {
         }
         match duplicate_of(s, source) {
             Some(existing) => prepared.push((Some(existing), None)),
-            None => prepared.push((None, Some(copy_into_archive(&root, source)?))),
+            None => prepared.push((None, Some(copy_into_archive(&layers, &target_dir, source)?))),
         }
     }
     let mut changes = Changes::new(&s.archive.doc);
@@ -316,8 +379,10 @@ fn set_profile(s: &mut Session, args: &Value) -> ApiResult {
 fn relink(s: &mut Session, args: &Value) -> ApiResult {
     let id = req(args, "id")?;
     let path = req(args, "path")?;
-    let root = s.archive.root().to_path_buf();
-    let relative = copy_into_archive(&root, Path::new(&path))?;
+    let layers = s.layers();
+    // The owner's folder in „W folderach osób”.
+    let target_dir = crate::layout::dir_for_object(s, &id);
+    let relative = copy_into_archive(&layers, &target_dir, Path::new(&path))?;
     let mut changes = Changes::new(&s.archive.doc);
     let object = changes.get(&id)?;
     match object.child_mut("FILE") {

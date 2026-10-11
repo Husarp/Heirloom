@@ -2,6 +2,7 @@ import { FileCode, ImageOff } from "lucide-react";
 import { useStore } from "../../app/store";
 import { useApi } from "../../app/useApi";
 import { count, displayPath, num, plural } from "../../lib/format";
+import { OriginalMissingBanner } from "../start/OverlayBanners";
 import "./archive.css";
 
 interface FirstOpenData {
@@ -49,7 +50,8 @@ export function FirstOpen() {
             </div>
           ))}
         </div>
-        {data && data.missingFiles > 0 && (
+        <OriginalMissingBanner />
+        {data && data.missingFiles > 0 && !archive?.overlay?.originalMissing && (
           <div className="banner warn" style={{ padding: "10px 10px 10px 14px" }}>
             <ImageOff size={16} color="var(--warn)" />
             <span className="grow">Nie znaleziono {count(data.missingFiles, "pliku", "plików", "plików")} — wskaż folder, w którym mogą być.</span>

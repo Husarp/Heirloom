@@ -494,6 +494,10 @@ The Import has five steps; nothing is written before the last one.
 5. **Podsumowanie.** Everything ticked is saved as one change group named after the batch:
    - every saved record carries the batch name (`_HLM_BATCH`), and „Cofnij import” takes the whole batch back;
    - the AI's answers are kept unchanged in the archive's `zrodla-ai/<batch>/` folder.
+   - In „Nie ruszaj oryginału” (since 0.7.0) the archive itself is not written: the import goes into the user's changes
+     (`<Documents>\Heirloom\Moje zmiany\<archive>`), `zrodla-ai/<batch>/` included, and reaches the archive with
+     „Przenieś zmiany do archiwum…”. „Cofnij import” works on the user's changes. In „Pracuj na archiwum” a final
+     dialog offers a backup of the archive first.
 
 ## 7. Versioning
 

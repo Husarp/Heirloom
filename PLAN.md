@@ -269,6 +269,20 @@ with no archive yet, "Utwórz archiwum z plików" creates the folder and then ru
 ### 4.7 Media and documents
 - ✅ **Storage:**
   - files live in the archive's `media/` folder with readable names, e.g. `1878 Akt urodzenia Józef Kowalski.jpg`;
+  - **media layout (0.7.0):** a per-archive setting (`display.mediaLayout`, shared by everyone using the archive),
+    „Wszystkie razem” (`media/`) or „W folderach osób” (`media/Kowalski Józef/`, „Nazwisko Imię”, the birth year or
+    „ (2)” for namesakes). A file's owner is the person whose profile photo it is, else the first person linking it;
+    files linked to nobody stay in `media/`. What is shown never depends on the layout: a file is found through its
+    `FILE` path, then through a map of files found elsewhere in the archive. Only new files and „Przenieś pliki” follow
+    the layout, and files move only in explicit actions, never on link or unlink;
+  - **detection on open:** a scan of `media/` (after Start is shown) finds files that moved (a `FILE` path that exists
+    elsewhere under one name: „Popraw ścieżki”), photos of people lying loose, files nothing refers to (name-based
+    suggestions, never applied without „Przypisz zaznaczone”), folders put into `media/` and files outside the archive.
+    It is reported calmly on Start („Przejrzyj” / „Nie teraz”) and in the dialog „Porządek w zdjęciach”;
+  - **moving files** (Ustawienia › Archiwum › „Zdjęcia i pliki”, or the dialog): never overwrites (`move_no_replace`),
+    skips files held by another program, changes the `FILE` paths in the same saved group, keeps a journal in
+    `.heirloom/porzadkowanie/`, rolls back on a failed save, and can be finished or undone after an interruption
+    („Cofnij porządkowanie”). Only in „Pracuj na archiwum”;
   - duplicates are detected by hash, in the cache;
   - thumbnails and previews are generated in the background, into the cache.
 - ✅ **"Zmniejsz zdjęcia bez utraty jakości"**, an explicit tool that never runs silently. It replaces zip-style
@@ -294,8 +308,19 @@ with no archive yet, "Utwórz archiwum z plików" creates the folder and then ru
     written safely;
   - if another program changed the file meanwhile: "Wczytaj nową wersję" (reload) or "Zapisz moje zmiany jako
     kopię" (save my changes as a copy).
-- ✅ **Backups:** "Utwórz kopię archiwum (.zip)" of the whole folder, and restore. The folder itself can also simply be
-  copied.
+- ✅ **Backups:** the whole archive as a .zip, and restore. The folder itself can also simply be copied.
+  - **Automatic backup (0.7.0):** „Zrób kopię zapasową” in a dialog before an import, before „Przenieś zmiany do
+    archiwum” and before moving files („Dalej bez kopii” skips it). Also „Utwórz kopię zapasową” on Start and
+    „Utwórz kopię” in Ustawienia › Archiwum › Kopie zapasowe. No file dialog: the zip goes to
+    `<Documents>\Heirloom\Kopie zapasowe\<archive>\Heirloom-<name>-RRRR-MM-DD-GGMM.zip` (the folder is remembered per
+    computer, „Zmień…”). Free space is checked first; notes appear for OneDrive, the same disk, online-only files and
+    FAT32 (files over 4 GB). It can be cancelled („Przerwij”), reports progress, and Heirloom keeps the 5 newest of
+    its own zips. „Zapisz w innym miejscu…” keeps the save dialog.
+  - **What is in the zip:** the data file, `media/`, `zrodla-ai/`, the top-level `.heirloom` files (not `kopie/`) and
+    every file the data refers to inside the folder. In „Nie ruszaj oryginału” a backup from Start or Settings is the
+    user's version as a standalone archive; before moving changes, the backup is of the original.
+  - **Restore:** „Przywróć z kopii…” unpacks into a new folder „<name> (z kopii RRRR-MM-DD)”, never over an existing
+    file, refusing paths that leave the folder, and opens it; the old archive is unchanged.
 - ✅ **GEDZIP export** (GEDCOM 7 + photos in one file), and an archive check.
 - ⏭ **GEDCOM 5.5.1 compatibility export**, for MyHeritage and Ancestry.
 - ⏭ **A privacy flag for living people**, used in exports.
@@ -305,9 +330,16 @@ with no archive yet, "Utwórz archiwum z plików" creates the folder and then ru
 - ✅ **Drzewo:** default view, start person, card style, colour mode, line style, sibling order.
 - ✅ **Osoby i daty:** name order, date format, Julian dates, how maiden names are written.
 - ✅ **Archiwum:**
-  - the folder and the data file; the read-only switch;
-  - where the `.heirloom` files are kept (next to the data or in the app), and export/import of the display settings;
-  - backups and GEDZIP export;
+  - „Sposób pracy”: „Pracuj na archiwum” / „Nie ruszaj oryginału” (§11.2 rule 6);
+  - the folder and the data file; the „Tylko do odczytu” switch (not shown in „Nie ruszaj oryginału”);
+  - „Zdjęcia i pliki” (0.7.0): „Układ plików w folderze media”, „Do uporządkowania” with „Przejrzyj…”, „Ostatnie
+    porządkowanie” with „Cofnij porządkowanie”, and a resumable „Przenoszenie przerwane” (not in „Nie ruszaj oryginału”);
+  - „Twoje zmiany” (only in „Nie ruszaj oryginału”): „Folder” with „Otwórz folder”, „Czeka na przeniesienie”
+    with „Przenieś zmiany do archiwum…”, „Ktoś zmienił archiwum” with „Wczytaj zmiany”, „Ostatnie przeniesienie”
+    with „Cofnij”, „Zacznij od nowa” with „Porzuć moje zmiany…”;
+  - export/import of the display settings (the former „Gdzie trzymać” row is gone, replaced by the work modes);
+  - Kopie zapasowe: „Utwórz kopię”, „Zapisz w innym miejscu…”, „Przywróć z kopii…”, the data-file copy before each
+    save and how many to keep; GEDZIP export;
   - tools: missing files, "Zmniejsz zdjęcia", archive check, rebuild the cache.
 - ✅ **Import:** the AI instructions, the format version, import history with undo.
 - ✅ **Osoby edytujące:** the names offered by "Kto edytuje?".
@@ -585,8 +617,14 @@ automatically, never synced, and safe to delete.
 5. **No setup needed to open.** Open a folder or a `.ged` and the tree appears.
    - Heirloom detects the text encoding, finds photos by file name, picks a start person and groups surnames.
    - A short, optional setup screen shows what it found and what's missing.
-6. **Where the `.heirloom` files live.** Next to the data by default, or inside the app (for read-only or shared
-   folders). They can be exported and imported as one settings file.
+6. **Work modes (0.7.0; replaces „where the `.heirloom` files live”).** Asked once for every archive on a computer:
+   - **„Pracuj na archiwum”:** changes are saved in the archive; `.heirloom/` sits next to the data.
+   - **„Nie ruszaj oryginału”:** the archive is never written. Changes, new files and imports go to an own folder,
+     `<Documents>\Heirloom\Moje zmiany\<name>` (a complete archive of its own, with `CO TO JEST.txt` and a link to the
+     original). Reads look in the overlay first, then in the original. „Przenieś zmiany do archiwum…” merges them
+     into the original (3-way, with a backup first and an exact undo while the original is unchanged); an archive
+     that was changed meanwhile is merged first, conflicts are chosen per person.
+   - The display settings can still be exported and imported as one settings file.
 7. **Big and small archives both work.** The first time a 10,000-person file is opened, the cache is built (a second
    or two). After that, opening is instant as long as the file hasn't changed.
 8. **The built-in converter.** The family has no GEDCOM yet, only text and pictures, so the app creates it.

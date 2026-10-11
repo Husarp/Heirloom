@@ -13,7 +13,7 @@ use heirloom_core::gedcom::Node;
 use heirloom_core::SaveOptions;
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 fn batch_mark(node: &mut Node, batch: &str) {
     node.children.push(Node::with_value("_HLM_BATCH", batch));
@@ -140,7 +140,9 @@ pub fn commit(s: &mut Session, draft: &mut Draft, author: &str, note: Option<&st
     // copies this import made are removed again: a failed import leaves nothing behind in media/.
     let media_existed = root.join(MEDIA_DIR).is_dir();
     let mut created: Vec<PathBuf> = Vec::new();
-    let result = copy_files(&root, draft, &mut created).and_then(|copied| write(s, draft, &name, &copied, author, note, allow_foreign));
+    let layers = s.layers();
+    let dirs = import_dirs(s, draft);
+    let result = copy_files(&layers, draft, &dirs, &mut created).and_then(|copied| write(s, draft, &name, &copied, author, note, allow_foreign));
     if result.is_err() {
         // A file that can't be removed now (held by an antivirus) stays; the import already failed with its own message.
         for path in &created {
@@ -161,19 +163,56 @@ pub fn commit(s: &mut Session, draft: &mut Draft, author: &str, note: Option<&st
     result
 }
 
-/// Copies the files the import saves into `media/` (M-label or name → path in the archive), noting each file created.
-fn copy_files(root: &Path, draft: &Draft, created: &mut Vec<PathBuf>) -> Result<HashMap<String, String>, ApiError> {
+/// Whether the import saves this file (it is described, or somebody is assigned to it), and under which key.
+fn saved_file_key(draft: &Draft, f: &super::InputFile) -> Option<String> {
     let batch = &draft.batch.merged;
+    let key = f.m.map(m_label).unwrap_or_else(|| f.name.clone());
+    let choice = draft.file_choices.get(&key);
+    let described = batch.media.iter().any(|m| m_number(&m.id).map(m_label).as_deref() == Some(key.as_str()));
+    let assigned = choice.is_some_and(|c| !c.people.is_empty());
+    (!(choice.is_some_and(|c| c.skip) || draft.duplicates.contains_key(&key) || (!described && !assigned))).then_some(key)
+}
+
+/// Where each file goes when the archive keeps files in folders of people: the folder of the first person the file is
+/// assigned to (the user's choice, else the batch's own description). A new person of the batch has no record yet, so
+/// the folder is named from the batch name. Files for nobody are not in the map and go to `media/`.
+fn import_dirs(s: &mut Session, draft: &Draft) -> HashMap<String, String> {
+    let batch = &draft.batch.merged;
+    let mut wanted: Vec<(String, crate::layout::Who)> = Vec::new();
+    for f in &draft.files {
+        let Some(key) = saved_file_key(draft, f) else { continue };
+        let mut people: Vec<String> = draft.file_choices.get(&key).map(|c| c.people.clone()).unwrap_or_default();
+        if people.is_empty() {
+            if let Some(m) = batch.media.iter().find(|m| m_number(&m.id).map(m_label).as_deref() == Some(key.as_str())) {
+                people = m.depicts.iter().chain(&m.about).cloned().collect();
+            }
+        }
+        let first = people.iter().find_map(|pid| {
+            let decision = draft.decisions.get(pid).filter(|d| is_included(Some(d)))?;
+            match decision.kind {
+                Kind::Merge => Some(crate::layout::Who::Existing(decision.target.clone()?)),
+                Kind::New => {
+                    let name = batch.persons.iter().find(|p| &p.id == pid)?.names.first()?;
+                    Some(crate::layout::Who::New { given: name.given.clone().unwrap_or_default(), surname: name.surname.clone().unwrap_or_default() })
+                }
+                _ => None,
+            }
+        });
+        if let Some(who) = first {
+            wanted.push((key, who));
+        }
+    }
+    crate::layout::dirs_for_import(s, &wanted)
+}
+
+/// Copies the files the import saves into `media/` (or the folder of their person; M-label or name → path in the
+/// archive), noting each file created.
+fn copy_files(layers: &[PathBuf], draft: &Draft, dirs: &HashMap<String, String>, created: &mut Vec<PathBuf>) -> Result<HashMap<String, String>, ApiError> {
     let mut copied: HashMap<String, String> = HashMap::new();
     for f in &draft.files {
-        let key = f.m.map(m_label).unwrap_or_else(|| f.name.clone());
-        let choice = draft.file_choices.get(&key);
-        let described = batch.media.iter().any(|m| m_number(&m.id).map(m_label).as_deref() == Some(key.as_str()));
-        let assigned = choice.is_some_and(|c| !c.people.is_empty());
-        if choice.is_some_and(|c| c.skip) || draft.duplicates.contains_key(&key) || (!described && !assigned) {
-            continue;
-        }
-        let (relative, new) = copy_new_into_archive(root, &f.path)?;
+        let Some(key) = saved_file_key(draft, f) else { continue };
+        let dir = dirs.get(&key).map_or("media", String::as_str);
+        let (relative, new) = copy_new_into_archive(layers, dir, &f.path)?;
         created.extend(new);
         copied.insert(key, relative);
     }
@@ -779,7 +818,7 @@ fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, St
     let applied = !edits.is_empty();
     s.archive.apply_all(edits)?;
     s.changed();
-    let report = match s.archive.save(&SaveOptions { author, batch: Some(name), note, allow_foreign }) {
+    let report = match s.archive.save(&SaveOptions { author, batch: Some(name), note, allow_foreign, kind: None }) {
         Ok(report) => report,
         Err(e) => {
             // Not written: the import must not stay in memory, or committing again would add it a second time.

@@ -1,11 +1,14 @@
 import { ChevronRight, CircleCheck, FileSearch, FolderSearch, Info } from "lucide-react";
 import { useCallback, useState } from "react";
 import { call, type ApiError } from "../../api/transport";
+import { scanSoon } from "../../app/layout";
 import { afterChange, useStore } from "../../app/store";
 import { useApi } from "../../app/useApi";
 import { Checkbox, EmptyState, Spinner, useDismiss } from "../../components/bits";
 import { count, num, plural } from "../../lib/format";
 import { pickFiles, pickFolder } from "../../lib/native";
+import { OriginalMissingBanner } from "../start/OverlayBanners";
+import { foundElsewhereText } from "./layoutText";
 import { filtersLike, runEdit } from "./shared";
 import "./media.css";
 
@@ -23,6 +26,30 @@ interface FindResult {
   folder: string;
 }
 
+/** Files whose path in the archive is out of date but that lie elsewhere in the archive: they are shown all the same, so
+ *  they are not counted as missing; „Popraw ścieżki” writes the right paths (DESIGN B.4). */
+function FoundElsewhere() {
+  const n = useStore((s) => s.scan?.counts.moved ?? 0);
+  const notify = useStore((s) => s.notify);
+  if (n === 0) return null;
+  const fix = () =>
+    runEdit(async () => {
+      const r = await call<{ fixed: number }>("media.fixMoved");
+      afterChange();
+      scanSoon(0);
+      notify(`Poprawiono ścieżki: ${count(r.fixed, "plik", "pliki", "plików")}.`, { detail: "Zmiana czeka na zapis." });
+    });
+  return (
+    <div className="banner info">
+      <Info size={16} color="var(--text2)" style={{ flex: "none" }} />
+      <span className="grow">{foundElsewhereText(n)}. Zdjęcia są widoczne, ale inne programy ich nie znajdą.</span>
+      <button className="btn secondary sm" onClick={fix}>
+        Popraw ścieżki
+      </button>
+    </div>
+  );
+}
+
 /** Brakujące pliki (spec §4.33): files the archive describes that aren't in its folder. „Szukaj w folderze…” matches
  *  them by name; a file found once is ticked, several need a look („sprawdź”), none can be pointed to by hand.
  *  Nothing changes until „Zastosuj”, which copies the chosen files back into media/. */
@@ -31,6 +58,9 @@ export function MissingFiles() {
   const notify = useStore((s) => s.notify);
   const { data, error, loading } = useApi<{ rows: MissingRow[] }>("media.missing");
   const rows = data?.rows ?? [];
+  // The archive can't be reached (a pendrive unplugged): its photos are not lost, so there is nothing to look for.
+  const elsewhere = useStore((s) => s.scan?.counts.moved ?? 0);
+  const originalMissing = useStore((s) => s.archive?.overlay?.originalMissing ?? false);
 
   /** Files with the same name found by the searches, per record. */
   const [candidates, setCandidates] = useState<Record<string, string[]>>({});
@@ -140,6 +170,18 @@ export function MissingFiles() {
     </div>
   );
 
+  if (originalMissing) {
+    return (
+      <div className="page">
+        <div className="missing-page">
+          {crumb}
+          <h1 className="page-title">Brakujące pliki</h1>
+          <OriginalMissingBanner />
+        </div>
+      </div>
+    );
+  }
+
   if (!data) {
     return (
       <div className="page">
@@ -165,11 +207,12 @@ export function MissingFiles() {
         <div className="missing-page">
           {crumb}
           <h1 className="page-title">Brakujące pliki</h1>
+          <FoundElsewhere />
           <div className="card">
             <EmptyState
               icon={<CircleCheck size={32} color="var(--accent-text)" />}
-              title="Wszystkie pliki są na miejscu."
-              text="Każdy plik opisany w archiwum jest w jego folderze."
+              title={elsewhere > 0 ? "Żaden plik nie zginął." : "Wszystkie pliki są na miejscu."}
+              text={elsewhere > 0 ? "Każdy plik opisany w archiwum jest gdzieś w jego folderze i widać go w programie." : "Każdy plik opisany w archiwum jest w jego folderze."}
               action={
                 <button className="link" style={{ fontSize: 13 }} onClick={() => go({ name: "media" })}>
                   Wróć do Mediów
@@ -210,6 +253,7 @@ export function MissingFiles() {
           </button>
         </div>
 
+        <FoundElsewhere />
         {lastSearch &&
           (lastSearch.found > 0 ? (
             <div className="banner success">

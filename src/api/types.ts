@@ -61,6 +61,149 @@ export interface ArchiveStatus {
   lastSaved: string | null;
   /** Only when archives are opened together (a set): then the status is the set's, and `readOnly` is always on. */
   combined?: CombinedInfo;
+  /** How this person works with the archive on this computer: „Pracuj na archiwum”, „Nie ruszaj oryginału”, or null
+   *  until asked (the question on first open). Sets have none. */
+  workMode?: "inPlace" | "overlay" | null;
+  /** „Nie ruszaj oryginału”: where the user's changes are and what the archive doesn't have yet. `root`, `dataFile`
+   *  and `dataPath` above are the original's. */
+  overlay?: OverlayStatus | null;
+  /** Said once after opening (changes found again, a write-back finished, the archive's changes taken in). */
+  notice?: string;
+  /** A „Uporządkuj” run that was cut off: the banner „Przenoszenie plików zostało przerwane (przeniesiono 120 z 340)”. */
+  layoutInterrupted?: LayoutInterrupted | null;
+}
+
+export interface OverlayStatus {
+  /** The folder of „Twoje zmiany”. */
+  folder: string;
+  /** „Dokumenty › Heirloom › Moje zmiany › Rodzina Kowalskich”. */
+  folderLabel: string;
+  dataPath: string;
+  /** Changes (records) the archive doesn't have yet. */
+  pending: number;
+  /** Someone changed the archive since the last sync. */
+  originalChanged: boolean;
+  /** The archive can't be opened now (a pendrive unplugged). */
+  originalMissing: boolean;
+  lastWriteBack: string | null;
+  canUndoWriteBack: boolean;
+  /** A write-back that didn't finish: why, for the banner. */
+  interrupted: string | null;
+  /** The archive and the user's folder are on one disk (no close reminder then). */
+  sameDrive: boolean;
+}
+
+/** What the question „Jak chcesz pracować z tym archiwum?” shows. */
+export interface ModeInfo {
+  writable: boolean;
+  /** The program that made the file, when it isn't Heirloom. */
+  foreign: string | null;
+  usedBefore: boolean;
+  editors: Editor[];
+  folder: { path: string; label: string };
+  suggested: "inPlace" | "overlay";
+}
+
+/** Ustawienia › Archiwum › Twoje zmiany. */
+export interface OverlayInfo {
+  folder: string;
+  folderLabel: string;
+  pending: number;
+  people: number;
+  newFiles: number;
+  newBytes: number;
+  writable: boolean;
+  lockedOriginal: boolean;
+  lastWriteBack: string | null;
+  canUndoWriteBack: boolean;
+  originalChanged: boolean;
+  originalMissing: boolean;
+}
+
+/** What „Przenieś zmiany do archiwum” would do. */
+export interface WriteBackPreview {
+  changes: number;
+  people: number;
+  files: number;
+  bytes: number;
+  originalChanged: boolean;
+  foreign: { origin: string; version: string | null; dataFile: string } | null;
+  lockedOriginal: boolean;
+  writable: boolean;
+  originalMissing: boolean;
+  root: string;
+  name: string;
+}
+
+/** The automatic backup (.zip) of the archive: where it goes and what to warn about. */
+export interface BackupInfo {
+  folder: string;
+  folderLabel: string;
+  files: number;
+  bytes: number;
+  needed: number;
+  free: number | null;
+  lastZip: { path: string; at: string; bytes: number; exists: boolean } | null;
+  /** The last backup has exactly what the archive has now. */
+  current: boolean;
+  inOneDrive: boolean;
+  sameDisk: boolean;
+  cloudOnly: { files: number; bytes: number };
+}
+
+/** `archive.backupAuto`: the .zip that was made. */
+export interface BackupResult {
+  path: string;
+  bytes: number;
+  files: number;
+}
+
+/** `job.progress` / `job.cancel` (answered without waiting for the running job). */
+export interface JobProgress {
+  running: boolean;
+  label: string;
+  done: number;
+  total: number;
+  cancelling: boolean;
+}
+
+/** `archive.writeBack` → { result, status }. */
+export interface WriteBackResult {
+  result: { changes: number; files: number; bytes: number };
+  status: ArchiveStatus;
+}
+
+/** One record changed on both sides (`archive.rebase`). Texts are the record as GEDCOM lines; null: deleted there. */
+export interface RebaseConflict {
+  key: string;
+  tag: string;
+  name: string;
+  /** The side kept when no choice is given. */
+  default: "mine" | "theirs";
+  mine: string | null;
+  theirs: string | null;
+  base: string | null;
+  /** The places both sides changed („Urodzenie · data”): the choice covers only these. Empty when a side deleted the record. */
+  fields: string[];
+  /** What each side changed from the base, worded like the history feed („Pokaż różnice”). */
+  mineChanges: FieldChange[];
+  theirChanges: FieldChange[];
+}
+
+/** One field of a record changed: „Urodzenie · data”: „1878” → „12.03.1878”. null: not there. */
+export interface FieldChange {
+  field: string;
+  old: string | null;
+  new: string | null;
+}
+
+/** `archive.rebase` → { result, status }. `merged: false` with `conflicts`: nothing was changed, choose and call again with
+ *  `choices` (or `preview: true` first, which never changes anything). */
+export interface RebaseResult {
+  result:
+    | { merged: true; fastForward: boolean; changes: number; conflicts: [] }
+    | { merged: false; conflicts: RebaseConflict[]; theirChanges: number; myChanges: number; /** RFC 3339: the last time the archive and „Twoje zmiany” were the same. */ since: string };
+  status: ArchiveStatus;
 }
 
 /** Archives opened together („Otwórz razem…”, crates/heirloom-api/src/combined). */
@@ -89,6 +232,10 @@ export interface CombinedArchive {
   /** The folder or .ged to open the archive by itself. */
   path: string | null;
   dataPath: string | null;
+  /** Shown in the user's version („Nie ruszaj oryginału” on this computer). */
+  withChanges?: boolean;
+  /** With `withChanges`: how many records of the user's version the archive doesn't have yet. */
+  pending?: number;
 }
 
 /** A name offered by „Kto edytuje?”. */
@@ -186,4 +333,140 @@ export interface PersonSummary {
   created: string | null;
   /** Archives opened together: the keys of the archives the person is in (two or more for a linked person). */
   from?: string[];
+}
+
+// ---------- Part B: where the photos lie in media/ (media.scan and the commands that move or assign files) ----------
+
+export type MediaLayout = "flat" | "perPerson";
+
+export interface LayoutInterrupted {
+  /** The journal's name: give it to media.finishRestructure / media.undoRestructure. */
+  journal: string;
+  done: number;
+  total: number;
+  layout: MediaLayout | null;
+}
+
+/** A person as the scan names them („Józef Kowalski (1878–1944)” = name + years). */
+export interface LayoutPerson {
+  id: string;
+  name: string;
+  /** „1878–1944”, „1878–”, „–1944”, or null. */
+  years: string | null;
+}
+
+export interface ScanUnknown {
+  /** Path inside the archive, `/` separators: give it to media.assign / media.leaveAlone. */
+  path: string;
+  name: string;
+  size: number;
+  /** `media` or `media/<folder>`. */
+  folder: string;
+  /** Prefilled when exactly one name fits, or the file lies in a person's folder. `why`: „pasuje nazwa pliku” | „w folderze osoby”. */
+  suggestion: { id: string; name: string; why: string } | null;
+  /** Two or three people that fit the name (nothing prefilled). */
+  candidates: LayoutPerson[];
+}
+
+export interface ScanFolder {
+  path: string;
+  name: string;
+  files: number;
+  linked: number;
+  unknown: number;
+  person: LayoutPerson | null;
+  /** Left alone earlier and not changed since. */
+  leftAlone: boolean;
+  /** Left alone earlier but its files changed: asked again. */
+  changed: boolean;
+  /** `unpack`: in a flat archive (B1) a folder to take out or leave; `whose`: in B2 a folder of nobody with unknown files. */
+  question: "unpack" | "whose" | null;
+}
+
+export interface JournalSummary {
+  name: string;
+  ts: string;
+  state: "saved" | "interrupted";
+  moved: number;
+  total: number;
+}
+
+export interface MediaScan {
+  layout: {
+    setting: MediaLayout | null;
+    guess: MediaLayout;
+    /** The setting, else the guess. */
+    effective: MediaLayout;
+    rootOwned: number;
+    folderOwned: number;
+    personFolders: number;
+  };
+  /** FILE values that point at nothing but whose file is elsewhere in the archive. */
+  moved: { id: string; file: string; found: string }[];
+  /** B2: files of people lying loose in media/ (`ids`: every record that names the file). */
+  looseLinked: { id: string; ids: string[]; file: string; owner: LayoutPerson }[];
+  unknown: ScanUnknown[];
+  folders: ScanFolder[];
+  /** Absolute FILE paths outside the archive that exist. */
+  outside: { id: string; file: string }[];
+  counts: { moved: number; looseLinked: number; unknown: number; folders: number; outside: number; missing: number; files: number };
+  /** Everything to tidy: the banner shows it when > 0 and `!seen`. */
+  total: number;
+  /** Give it to media.tidySeen („Nie teraz”). */
+  fingerprint: string;
+  /** „Nie teraz” was said to exactly these findings (on this computer). */
+  seen: boolean;
+  /** More than 50 000 files: the scan stopped. */
+  truncated: boolean;
+  /** The last saved or open „Uporządkuj” run (Settings: „Ostatnie porządkowanie”), else null. */
+  journal: JournalSummary | null;
+  interrupted: LayoutInterrupted | null;
+}
+
+export interface RestructurePlan {
+  to: MediaLayout;
+  count: number;
+  bytes: number;
+  /** The first 300 moves. */
+  moves: { from: string; to: string; objects: string[]; unknown: boolean }[];
+  unknownMoves: number;
+  /** Files in the media root that belong to nobody: they stay. */
+  unassigned: number;
+  /** Files of several people (go to one folder). */
+  groupFiles: number;
+  /** Files several records point at (moved once). */
+  shared: number;
+  alreadyInPlace: number;
+  newFolders: string[];
+  shortened: { from: string; to: string }[];
+  longPaths: number;
+}
+
+export interface RestructureResult {
+  moved: number;
+  /** Files not moved: `reason` is `held` (open in another program), `locked`, `missing` or `error`. */
+  skipped: { from: string; reason: "held" | "locked" | "missing" | "error" }[];
+  /** Skipped for a reason other than `missing`: „6 plików było otwartych w innym programie”. */
+  held: number;
+  /** The journal's name, for „Cofnij porządkowanie”; null when nothing moved. */
+  journal: string | null;
+  batch?: string;
+  layout: MediaLayout | null;
+  removedFolders: string[];
+  /** Unknown files that came along (unpacking a folder): offer them in the assign list. */
+  unknownMoved: string[];
+  /** Of those, assigned to `assignTo`. */
+  assigned: number;
+  /** A fresh media.scan. */
+  report: MediaScan;
+  status: ArchiveStatus;
+}
+
+export interface UndoRestructureResult {
+  movedBack: number;
+  notBack: number;
+  journal: string;
+  removedFolders: string[];
+  report: MediaScan;
+  status: ArchiveStatus;
 }

@@ -361,13 +361,13 @@ fn load(s: &mut Session, texts: &[String], paths: &[PathBuf], exclude: &[PathBuf
             target: None,
         });
     }
-    let root = s.archive.root().to_path_buf();
+    let roots = s.file_roots();
     let d = s.derived();
     // Files already in the archive (same contents) are linked, not copied again.
     let mut duplicates = HashMap::new();
     for f in &files {
         let Some(n) = f.m else { continue };
-        if let Some(existing) = duplicate_in_archive(d, &root, &f.path, f.size) {
+        if let Some(existing) = duplicate_in_archive(d, &roots, &f.path, f.size) {
             let what = if check::is_image(&f.path) { "Zdjęcie" } else { "Plik" };
             issues.push(Issue {
                 level: "info",
@@ -568,13 +568,13 @@ pub fn age_at(text: &str, year: i32) -> Option<i32> {
     first_number(text).filter(|age| *age <= 120).map(|age| age as i32).filter(|age| *age < year)
 }
 
-fn duplicate_in_archive(d: &Derived, root: &std::path::Path, path: &std::path::Path, size: u64) -> Option<String> {
+fn duplicate_in_archive(d: &Derived, roots: &crate::media_edit::FileRoots, path: &std::path::Path, size: u64) -> Option<String> {
     let mut hash = None;
     // Only records can be pointed to (not an object written inside a person, `@I1@#0`); an object without a file is
     // passed over, not the end of the search.
     for id in d.view.media_order.iter().filter(|id| !id.contains('#')) {
         let Some(file) = d.view.media.get(id).and_then(|m| m.file.clone()) else { continue };
-        let existing = crate::media_edit::resolve(root, &file);
+        let existing = roots.resolve(&file);
         if std::fs::metadata(&existing).ok().map(|m| m.len()) != Some(size) {
             continue;
         }
@@ -1009,7 +1009,8 @@ fn history(s: &Session) -> Value {
     // Each batch's records as they were before it (the oldest entry of a record in the batch).
     let mut before: HashMap<&str, Vec<(&str, &Option<String>)>> = HashMap::new();
     for e in &entries {
-        let Some(batch) = &e.batch else { continue };
+        // Moving files (kind "layout") is saved under a batch too, but it is not an import.
+        let Some(batch) = e.batch.as_ref().filter(|_| e.kind.is_none()) else { continue };
         let current = now.entry(e.record.as_str()).or_insert_with(|| s.archive.doc.record(&e.record).map(heirloom_core::history::record_text));
         let active = e.tag != "HEAD" && e.after.is_some() && *current == e.after;
         if e.tag != "HEAD" {

@@ -2,6 +2,7 @@
 //! Every command takes JSON and returns JSON, so the UI's `api.ts` works the same over both.
 
 pub mod activity;
+pub mod backup;
 pub mod combined;
 pub mod config;
 pub mod edit;
@@ -9,17 +10,21 @@ pub mod gedwrite;
 pub mod import;
 pub mod media_edit;
 pub mod derive;
+pub mod fsx;
 pub mod kin;
+pub mod layout;
 pub mod lists;
 pub mod tree;
 pub mod media;
+pub mod overlay;
 pub mod people;
+pub mod progress;
 pub mod running;
 pub mod text;
-mod tools;
+pub(crate) mod tools;
 pub mod update;
 
-use config::{AppConfig, RecentArchive};
+use config::{AppConfig, IN_PLACE, OVERLAY, RecentArchive, data_key};
 use derive::Derived;
 use heirloom_core::{Archive, Error as CoreError, SaveOptions};
 use serde::Serialize;
@@ -82,19 +87,58 @@ pub fn count_pl(n: usize, one: &str, few: &str, many: &str) -> String {
     format!("{n} {word}")
 }
 
+/// "1,2 GB", "48 MB", "350 kB".
+pub fn count_bytes(n: u64) -> String {
+    let (value, unit) = match n {
+        n if n >= 1_000_000_000 => (n as f64 / 1e9, "GB"),
+        n if n >= 1_000_000 => (n as f64 / 1e6, "MB"),
+        n => (n as f64 / 1e3, "kB"),
+    };
+    let text = if value >= 10.0 { format!("{value:.0}") } else { format!("{value:.1}") };
+    format!("{} {unit}", text.replace('.', ","))
+}
+
 /// The open archive and what is worked out from it.
 pub struct Session {
+    /// In „Nie ruszaj oryginału” the folder of the user's changes (a normal archive folder), never the original.
     pub archive: Archive,
     /// Rebuilt lazily after every change.
     pub(crate) derived: Option<Derived>,
     /// The display settings it was built with; changing them (name order, date format, surname joins) rebuilds it.
     display_seen: Option<serde_json::Map<String, Value>>,
     pub last_saved: Option<String>,
+    /// How this person works with the archive on this computer: [`IN_PLACE`], [`OVERLAY`], or None until asked.
+    pub work_mode: Option<&'static str>,
+    /// „Nie ruszaj oryginału”: the original archive behind `archive`.
+    pub overlay: Option<overlay::OverlayInfo>,
+    /// The original's path as it was opened (the folder or the `.ged`).
+    pub opened: String,
+    /// Heirloom saved into it before, or it was in the recent list before this open („Do tej pory…”).
+    used_before: bool,
+    /// Files someone moved in Explorer, found by the last `media.scan`: served after the folders miss (Part B).
+    pub(crate) moved: media::Moved,
+    /// A „Uporządkuj” run that was cut off (`{ journal, done, total }`), found at open and after each run.
+    pub(crate) layout_interrupted: Option<Value>,
 }
 
 impl Session {
     pub(crate) fn new(archive: Archive) -> Session {
-        Session { archive, derived: None, display_seen: None, last_saved: None }
+        let layout_interrupted = layout::engine::interrupted(archive.sidecar_path());
+        Session { archive, derived: None, display_seen: None, last_saved: None, work_mode: None, overlay: None, opened: String::new(), used_before: false, moved: media::Moved::default(), layout_interrupted }
+    }
+
+    /// Where the archive's files are, the one written into first: the folder of the user's changes and the original,
+    /// or the archive folder alone.
+    pub fn layers(&self) -> Vec<PathBuf> {
+        let root = self.archive.root().to_path_buf();
+        match &self.overlay {
+            Some(info) => vec![root, info.original_root.clone()],
+            None => vec![root],
+        }
+    }
+
+    pub fn file_roots(&self) -> media_edit::FileRoots {
+        media_edit::FileRoots::Layers(self.layers(), self.moved.clone())
     }
 
     pub(crate) fn ensure(&mut self) {
@@ -118,12 +162,18 @@ impl Session {
     /// After any change to the records.
     pub fn changed(&mut self) {
         self.derived = None;
+        if let Some(info) = &self.overlay {
+            info.forget_pending();
+        }
     }
 
     pub fn history(&self) -> Vec<heirloom_core::history::Entry> {
         heirloom_core::history::read(&self.archive.history_path()).unwrap_or_default()
     }
 }
+
+/// Commands that write into the archive (or prepare a write) and wait for the first-open question.
+const GUARDED: &[&str] = &["archive.save", "archive.saveAsCopy", "archive.setSettings", "settings.import", "import.commit", "history.undo"];
 
 pub struct Api {
     config_dir: Option<PathBuf>,
@@ -138,6 +188,10 @@ pub struct Api {
     combined: Option<combined::Combined>,
     /// What this window was started with (`--open <path> [--person <xref>]`), given to the interface once.
     start: Option<(String, Option<String>)>,
+    /// How far a long job has got; read without the command lock (`job.progress`).
+    progress: progress::Progress,
+    /// Tests and the browser bridge: a folder standing in for the user's home (`Dokumenty`, `AppData\Local`).
+    home: Option<PathBuf>,
 }
 
 fn str_arg(args: &Value, key: &str) -> Result<String, ApiError> {
@@ -153,7 +207,69 @@ impl Api {
     /// per-archive caches (thumbnails).
     pub fn new(config_dir: Option<PathBuf>, cache_root: Option<PathBuf>) -> Api {
         let config = config_dir.as_deref().map(AppConfig::load).unwrap_or_default();
-        Api { config_dir, cache_root, config, session: None, import: None, media: media::MediaRoots::default(), combined: None, start: None }
+        Api { config_dir, cache_root, config, session: None, import: None, media: media::MediaRoots::default(), combined: None, start: None, progress: progress::Progress::default(), home: None }
+    }
+
+    /// The handle the window reads long jobs' progress through, outside the command lock.
+    pub fn progress(&self) -> progress::Progress {
+        self.progress.clone()
+    }
+
+    /// Tests and the browser bridge: `<home>/Dokumenty` and `<home>/Lokalne` stand for the user's folders.
+    #[doc(hidden)]
+    pub fn set_home(&mut self, home: PathBuf) {
+        self.home = Some(home);
+    }
+
+    /// The user's Documents folder (wherever Windows keeps it: redirected, in OneDrive).
+    fn documents(&self) -> Option<PathBuf> {
+        match &self.home {
+            Some(home) => Some(home.join("Dokumenty")),
+            None => dirs::document_dir(),
+        }
+    }
+
+    fn local_dir(&self) -> Option<PathBuf> {
+        match &self.home {
+            Some(home) => Some(home.join("Lokalne")),
+            None => dirs::data_local_dir(),
+        }
+    }
+
+    /// Where new folders of „Twoje zmiany” go.
+    fn changes_parent(&self) -> PathBuf {
+        if let Some(folder) = &self.config.changes_folder {
+            return PathBuf::from(folder);
+        }
+        self.default_changes_parent().unwrap_or_else(|| PathBuf::from("Moje zmiany"))
+    }
+
+    fn default_changes_parent(&self) -> Option<PathBuf> {
+        self.documents().or_else(|| self.local_dir()).map(|d| d.join("Heirloom").join("Moje zmiany"))
+    }
+
+    /// Where „Twoje zmiany” go when Documents can't be written (e.g. Controlled Folder Access).
+    fn local_changes_parent(&self) -> Option<PathBuf> {
+        self.local_dir().map(|d| d.join("Heirloom").join("Moje zmiany"))
+    }
+
+    /// Where the automatic backups go.
+    fn backup_parent(&self) -> PathBuf {
+        if let Some(folder) = &self.config.backup_folder {
+            return PathBuf::from(folder);
+        }
+        self.documents().or_else(|| self.local_dir()).map_or_else(|| PathBuf::from("Kopie zapasowe"), |d| d.join("Heirloom").join("Kopie zapasowe"))
+    }
+
+    /// Archives worked on in „Nie ruszaj oryginału” here: data key → folder of the changes (for archives opened together).
+    fn overlays(&self) -> std::collections::HashMap<String, PathBuf> {
+        self.config
+            .archives
+            .iter()
+            .filter(|(_, u)| u.mode == OVERLAY)
+            .filter_map(|(k, u)| Some((k.clone(), PathBuf::from(u.overlay.as_ref()?))))
+            .filter(|(_, folder)| overlay::read_manifest(folder).is_some_and(|m| !m.retired))
+            .collect()
     }
 
     /// The standard locations: `%APPDATA%\Heirloom` and `%LOCALAPPDATA%\Heirloom\cache`.
@@ -199,9 +315,17 @@ impl Api {
 
     /// Runs one command. `args` is a JSON object (or null when the command takes nothing).
     pub fn call(&mut self, method: &str, args: Value) -> ApiResult {
+        // Read without the lock in the window (src-tauri); here for the browser bridge.
+        if method == "job.progress" || method == "job.cancel" {
+            return Ok(self.progress.call(method));
+        }
         // Archives opened together are only for browsing (decision 1a): nothing that could change an archive runs.
         if self.combined.is_some() && !combined::allowed(method) {
             return Err(combined::read_only());
+        }
+        // Until the user chose how to work with the archive (the question on first open), nothing is written into it.
+        if GUARDED.contains(&method) {
+            self.mode_chosen()?;
         }
         match method {
             "app.state" => Ok(self.app_state()),
@@ -209,11 +333,16 @@ impl Api {
             "set.create" => {
                 let archives: Vec<String> = args.get("archives").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
                 let replace = args.get("replace").and_then(Value::as_bool).unwrap_or(false);
-                let set = combined::Combined::create(Path::new(&str_arg(&args, "path")?), &str_arg(&args, "name")?, &archives, replace)?;
+                let path = str_arg(&args, "path")?;
+                // The set file never goes into an archive worked on in „Nie ruszaj oryginału”.
+                if self.inside_untouched_original(Path::new(&path)) {
+                    return Err(ApiError::new("inside_archive", "Wybierz miejsce poza folderem archiwum, którego nie zmieniasz („Nie ruszaj oryginału”)."));
+                }
+                let set = combined::Combined::create(Path::new(&path), &str_arg(&args, "name")?, &archives, replace, self.overlays())?;
                 self.install_set(set)
             }
             "set.open" => {
-                let set = combined::Combined::open(Path::new(&str_arg(&args, "path")?))?;
+                let set = combined::Combined::open(Path::new(&str_arg(&args, "path")?), self.overlays())?;
                 self.install_set(set)
             }
             m if m.starts_with("set.") => {
@@ -285,6 +414,37 @@ impl Api {
             "archive.setSettings" => self.set_archive_settings(&args),
             "archive.storage" | "archive.backup" | "archive.exportGedzip" | "archive.check" | "archive.rebuildCache" | "archive.editors"
             | "archive.saveAsNew" | "settings.export" | "settings.import" | "app.about" => tools::call(self, method, &args),
+            "archive.modeInfo" => self.mode_info(),
+            "archive.setWorkMode" => self.set_work_mode(&args),
+            "archive.overlayInfo" => self.overlay_info(),
+            "archive.writeBackPreview" => overlay::writeback::preview(self.session()?),
+            "archive.writeBack" => {
+                let author = str_arg(&args, "author")?;
+                let allow_foreign = args.get("allowForeign").and_then(Value::as_bool).unwrap_or(false);
+                let progress = self.progress.clone();
+                let result = overlay::writeback::write_back(self.session()?, &author, allow_foreign, &progress)?;
+                self.update_config(|c| c.last_editor = Some(author));
+                Ok(json!({ "result": result, "status": self.archive_status()? }))
+            }
+            "archive.undoWriteBack" => {
+                overlay::writeback::undo(self.session()?)?;
+                self.archive_status()
+            }
+            "archive.rebase" => {
+                let choices = args.get("choices").and_then(Value::as_object).map(|c| {
+                    c.iter()
+                        .map(|(k, v)| (k.clone(), if v.as_str() == Some("theirs") { overlay::merge::Side::Theirs } else { overlay::merge::Side::Mine }))
+                        .collect()
+                });
+                // `preview`: only says what a merge would do (the conflicts, the counts); nothing changes.
+                let preview = args.get("preview").and_then(Value::as_bool).unwrap_or(false);
+                let s = self.session()?;
+                let result = overlay::writeback::rebase(s, choices, preview)?;
+                Ok(json!({ "result": result, "status": self.archive_status()? }))
+            }
+            "archive.discardOverlay" => self.discard_overlay(),
+            "archive.relocateOriginal" => self.relocate_original(&str_arg(&args, "path")?, args.get("force").and_then(Value::as_bool).unwrap_or(false)),
+            "archive.backupInfo" | "archive.backupAuto" | "archive.restore" | "app.setBackupFolder" => backup::call(self, method, &args),
             "archive.setEditor" => {
                 // Remembered for "Kto edytuje?" next time; the name is added to the archive's list on the first save.
                 let name = str_arg(&args, "name")?;
@@ -377,8 +537,8 @@ impl Api {
             }
             "archive.firstOpen" => {
                 let s = self.session()?;
-                let root = s.archive.root().to_path_buf();
-                Ok(lists::first_open(s.derived(), &root))
+                let roots = s.file_roots();
+                Ok(lists::first_open(s.derived(), &roots))
             }
             "surnames.list" => Ok(lists::surnames(self.view()?)),
             "surname.get" => {
@@ -398,7 +558,7 @@ impl Api {
             "media.list" | "media.get" | "media.missing" | "media.findMissing" => {
                 let roots = match &self.combined {
                     Some(c) => c.file_roots(),
-                    None => media_edit::FileRoots::One(self.session()?.archive.root().to_path_buf()),
+                    None => self.session()?.file_roots(),
                 };
                 let d = self.view()?;
                 match method {
@@ -408,16 +568,83 @@ impl Api {
                     _ => Ok(lists::find_missing(d, &roots, Path::new(&str_arg(&args, "folder")?))),
                 }
             }
+            // Part B: where the photos lie in media/. The scan and the preview only read.
+            "media.scan" => {
+                let s = self.session()?;
+                let mut report = layout::run_scan(s);
+                let key = match &s.overlay {
+                    Some(info) => info.manifest.original.data_path.to_lowercase(),
+                    None => data_key(&s.archive.data_path()),
+                };
+                // „Nie teraz” was said to exactly these findings (on this computer).
+                let seen = self.config.archives.get(&key).and_then(|u| u.tidy_seen.as_ref());
+                report["seen"] = json!(seen.is_some_and(|f| report["fingerprint"].as_str() == Some(f.as_str())));
+                Ok(report)
+            }
+            "media.restructurePreview" => layout::engine::preview(self.session()?, &args),
+            "media.fixMoved" | "media.assign" | "media.leaveAlone" | "media.setLayout" | "media.restructure" | "media.finishRestructure" | "media.undoRestructure" | "media.tidySeen" => {
+                self.mode_chosen()?;
+                self.layout_command(method, &args)
+            }
             "sources.list" => Ok(lists::sources(self.view()?)),
             "source.get" => {
                 let id = str_arg(&args, "id")?;
                 lists::source(self.view()?, &id)
             }
             m if ["person.", "relation.", "family.", "fact.", "text.", "media.", "source.", "citation.", "place."].iter().any(|p| m.starts_with(p)) => {
+                // media.add copies files into the archive at once, before any save.
+                if !m.ends_with("Preview") {
+                    self.mode_chosen()?;
+                }
                 edit::call(self.session()?, m, &args)
             }
             _ => Err(ApiError::new("unknown_method", format!("Nieznane polecenie: {method}"))),
         }
+    }
+
+    /// The Part B commands that change something (the files in `media/`, or what the data says about them).
+    fn layout_command(&mut self, method: &str, args: &Value) -> ApiResult {
+        if method == "media.tidySeen" {
+            // „Nie teraz”: the banner stays away until the findings change (per computer).
+            let fingerprint = str_arg(args, "fingerprint")?;
+            let s = self.session()?;
+            let key = match &s.overlay {
+                Some(info) => info.manifest.original.data_path.to_lowercase(),
+                None => data_key(&s.archive.data_path()),
+            };
+            self.update_config(|c| {
+                if let Some(record) = c.archives.get_mut(&key) {
+                    record.tidy_seen = Some(fingerprint);
+                }
+            });
+            return Ok(Value::Null);
+        }
+        let progress = self.progress.clone();
+        let s = self.session()?;
+        let moves_files = matches!(method, "media.restructure" | "media.finishRestructure" | "media.undoRestructure");
+        let mut result = match method {
+            "media.fixMoved" => layout::fix_moved(s)?,
+            "media.assign" => layout::assign(s, args)?,
+            "media.leaveAlone" => layout::leave_alone(s, args)?,
+            "media.setLayout" => layout::set_layout(s, args)?,
+            "media.restructure" => layout::engine::restructure(s, &progress, args)?,
+            "media.finishRestructure" => layout::engine::finish(s, &progress, args)?,
+            _ => layout::engine::undo(s, &progress, args)?,
+        };
+        if moves_files {
+            // The data file was saved: the registry's hash follows (A.2), and the moved map is looked up again.
+            let author = str_arg(args, "author")?;
+            let record = s.overlay.is_none().then(|| (data_key(&s.archive.data_path()), s.archive.fingerprint_hex()));
+            result["report"] = layout::run_scan(s);
+            self.update_config(|c| {
+                c.last_editor = Some(author);
+                if let Some((u, hash)) = record.and_then(|(key, hash)| c.archives.get_mut(&key).filter(|u| u.mode == IN_PLACE).map(|u| (u, hash))) {
+                    u.hash = Some(hash);
+                }
+            });
+            result["status"] = self.archive_status()?;
+        }
+        Ok(result)
     }
 
     /// "Cofnij" in the history: the record goes back to how it was before that change (or a whole import batch
@@ -441,6 +668,10 @@ impl Api {
                 vec![entries.get(index).ok_or_else(|| ApiError::bad_args("index"))?]
             }
         };
+        // Moving files (Part B) has its own button: undoing its lines one by one would unlink the files it moved.
+        if targets.iter().any(|e| e.kind.as_deref() == Some("layout")) {
+            return Err(ApiError::new("layout_entry", "Przenoszenie plików cofniesz przyciskiem „Cofnij porządkowanie”."));
+        }
         let parse = |text: &str| {
             heirloom_core::gedcom::Document::from_bytes(text.as_bytes()).0.records.into_iter().find(|r| r.tag != "HEAD" && r.tag != "TRLR")
         };
@@ -478,7 +709,7 @@ impl Api {
     fn app_state(&self) -> Value {
         let (archive, id) = match (&self.combined, &self.session) {
             (Some(c), _) => (Some(c.status()), Some(c.set.id.clone())),
-            (None, Some(s)) => (Some(status_of(s)), Some(s.archive.settings().archive_id.clone())),
+            (None, Some(s)) => (Some(status_of(s, self.documents().as_deref())), Some(s.archive.settings().archive_id.clone())),
             (None, None) => (None, None),
         };
         json!({
@@ -530,8 +761,62 @@ impl Api {
         Ok(self.app_state())
     }
 
+    /// Opens an archive (A.4): in „Nie ruszaj oryginału” the folder of the user's changes instead; the first time on
+    /// this computer without a mode (the question follows); a folder of „Twoje zmiany” opened directly as its original.
     fn open_archive(&mut self, path: &str) -> ApiResult {
-        let archive = Archive::open(Path::new(path))?;
+        let archive = match Archive::open(Path::new(path)) {
+            Ok(archive) => archive,
+            Err(e) => {
+                // The original is gone (a pendrive unplugged): the user's version still opens.
+                if let Some((folder, manifest)) = self.overlay_of_missing(path) {
+                    let archive = Archive::open(&folder)?;
+                    return self.install_overlay(archive, manifest, true, Vec::new());
+                }
+                return Err(e.into());
+            }
+        };
+        if let Some(manifest) = overlay::read_manifest(archive.root()) {
+            if manifest.retired {
+                // Earlier, set-aside changes (renamed after a switch, a write-back or „Porzuć moje zmiany…”): opened so the
+                // user can look at them, like any archive of its own. Never registered over the original's record and
+                // never attached to the original again.
+                self.install(archive, path)?;
+                if let Some(s) = self.session.as_mut() {
+                    s.work_mode = Some(IN_PLACE);
+                }
+                let mut status = self.archive_status()?;
+                status["notice"] = json!("To są wcześniejsze, odłożone zmiany. Archiwum, z którego pochodzą, nie zostało przez to zmienione.");
+                return Ok(status);
+            }
+            let missing = !Path::new(&manifest.original.data_path).is_file();
+            return self.install_overlay(archive, manifest, missing, Vec::new());
+        }
+        let key = data_key(&archive.data_path());
+        match self.config.archives.get(&key).cloned() {
+            Some(u) if u.mode == IN_PLACE => return self.install(archive, path),
+            Some(u) if u.mode == OVERLAY => {
+                let found = u.overlay.as_deref().map(PathBuf::from).and_then(|f| Some((overlay::read_manifest(&f).filter(|m| !m.retired)?, f)));
+                if let Some((manifest, folder)) = found {
+                    let mine = Archive::open(&folder)?;
+                    return self.install_overlay(mine, manifest, false, Vec::new());
+                }
+                // The folder of the changes is gone: asked again.
+                self.update_config(|c| {
+                    c.archives.remove(&key);
+                });
+            }
+            _ => {}
+        }
+        if let Some((folder, manifest)) = self.reattach(&archive, path, &key) {
+            let mine = Archive::open(&folder)?;
+            let info = overlay::OverlayInfo::new(&folder, manifest.clone(), false);
+            let pending = info.pending(&mine);
+            let notice = format!(
+                "Znaleziono Twoje wcześniejsze zmiany w tym archiwum ({}). Pracujesz dalej w trybie „Nie ruszaj oryginału”.",
+                count_pl(pending, "zmiana", "zmiany", "zmian")
+            );
+            return self.install_overlay(mine, manifest, false, vec![notice]);
+        }
         self.install(archive, path)
     }
 
@@ -541,16 +826,41 @@ impl Api {
             return Err(ApiError::new("bad_args", "Podaj nazwę archiwum."));
         }
         let archive = Archive::create(Path::new(folder), name)?;
+        // Made here by Heirloom: worked on in place, nobody is asked.
+        self.record_in_place(&archive, folder);
         self.install(archive, folder)
     }
 
-    /// Makes `archive` the open one and remembers it in the recent list.
+    /// Remembers on this computer that this archive is worked on in place.
+    pub(crate) fn record_in_place(&mut self, archive: &Archive, opened: &str) {
+        self.update_config(in_place(archive, opened));
+    }
+
+    /// Makes `archive` the open one and remembers it in the recent list; its mode is what this computer recorded for
+    /// it (none: the question).
     pub(crate) fn install(&mut self, archive: Archive, opened_path: &str) -> ApiResult {
+        let key = data_key(&archive.data_path());
+        let mode = self.config.archives.get(&key).filter(|u| u.mode == IN_PLACE).map(|_| IN_PLACE);
+        if mode.is_some() {
+            // The hash finds the archive again by its content when it has no settings of its own (A.4 c).
+            let hash = archive.fingerprint_hex();
+            if self.config.archives.get(&key).and_then(|u| u.hash.as_ref()) != Some(&hash) {
+                self.update_config(|c| {
+                    if let Some(record) = c.archives.get_mut(&key) {
+                        record.hash = Some(hash);
+                    }
+                });
+            }
+        }
+        let moved = media::Moved::default();
         self.media.set(Some(media::Roots {
             archive: archive.root().to_path_buf(),
+            fallback: None,
             thumbs: self.cache_root.as_ref().map(|c| c.join(&archive.settings().archive_id).join("miniatury")),
             key: None,
+            moved: moved.clone(),
         }));
+        let used_before = archive.history_path().is_file() || self.config.seen(opened_path);
         let entry = RecentArchive {
             path: opened_path.to_string(),
             name: archive.settings().name.clone(),
@@ -560,10 +870,340 @@ impl Api {
             archives: None,
         };
         self.update_config(|c| c.remember(entry));
-        self.session = Some(Session::new(archive));
+        let mut session = Session::new(archive);
+        session.work_mode = mode;
+        session.moved = moved;
+        session.opened = opened_path.to_string();
+        session.used_before = used_before;
+        self.session = Some(session);
         self.combined = None;
         self.import = None;
         self.archive_status()
+    }
+
+    /// „Nie ruszaj oryginału”: the folder of the user's changes becomes the open archive, its files backed by the
+    /// original's. A write-back the program didn't finish is finished or taken back, and changes made in the archive
+    /// meanwhile are taken in at once when the user has none of their own.
+    fn install_overlay(&mut self, archive: Archive, manifest: overlay::Manifest, original_missing: bool, mut notices: Vec<String>) -> ApiResult {
+        let root = archive.root().to_path_buf();
+        let original = manifest.original.clone();
+        let key = original.data_path.to_lowercase();
+        let base_hash = manifest.base.hash.clone();
+        self.update_config(|c| {
+            let record = c.archives.entry(key).or_default();
+            record.mode = OVERLAY.into();
+            record.overlay = Some(root.display().to_string());
+            record.opened = original.opened.clone();
+            record.archive_id = original.archive_id.clone();
+            record.data_file = original.data_file.clone();
+            record.hash = Some(base_hash);
+            if record.decided_at.is_empty() {
+                record.decided_at = heirloom_core::history::now();
+            }
+        });
+        let moved = media::Moved::default();
+        self.media.set(Some(media::Roots {
+            archive: root.clone(),
+            fallback: Some(PathBuf::from(&original.root)),
+            thumbs: self.cache_root.as_ref().map(|c| c.join(&archive.settings().archive_id).join("miniatury")),
+            key: None,
+            moved: moved.clone(),
+        }));
+        // One entry in the recent list, the original's, whichever folder was opened.
+        let entry = RecentArchive {
+            path: original.opened.clone(),
+            name: archive.settings().name.clone(),
+            opened_at: heirloom_core::history::now(),
+            people: archive.doc.records.iter().filter(|r| r.tag == "INDI").count(),
+            kind: "archive".into(),
+            archives: None,
+        };
+        self.update_config(|c| c.remember(entry));
+        let mut session = Session::new(archive);
+        session.work_mode = Some(OVERLAY);
+        session.moved = moved;
+        session.opened = original.opened.clone();
+        session.overlay = Some(overlay::OverlayInfo::new(&root, manifest, original_missing));
+        self.session = Some(session);
+        self.combined = None;
+        self.import = None;
+        if !original_missing {
+            let s = self.session.as_mut().expect("just set");
+            if let Ok(Some(text)) = overlay::writeback::recover(s, None) {
+                notices.push(text);
+            }
+            if let Some(info) = &s.overlay {
+                overlay::writeback::settle_if_stale(&root, info);
+            }
+            let fast_forward = s.overlay.as_ref().is_some_and(|i| i.interrupted.is_none() && i.original_changed() && i.pending(&s.archive) == 0);
+            if fast_forward && overlay::writeback::rebase(s, None, false).is_ok_and(|r| r["merged"] == true) {
+                notices.push("Wczytano nowe zmiany z archiwum.".into());
+            }
+        }
+        let mut status = self.archive_status()?;
+        if !notices.is_empty() {
+            status["notice"] = json!(notices.join(" "));
+        }
+        Ok(status)
+    }
+
+    /// A path that can't be opened now, worked on here in „Nie ruszaj oryginału”: the user's version (A.4 step 2).
+    fn overlay_of_missing(&self, path: &str) -> Option<(PathBuf, overlay::Manifest)> {
+        let wanted = overlay::absolute(path).to_lowercase();
+        self.config.archives.values().filter(|u| u.mode == OVERLAY && u.opened.to_lowercase() == wanted).find_map(|u| {
+            let folder = PathBuf::from(u.overlay.as_ref()?);
+            Some((folder.clone(), overlay::read_manifest(&folder).filter(|m| !m.retired)?))
+        })
+    }
+
+    /// The folders of „Twoje zmiany” on this computer, in every place they may be.
+    fn overlay_folders(&self) -> Vec<PathBuf> {
+        let mut parents: Vec<PathBuf> = self.config.changes_folder.iter().map(PathBuf::from).collect();
+        parents.extend(self.default_changes_parent());
+        parents.extend(self.local_changes_parent());
+        parents.dedup();
+        parents.iter().flat_map(|p| std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.path())).filter(|p| p.is_dir()).collect()
+    }
+
+    /// An archive with no record here, whose changes are still waiting (A.4 c): the record lost (a damaged
+    /// aplikacja.json), or the archive moved (another drive letter). Only when the recorded original is gone: a copied
+    /// folder or a restored zip has the same id and must not take the changes over.
+    fn reattach(&mut self, a: &Archive, opened: &str, key: &str) -> Option<(PathBuf, overlay::Manifest)> {
+        let own = overlay::has_own_settings(a);
+        let (id, data_file, hash) = (a.settings().archive_id.clone(), a.settings().data_file.to_lowercase(), a.fingerprint_hex());
+        let same = |archive_id: Option<&str>, file: &str, h: Option<&str>| if own { archive_id == Some(id.as_str()) } else { file.to_lowercase() == data_file && h == Some(hash.as_str()) };
+        let mut hit: Option<(PathBuf, overlay::Manifest)> = None;
+        for (k, u) in &self.config.archives {
+            if u.mode != OVERLAY || k == key || Path::new(&u.opened).exists() || !same(u.archive_id.as_deref(), &u.data_file, u.hash.as_deref()) {
+                continue;
+            }
+            let Some(folder) = u.overlay.as_ref().map(PathBuf::from) else { continue };
+            if let Some(m) = overlay::read_manifest(&folder).filter(|m| !m.retired) {
+                hit = Some((folder, m));
+                break;
+            }
+        }
+        if hit.is_none() {
+            for folder in self.overlay_folders() {
+                let Some(m) = overlay::read_manifest(&folder).filter(|m| !m.retired) else { continue };
+                let gone = !Path::new(&m.original.opened).exists() && !Path::new(&m.original.data_path).exists();
+                if m.original.data_path.to_lowercase() == key || (gone && same(m.original.archive_id.as_deref(), &m.original.data_file, Some(&m.base.hash))) {
+                    hit = Some((folder, m));
+                    break;
+                }
+            }
+        }
+        let (folder, mut manifest) = hit?;
+        // The record follows the archive to where it is now.
+        manifest.original.opened = overlay::absolute(opened);
+        manifest.original.root = a.root().display().to_string();
+        manifest.original.data_path = std::fs::canonicalize(a.data_path()).unwrap_or_else(|_| a.data_path()).display().to_string();
+        overlay::write_manifest(&folder, &manifest).ok()?;
+        let folder_text = folder.display().to_string();
+        self.update_config(|c| c.archives.retain(|_, u| u.overlay.as_deref() != Some(folder_text.as_str())));
+        Some((folder, manifest))
+    }
+
+    /// Whether `path` is inside an archive worked on in „Nie ruszaj oryginału” on this computer.
+    fn inside_untouched_original(&self, path: &Path) -> bool {
+        let target = path.parent().and_then(|p| std::fs::canonicalize(p).ok()).unwrap_or_else(|| path.to_path_buf());
+        self.config.archives.values().filter(|u| u.mode == OVERLAY).filter_map(|u| u.overlay.as_ref()).filter_map(|f| overlay::read_manifest(Path::new(f))).any(|m| {
+            let root = std::fs::canonicalize(&m.original.root).unwrap_or_else(|_| PathBuf::from(&m.original.root));
+            target.starts_with(root)
+        })
+    }
+
+    fn mode_chosen(&self) -> Result<(), ApiError> {
+        match &self.session {
+            Some(s) if s.work_mode.is_none() && self.combined.is_none() => Err(ApiError::new("mode_unset", "Najpierw wybierz, jak pracować z tym archiwum.")),
+            _ => Ok(()),
+        }
+    }
+
+    /// What the question „Jak chcesz pracować z tym archiwum?” shows (A.5).
+    fn mode_info(&mut self) -> ApiResult {
+        let documents = self.documents();
+        let parent = self.changes_parent();
+        let last_editor = self.config.last_editor.clone();
+        let s = self.session.as_ref().ok_or_else(ApiError::no_archive)?;
+        let archive = &s.archive;
+        let (root, data) = match &s.overlay {
+            Some(info) => (info.original_root.clone(), info.original_data_path.clone()),
+            None => (archive.root().to_path_buf(), archive.data_path()),
+        };
+        // Nothing is written to find out: the data file opened for writing, the folder's read-only mark, and whether
+        // the settings had to live inside the app.
+        let writable = overlay::writeback::writable_quiet(&root, &data) && (s.overlay.is_some() || archive.sidecar_path().starts_with(&root));
+        let used_before = s.used_before;
+        let editors: Vec<Value> = archive
+            .settings()
+            .editors
+            .iter()
+            .filter(|e| Some(&e.name) != last_editor.as_ref())
+            .map(|e| json!({ "name": e.name, "lastEdited": e.last_edited }))
+            .collect();
+        let foreign = archive.is_foreign().then(|| archive.origin().unwrap_or("nieznany program").to_string());
+        let folder = overlay::free_folder(&parent, &archive.settings().name);
+        let suggested = if !writable || foreign.is_some() && !used_before { OVERLAY } else { IN_PLACE };
+        Ok(json!({
+            "writable": writable,
+            "foreign": foreign,
+            "usedBefore": used_before,
+            "editors": editors,
+            "folder": { "path": folder.display().to_string(), "label": overlay::label(&folder, documents.as_deref()) },
+            "suggested": suggested,
+        }))
+    }
+
+    /// The answer to the question, or a switch in Ustawienia › Archiwum › Sposób pracy.
+    fn set_work_mode(&mut self, args: &Value) -> ApiResult {
+        let mode = str_arg(args, "mode")?;
+        let s = self.session.as_ref().ok_or_else(ApiError::no_archive)?;
+        match mode.as_str() {
+            "inPlace" => {
+                if let Some(info) = &s.overlay {
+                    // A1 → A2: only with nothing waiting, else the user chooses (write back, or keep as an archive).
+                    let pending = info.pending(&s.archive);
+                    if pending > 0 || s.archive.has_unsaved_changes() {
+                        return Err(ApiError::new("pending_changes", format!("Masz {}, których nie ma w archiwum.", count_pl(pending.max(1), "zmianę", "zmiany", "zmian"))));
+                    }
+                    if info.original_missing || !info.original_data_path.is_file() {
+                        return Err(ApiError::new("original_missing", "Archiwum jest teraz niedostępne."));
+                    }
+                    if !overlay::writeback::writable(&info.original_root, &info.original_data_path) {
+                        return Err(ApiError::new("not_writable", NOT_WRITABLE));
+                    }
+                    let (root, data, opened) = (s.archive.root().to_path_buf(), info.original_data_path.clone(), s.opened.clone());
+                    if let Some(mut journal) = overlay::writeback::last_journal(&root) {
+                        if journal.state.as_deref() == Some("done") {
+                            overlay::writeback::settle(&root, &info.original_root, &mut journal);
+                        }
+                    }
+                    let original = Archive::open(&data)?;
+                    self.session = None;
+                    overlay::retire(&root, &format!("przeniesione do archiwum {} – można usunąć", overlay::today()));
+                    self.record_in_place(&original, &opened);
+                    let mut status = self.install(original, &opened)?;
+                    status["notice"] = json!("Od teraz zmiany zapisują się w archiwum.");
+                    return Ok(status);
+                }
+                if !overlay::writeback::writable(s.archive.root(), &s.archive.data_path()) || !s.archive.sidecar_path().starts_with(s.archive.root()) {
+                    return Err(ApiError::new("not_writable", NOT_WRITABLE));
+                }
+                self.update_config(in_place(&s.archive, &s.opened.clone()));
+                if let Some(s) = self.session.as_mut() {
+                    s.work_mode = Some(IN_PLACE);
+                }
+                self.archive_status()
+            }
+            "overlay" => {
+                if s.overlay.is_some() {
+                    return self.archive_status();
+                }
+                if s.archive.has_unsaved_changes() {
+                    return Err(ApiError::new("unsaved", "Najpierw zapisz albo odrzuć niezapisane zmiany."));
+                }
+                let chosen = opt_str(args, "folder").map(PathBuf::from);
+                let parent = chosen.clone().unwrap_or_else(|| self.changes_parent());
+                let root = std::fs::canonicalize(s.archive.root()).unwrap_or_else(|_| s.archive.root().to_path_buf());
+                let parent_full = std::path::absolute(&parent).unwrap_or_else(|_| parent.clone());
+                if std::fs::canonicalize(&parent_full).unwrap_or_else(|_| parent_full.clone()).starts_with(&root) || parent_full.starts_with(s.archive.root()) {
+                    return Err(ApiError::new("inside_archive", "Wybierz miejsce poza folderem archiwum."));
+                }
+                let opened = s.opened.clone();
+                let mut notices = Vec::new();
+                let folder = match overlay::create(&s.archive, &opened, &parent) {
+                    Ok(folder) => folder,
+                    // Documents can't be written (e.g. Windows' protection against ransomware): the app's own folder.
+                    Err(e) if e.code == "permission" && chosen.is_none() && self.config.changes_folder.is_none() => {
+                        let local = self.local_changes_parent().ok_or(e)?;
+                        let folder = overlay::create(&s.archive, &opened, &local)?;
+                        notices.push(format!("Folder Dokumenty jest zablokowany (np. przez ochronę przed ransomware). Twoje zmiany będą w: {}", folder.display()));
+                        folder
+                    }
+                    Err(e) => return Err(e),
+                };
+                if let Some(chosen) = chosen {
+                    self.update_config(|c| c.changes_folder = Some(chosen.display().to_string()));
+                }
+                let manifest = overlay::read_manifest(&folder).ok_or_else(|| ApiError::new("io", "Nie można odczytać folderu Twoich zmian."))?;
+                let mine = Archive::open(&folder)?;
+                self.install_overlay(mine, manifest, false, notices)
+            }
+            _ => Err(ApiError::bad_args("mode")),
+        }
+    }
+
+    /// Ustawienia › Archiwum › Twoje zmiany.
+    fn overlay_info(&mut self) -> ApiResult {
+        let documents = self.documents();
+        let s = self.session.as_ref().ok_or_else(ApiError::no_archive)?;
+        let info = s.overlay.as_ref().ok_or_else(|| ApiError::new("not_overlay", "To archiwum nie jest otwarte w trybie „Nie ruszaj oryginału”."))?;
+        let root = s.archive.root();
+        let base = info.base_as(s.archive.doc.version);
+        let people = heirloom_core::history::diff(&base, s.archive.saved(), "", None).iter().filter(|e| e.tag == "INDI").count();
+        let files = if info.original_missing { Vec::new() } else { overlay::writeback::new_files(root, &info.original_root) };
+        let original = (!info.original_missing).then(|| Archive::open(&info.original_data_path).ok()).flatten();
+        Ok(json!({
+            "folder": root.display().to_string(),
+            "folderLabel": overlay::label(root, documents.as_deref()),
+            "pending": info.pending(&s.archive),
+            "people": people,
+            "newFiles": files.len(),
+            "newBytes": files.iter().map(|f| f.size).sum::<u64>(),
+            "writable": !info.original_missing && overlay::writeback::writable_quiet(&info.original_root, &info.original_data_path),
+            "lockedOriginal": original.as_ref().is_some_and(|o| o.settings().read_only),
+            "lastWriteBack": info.manifest.synced.last_write_back,
+            "canUndoWriteBack": overlay::writeback::can_undo(root, info),
+            "originalChanged": info.original_changed(),
+            "originalMissing": info.original_missing,
+        }))
+    }
+
+    /// „Porzuć moje zmiany…”: the folder is renamed (never deleted) and a fresh one starts from the archive as it is now.
+    fn discard_overlay(&mut self) -> ApiResult {
+        let s = self.session.as_ref().ok_or_else(ApiError::no_archive)?;
+        let info = s.overlay.as_ref().ok_or_else(|| ApiError::new("not_overlay", "To archiwum nie jest otwarte w trybie „Nie ruszaj oryginału”."))?;
+        if info.original_missing || !info.original_data_path.is_file() {
+            return Err(ApiError::new("original_missing", "Archiwum jest teraz niedostępne."));
+        }
+        let (root, opened, data) = (s.archive.root().to_path_buf(), s.opened.clone(), info.original_data_path.clone());
+        let parent = root.parent().map(Path::to_path_buf).unwrap_or_else(|| self.changes_parent());
+        let original = Archive::open(&data)?;
+        self.session = None;
+        let kept = overlay::retire(&root, &format!("porzucone {}", overlay::today()));
+        let folder = overlay::create(&original, &opened, &parent)?;
+        let manifest = overlay::read_manifest(&folder).ok_or_else(|| ApiError::new("io", "Nie można odczytać folderu Twoich zmian."))?;
+        let mine = Archive::open(&folder)?;
+        let name = kept.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        self.install_overlay(mine, manifest, false, vec![format!("Porzucone zmiany są w folderze „{name}”.")])
+    }
+
+    /// „Wskaż, gdzie jest teraz…”: the original found in another place.
+    fn relocate_original(&mut self, path: &str, force: bool) -> ApiResult {
+        let s = self.session.as_ref().ok_or_else(ApiError::no_archive)?;
+        let info = s.overlay.as_ref().ok_or_else(|| ApiError::new("not_overlay", "To archiwum nie jest otwarte w trybie „Nie ruszaj oryginału”."))?;
+        let found = Archive::open(Path::new(path))?;
+        let mut manifest = info.manifest.clone();
+        let same = match &manifest.original.archive_id {
+            Some(id) => overlay::has_own_settings(&found) && found.settings().archive_id == *id,
+            None => found.settings().data_file.eq_ignore_ascii_case(&manifest.original.data_file) && found.fingerprint_hex() == manifest.base.hash,
+        };
+        if !same && !force {
+            return Err(ApiError::new("other_archive", "To inne archiwum niż to, z którego pochodzą Twoje zmiany. Użyć go mimo to?"));
+        }
+        let root = s.archive.root().to_path_buf();
+        let old_key = manifest.original.data_path.to_lowercase();
+        manifest.original.opened = overlay::absolute(path);
+        manifest.original.root = found.root().display().to_string();
+        manifest.original.data_path = std::fs::canonicalize(found.data_path()).unwrap_or_else(|_| found.data_path()).display().to_string();
+        overlay::write_manifest(&root, &manifest)?;
+        self.update_config(|c| {
+            c.archives.remove(&old_key);
+        });
+        self.session = None;
+        let mine = Archive::open(&root)?;
+        self.install_overlay(mine, manifest, false, Vec::new())
     }
 
     /// Makes `set` the open view (closing the archive and any import) and remembers it in the recent list.
@@ -590,7 +1230,7 @@ impl Api {
             return Ok(c.status());
         }
         let s = self.session.as_ref().ok_or_else(ApiError::no_archive)?;
-        Ok(status_of(s))
+        Ok(status_of(s, self.documents().as_deref()))
     }
 
     fn save(&mut self, args: &Value) -> ApiResult {
@@ -598,13 +1238,20 @@ impl Api {
         let note = opt_str(args, "note");
         let allow_foreign = args.get("allowForeign").and_then(Value::as_bool).unwrap_or(false);
         let s = self.session()?;
-        let report = s.archive.save(&SaveOptions { author: &author, batch: None, note: note.as_deref(), allow_foreign })?;
+        let report = s.archive.save(&SaveOptions { author: &author, batch: None, note: note.as_deref(), allow_foreign, kind: None })?;
         // What names this save for „Cofnij zapis”; nothing when its history couldn't be written.
         let history = report.history_ts.as_ref().filter(|_| report.history_error.is_none()).map(|ts| json!({ "ts": ts, "author": author }));
         let saved_at = heirloom_core::history::now();
         s.last_saved = Some(saved_at.clone());
         s.changed();
-        self.update_config(|c| c.last_editor = Some(author));
+        // The data file's hash on this computer (A.2), for finding the archive again by its content.
+        let record = s.overlay.is_none().then(|| (data_key(&s.archive.data_path()), s.archive.fingerprint_hex()));
+        self.update_config(|c| {
+            c.last_editor = Some(author);
+            if let Some(r) = record.and_then(|(key, hash)| c.archives.get_mut(&key).filter(|u| u.mode == IN_PLACE).map(|u| (u, hash))) {
+                r.0.hash = Some(r.1);
+            }
+        });
         Ok(json!({
             "backup": report.backup.map(|p| p.display().to_string()),
             "changes": report.history_entries,
@@ -662,19 +1309,60 @@ impl Api {
     }
 }
 
-fn status_of(s: &Session) -> Value {
+/// The change to `aplikacja.json` that records `archive` as worked on in place.
+fn in_place(archive: &Archive, opened: &str) -> impl FnOnce(&mut AppConfig) + use<> {
+    let key = data_key(&archive.data_path());
+    let (id, data_file, hash) = (overlay::has_own_settings(archive).then(|| archive.settings().archive_id.clone()), archive.settings().data_file.clone(), archive.fingerprint_hex());
+    let opened = overlay::absolute(opened);
+    move |c: &mut AppConfig| {
+        let record = c.archives.entry(key).or_default();
+        record.mode = IN_PLACE.into();
+        record.overlay = None;
+        record.opened = opened;
+        record.archive_id = id;
+        record.data_file = data_file;
+        record.hash = Some(hash);
+        record.decided_at = heirloom_core::history::now();
+    }
+}
+
+const NOT_WRITABLE: &str = "W tym folderze nie da się nic zapisać (np. płyta, zablokowany pendrive albo folder tylko do odczytu), więc zostaje „Nie ruszaj oryginału”.";
+
+fn status_of(s: &Session, documents: Option<&Path>) -> Value {
     let archive = &s.archive;
     let settings = archive.settings();
+    // In „Nie ruszaj oryginału” the archive is the original: the screens compare these paths.
+    let (root, data_path) = match &s.overlay {
+        Some(info) => (info.original_root.clone(), info.original_data_path.clone()),
+        None => (archive.root().to_path_buf(), archive.data_path()),
+    };
+    let overlay = s.overlay.as_ref().map(|info| {
+        json!({
+            "folder": archive.root().display().to_string(),
+            "folderLabel": overlay::label(archive.root(), documents),
+            "dataPath": info.original_data_path.display().to_string(),
+            "pending": info.pending(archive),
+            "originalChanged": info.original_changed(),
+            "originalMissing": info.original_missing,
+            "lastWriteBack": info.manifest.synced.last_write_back,
+            "canUndoWriteBack": !info.original_missing && overlay::writeback::can_undo(archive.root(), info),
+            "interrupted": info.interrupted,
+            "sameDrive": tools::disk_name(archive.root()) == tools::disk_name(&info.original_root),
+        })
+    });
     json!({
         "archiveId": settings.archive_id,
         "name": settings.name,
-        "root": archive.root().display().to_string(),
+        "root": root.display().to_string(),
         "dataFile": settings.data_file,
-        "dataPath": archive.data_path().display().to_string(),
+        "dataPath": data_path.display().to_string(),
+        "workMode": s.work_mode,
+        "overlay": overlay,
         "origin": archive.origin(),
         "foreign": archive.is_foreign(),
         "foreignConfirmed": settings.foreign_save_confirmed,
         "readOnly": settings.read_only,
+        "layoutInterrupted": s.layout_interrupted,
         "unsavedChanges": archive.unsaved_records(),
         "canUndo": archive.can_undo(),
         "undoDepth": archive.undo_depth(),
@@ -809,6 +1497,7 @@ mod tests {
         std::fs::write(old.join("drzewo.ged"), ged).unwrap();
         let mut api = Api::new(None, None);
         api.call("archive.open", json!({ "path": old.join("drzewo.ged").to_str().unwrap() })).unwrap();
+        api.call("archive.setWorkMode", json!({ "mode": "inPlace" })).unwrap();
         let json = import::check::extract_blocks(include_str!("../../../docs/IMPORT_FORMAT.md"), "doc").into_iter().next().unwrap().text;
         let state = api.call("import.load", json!({ "texts": [format!("```json\n{json}\n```")] })).unwrap();
         for p in state["persons"].as_array().unwrap() {
@@ -835,6 +1524,7 @@ mod tests {
         std::fs::write(old.join("drzewo.ged"), ged).unwrap();
         let mut api = Api::new(None, None);
         api.call("archive.open", json!({ "path": old.join("drzewo.ged").to_str().unwrap() })).unwrap();
+        api.call("archive.setWorkMode", json!({ "mode": "inPlace" })).unwrap();
         let _held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&photo).unwrap();
         let new = old.join("Nowakowie");
         let result = api.call("archive.saveAsNew", json!({ "folder": new.to_str().unwrap() })).unwrap();
@@ -961,6 +1651,7 @@ mod tests {
         std::fs::write(old.join("rodzina.ged"), b"stray").unwrap();
         let mut api = Api::new(None, None);
         api.call("archive.open", json!({ "path": old.join("drzewo.ged").to_str().unwrap() })).unwrap();
+        api.call("archive.setWorkMode", json!({ "mode": "inPlace" })).unwrap();
         let id = api.call("people.list", json!({})).unwrap()["people"][0]["id"].as_str().unwrap().to_string();
         api.call("person.update", json!({ "id": id, "given": "Jan Paweł", "surname": "Nowak" })).unwrap();
         let same = api.call("archive.saveAsNew", json!({ "folder": old.to_str().unwrap() }));

@@ -3,6 +3,50 @@
 Format: `X.Y.Z — YYYY-MM-DD HH:MM: description`. Newest on top.
 X = major change, Y = feature / bigger change, Z = small change.
 
+## 0.7.0 — 2026-10-11 03:16: Two ways of working with an archive; automatic backups; photos in folders per person
+- **Two ways of working.** The first time you open an archive on a computer, Heirloom asks how you want to work with
+  it (it can be changed later in Ustawienia › Archiwum › „Sposób pracy”):
+  - **„Pracuj na archiwum”:** as before, changes are saved in the archive itself.
+  - **„Nie ruszaj oryginału”:** the archive stays exactly as it is (a relative's archive, a USB stick, a file from
+    another program). Your changes, new photos and imports are saved in a folder of your own, by default
+    `Dokumenty\Heirloom\Moje zmiany\<name of the archive>` (a `CO TO JEST.txt` in it explains it). The edit bar says
+    that changes are saved with you; Start shows how many changes are not in the archive yet, and warns before the
+    window is closed with them on a different drive than the archive.
+  - **„Przenieś zmiany do archiwum…”** (Ustawienia › Archiwum › „Twoje zmiany”) puts your changes, new photos and files
+    into the original when you decide. It shows what will go, offers a backup first, and can be taken back
+    („Cofnij”) while nobody else has changed the archive. If someone changed the archive meanwhile („Ktoś zmienił
+    archiwum”, „Wczytaj zmiany”), Heirloom first joins their changes with yours; where both of you changed the same
+    thing for a person you choose which version to keep. „Porzuć moje zmiany…” starts again from the archive as it is;
+    the old folder is renamed, never deleted. If the stick is unplugged, you can still look at and change your version.
+  - A file from another program is no longer a reason to change it: choose „Nie ruszaj oryginału” and nothing is
+    written into it.
+- **Automatic backups of the whole archive.** Before an import, before moving your changes into the archive and before
+  moving files, Heirloom offers a backup („Zrób kopię zapasową” or „Dalej bez kopii”). „Utwórz kopię zapasową” on Start
+  and „Utwórz kopię” in Ustawienia › Archiwum › Kopie zapasowe make one at any time, with no questions:
+  `Dokumenty\Heirloom\Kopie zapasowe\<name>` (changeable with „Zmień…”). Heirloom checks that there is room, says
+  when the folder is in OneDrive, on the same disk or when a FAT32 stick can't take a file over 4 GB, shows progress
+  and lets you stop with „Przerwij”. It keeps the 5 latest of its own copies. The backup now contains every photo the
+  archive refers to, also in folders other than `media`.
+- **„Przywróć z kopii…”:** unpacks a backup into a new folder („<name> (z kopii 2026-10-11)”) and opens it; the
+  current archive isn't touched, and nothing is ever overwritten.
+- **Photos in folders per person.** Ustawienia › Archiwum › „Zdjęcia i pliki”: „Wszystkie razem” or „W folderach osób”
+  (e.g. `media\Kowalski Józef`), the same for everyone using the archive. New photos go where the choice says.
+  Switching can also move the files already there („Przenieś pliki”), with a backup offered first, no file
+  overwritten, files held by another program left in place and reported, and „Cofnij porządkowanie”. A move that was
+  cut off (a USB stick pulled out) can be finished or undone at the next opening.
+- **Heirloom notices what's out of order in `media`.** A calm line on Start („Przejrzyj” / „Nie teraz”) and the window
+  „Porządek w zdjęciach”: files that were moved in Explorer (still shown; „Popraw ścieżki” fixes the paths), photos of
+  people lying loose, files nobody refers to (Heirloom suggests the person from the file name but only assigns when
+  you click „Przypisz zaznaczone”), a folder somebody put into `media`, and files outside the archive („Skopiuj do
+  archiwum”). Photos are shown wherever they are.
+- **Smaller:** the edit bar and some dialogs wrap properly on a 1366 px screen; the old „czeka na zapis” toast no longer
+  stays after saving; the history shows the tidying and „Zmiany z archiwum” as their own rows, and an undone tidy-up is
+  marked as such; „Utwórz kopię zapasową” on Start works at once instead of only opening Ustawienia.
+- **Known limits:** an older Heirloom (before 0.7.0) on the same computer doesn't know „Moje zmiany” and would edit the
+  original directly. Writing back into a GEDCOM 5.5.1 file from another program makes it GEDCOM 7 (the dialog says so
+  and offers „Zapisz jako nowe archiwum”). Not yet tried on Windows: USB sticks with a changed drive letter, OneDrive,
+  network shares, Controlled Folder Access, a photo open in Zdjęcia during tidying (TODO „Check 0.7.0 on Windows”).
+
 ## 0.6.1 — 2026-10-05 13:40: The new tree icon everywhere; set files open with a double-click
 - **New icon:** a light-green tree on the deep green square (`src-tauri/icons/heirloom-5a.ico`, used as is in
   `icon.ico`) replaces the „H” everywhere: heirloom.exe, the window and the taskbar, the Start menu and desktop

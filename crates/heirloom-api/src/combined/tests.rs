@@ -158,6 +158,7 @@ fn nothing_that_could_change_an_archive_runs_in_the_combined_view() {
     // Opening an archive leaves the set: editing works there again.
     api.call("archive.open", json!({ "path": f.kowalscy.to_str().unwrap() })).unwrap();
     assert_eq!(api.call("archive.status", Value::Null).unwrap()["readOnly"], false);
+    api.call("archive.setWorkMode", json!({ "mode": "inPlace" })).unwrap();
     api.call("person.create", json!({ "given": "Ewa" })).unwrap();
 }
 

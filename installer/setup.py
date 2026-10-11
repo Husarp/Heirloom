@@ -13,6 +13,10 @@ archive is a folder.
 What it never touches: the family archives. They are ordinary folders the family chose (rodzina.ged, media/,
 .heirloom/), anywhere on the disk, and neither an update nor an uninstall goes near them - nor near
 %LOCALAPPDATA%\\Heirloom\\archives, where an archive in a read-only folder keeps its history and backup copies.
+Nor does it touch what Heirloom keeps for the person in Documents: <Documents>\\Heirloom (Moje zmiany: the changes of
+archives worked on with „Nie ruszaj oryginału”, which may not be in any archive yet; Kopie zapasowe: the automatic
+backups) and, when Documents could not be written, %LOCALAPPDATA%\\Heirloom\\Moje zmiany. Uninstalling never removes
+them, ticked box or not: OWN_DATA, the folders that box sends to the Recycle Bin, lists none of them.
 The program's own settings (%APPDATA%\\Heirloom: recent archives, theme), its thumbnails (%LOCALAPPDATA%\\Heirloom\\
 cache) and the window's data (%LOCALAPPDATA%\\com.husarp.heirloom) stay too, unless the box is ticked while
 uninstalling - and then they go to the Recycle Bin; Windows asks first if a folder can't go there.

@@ -60,6 +60,11 @@ note, a photo is still a normal `OBJE`.
 | `_HLM_URL` | `SOUR` | A web address of the source. |
 | `_HLM_BATCH` | records | The import batch that created the record (for "Cofnij import"). |
 
+0.7.0 adds no tags. `FILE` paths are relative to the archive folder and may now include a person's folder
+(`media/Kowalski Józef/ślub.jpg`) when the archive uses „W folderach osób”; a reader must treat everything after the
+first `media/` as one path. Files moved by Heirloom keep their `FILE` value in step with their place, and the layout
+setting itself is kept in `.heirloom/ustawienia.json`, not in the GEDCOM file.
+
 ## Mentions inside texts
 
 A text mentions a person as `[visible text](person:<UID>)`, e.g. `syn [Antoniego](person:5f0c…)`. The link uses the

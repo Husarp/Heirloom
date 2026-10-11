@@ -3,6 +3,7 @@ import { call } from "../api/transport";
 import type { ArchiveStatus } from "../api/types";
 import { useStore } from "../app/store";
 import { clock, count, displayPath } from "../lib/format";
+import { whereTip } from "../screens/archive/workModes";
 
 /** One bar on every screen in edit mode (design 17a): who edits, the file and folder, the unsaved changes with
  *  Cofnij / Anuluj / Zapisz, and after a save „Cofnij zapis” and „Zakończ edycję”. */
@@ -24,7 +25,7 @@ export function EditModeBar() {
   const cancel = () =>
     setAsk({
       title: `Odrzucić ${count(unsaved, "niezapisaną zmianę", "niezapisane zmiany", "niezapisanych zmian")}?`,
-      text: `Plik ${archive.dataFile} zostanie taki, jak po ostatnim zapisie, a edycja się zakończy.`,
+      text: `${archive.overlay ? "Twoja wersja zostanie taka" : `Plik ${archive.dataFile} zostanie taki`}, jak po ostatnim zapisie, a edycja się zakończy.`,
       icon: "warn",
       buttons: [
         { label: "Wróć do edycji", kind: "ghost" },
@@ -36,10 +37,21 @@ export function EditModeBar() {
     <div className="edit-bar" role="status">
       <Pencil size={15} color="var(--accent-text)" style={{ flex: "none" }} />
       <strong>Tryb edycji</strong>
-      <span className="edit-bar-who">· edytuje: {editor} · zmiany zapisują się w:</span>
-      <span className="edit-bar-file" title={displayPath(archive.dataPath)}>
-        <b>{archive.dataFile}</b> <span className="mono">({displayPath(archive.root)})</span>
-      </span>
+      {archive.overlay ? (
+        <>
+          <span className="edit-bar-who">· edytuje: {editor} · zmiany zapisują się u Ciebie — oryginał zostaje bez zmian</span>
+          <span className="edit-bar-where" tabIndex={0} data-tip={whereTip(archive.overlay)}>
+            Gdzie?
+          </span>
+        </>
+      ) : (
+        <>
+          <span className="edit-bar-who">· edytuje: {editor} · zmiany zapisują się w:</span>
+          <span className="edit-bar-file" title={displayPath(archive.dataPath)}>
+            <b>{archive.dataFile}</b> <span className="mono">({displayPath(archive.root)})</span>
+          </span>
+        </>
+      )}
       <span className="grow" />
       {unsaved > 0 ? (
         <>

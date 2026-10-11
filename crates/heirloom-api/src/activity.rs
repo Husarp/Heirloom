@@ -231,12 +231,18 @@ fn subject(d: &Derived, entry: &Entry) -> (Option<usize>, String) {
 fn kind_of(entry: &Entry) -> &'static str {
     let tag = entry.tag.as_str();
     match (entry.action, tag) {
+        (_, _) if entry.kind.as_deref() == Some("layout") => "layout",
         (_, _) if entry.batch.is_some() => "import",
         (Action::Delete, _) => "deleted",
         (_, "OBJE") => "media",
         (_, "FAM") => "relation",
         _ => "person",
     }
+}
+
+/// Who made a change: changes taken in from the original archive (kind "fromArchive") are nobody's.
+fn who(entry: &Entry) -> &str {
+    if entry.kind.as_deref() == Some("fromArchive") { "Zmiany z archiwum" } else { &entry.author }
 }
 
 fn action_words(entry: &Entry) -> (&'static str, &'static str) {
@@ -305,18 +311,20 @@ pub fn feed(d: &Derived, entries: &[Entry], records: &[Node], filter: &str, limi
             if files > 0 {
                 detail.push(crate::count_pl(files, "plik", "pliki", "plików"));
             }
+            // Moving files (Part B) is saved as a batch too, but it is not an import.
+            let layout = entry.kind.as_deref() == Some("layout");
             rows.push(json!({
                 "index": index,
                 "ts": entry.ts,
                 "icon": "import",
-                "action": "Zaimportowano paczkę",
-                "subject": format!("„{batch}”"),
+                "action": if layout { "Uporządkowano pliki" } else { "Zaimportowano paczkę" },
+                "subject": if layout { String::new() } else { format!("„{batch}”") },
                 "subjectId": Value::Null,
-                "detail": detail.join(", "),
+                "detail": if layout { String::new() } else { detail.join(", ") },
                 "who": entry.author,
                 "batch": batch,
                 "note": entry.note,
-                "undo": "Cofnij import",
+                "undo": if layout { "Cofnij porządkowanie" } else { "Cofnij import" },
             }));
         } else {
             let (person, name) = subject(d, entry);
@@ -340,7 +348,7 @@ pub fn feed(d: &Derived, entries: &[Entry], records: &[Node], filter: &str, limi
                 "subject": name,
                 "subjectId": person.map(|i| d.xref(i).to_string()),
                 "detail": detail,
-                "who": entry.author,
+                "who": who(entry),
                 "batch": Value::Null,
                 "note": entry.note,
                 "undo": if entry.action == Action::Delete { "Przywróć" } else { "Cofnij" },
@@ -398,7 +406,7 @@ pub fn person_history(d: &Derived, entries: &[Entry], xref: &str) -> Value {
         groups.push(json!({
             "from": first.ts,
             "to": last.ts,
-            "who": first.author,
+            "who": who(first),
             "batch": first.batch,
             "kind": if first.batch.is_some() { "import" } else { "manual" },
             "count": lines.len(),
@@ -444,6 +452,7 @@ mod tests {
             before: Some("0 @I1@ INDI\n1 NAME Józef /Kowalski/\n1 BIRT\n2 DATE 1878\n".into()),
             after: Some("0 @I1@ INDI\n1 NAME Józef /Kowalski/\n2 NICK Dziadek Józek\n1 BIRT\n2 DATE 12 MAR 1878\n2 PLAC Wólka\n".into()),
             note: None,
+            kind: None,
         };
         let list = changes(&d, &entry);
         assert_eq!(list[0], json!({ "field": "Urodzenie · data", "old": "1878", "new": "12 marca 1878" }));

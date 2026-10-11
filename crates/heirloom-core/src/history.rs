@@ -34,6 +34,10 @@ pub struct Entry {
     /// A note given with the save (the Import's "Notatka do historii zmian").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// None: an ordinary save (with a batch: an import). `layout`: files moved in the archive; `fromArchive`: changes
+    /// taken from the original archive into „Twoje zmiany”. Older versions ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
 }
 
 /// The records that differ between two versions of a file, as history entries.
@@ -52,6 +56,7 @@ pub fn diff(old: &[Node], new: &[Node], author: &str, batch: Option<&str>) -> Ve
         before: before.map(record_text),
         after: after.map(record_text),
         note: None,
+        kind: None,
     };
     let mut entries = Vec::new();
     for &(ref k, n) in &new {
@@ -70,12 +75,12 @@ pub fn diff(old: &[Node], new: &[Node], author: &str, batch: Option<&str>) -> Ve
 }
 
 /// A record's xref (or its tag when it has none, like `HEAD`) and which occurrence of that key it is.
-type Key = (String, usize);
+pub type Key = (String, usize);
 
 /// Numbers repeated keys in file order, so they are compared pairwise: some programs write many records with
 /// the same tag and no xref (Legacy's `0 _PLAC_DEFN`), and broken files repeat xrefs. Keyed only by name, every
 /// save would log all but one of them as changed.
-fn keyed(records: &[Node]) -> Vec<(Key, &Node)> {
+pub fn keyed(records: &[Node]) -> Vec<(Key, &Node)> {
     let mut seen: HashMap<&str, usize> = HashMap::new();
     records
         .iter()
@@ -158,6 +163,17 @@ mod tests {
             [(Action::Update, "_PLAC_DEFN".to_string()), (Action::Create, "@I1@".to_string())],
             "only the edited place; the repeated xref counts as a new record"
         );
+    }
+
+    #[test]
+    fn the_kind_of_an_entry_survives_and_old_lines_still_read() {
+        let mut entry = diff(&[], &[indi("@I1@", "Jan /Nowak/")], "Ewa", None).remove(0);
+        assert!(!serde_json::to_string(&entry).unwrap().contains("kind"), "an ordinary save writes no kind");
+        entry.kind = Some("layout".into());
+        let line = serde_json::to_string(&entry).unwrap();
+        assert_eq!(serde_json::from_str::<Entry>(&line).unwrap().kind.as_deref(), Some("layout"));
+        let old = r#"{"ts":"2026-01-01T00:00:00Z","author":"Ewa","action":"create","record":"@I1@","tag":"INDI"}"#;
+        assert_eq!(serde_json::from_str::<Entry>(old).unwrap().kind, None);
     }
 
     #[test]

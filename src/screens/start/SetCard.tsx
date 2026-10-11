@@ -5,6 +5,7 @@ import { afterChange, lookForPairs, useStore } from "../../app/store";
 import { ArchiveDot } from "../../components/bits";
 import { count, displayPath, num, people as peopleCount } from "../../lib/format";
 import { pickFolder, pickGedcom } from "../../lib/native";
+import { withChangesLabel } from "../archive/writeBack";
 
 /** Start in archives opened together (design §6.5): „W tym zestawie” — each archive with its colour, how many people,
  *  where it is, and what to do when it can't be found; adding an archive; the pairs waiting in „Do sprawdzenia”. */
@@ -68,6 +69,7 @@ export function SetCard() {
                   {a.name}
                 </span>
                 {ok && <span style={{ fontSize: 12, color: "var(--text2)", whiteSpace: "nowrap" }}>{peopleCount(a.people)}</span>}
+                {ok && withChangesLabel(a) && <span style={{ fontSize: 12, color: "var(--accent-text)", whiteSpace: "nowrap" }}>{withChangesLabel(a)}</span>}
               </span>
               {ok || a.state === "other" ? (
                 <span className="mono ellipsis" style={{ fontSize: 12, color: "var(--text3)" }}>
