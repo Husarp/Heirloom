@@ -36,6 +36,8 @@ fn every_screen_reads_the_official_test_files() {
             continue;
         }
         opened += 1;
+        // The copy is ours to change, so work on it in place (0.7.0 asks this on first open).
+        check(&mut api, "archive.setWorkMode", json!({ "mode": "inPlace" }));
         for method in ["archive.status", "start.data", "archive.firstOpen", "surnames.list", "places.list", "stories.list", "media.list", "media.missing", "sources.list", "archive.check"] {
             check(&mut api, method, json!({}));
         }
