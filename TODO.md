@@ -478,10 +478,10 @@ This is the roadmap, with a checkbox per task.
       „Obok danych”), so sharing the folder shares all of it. To add: a notice „Teraz edytuje: Ewa, od 14:05” so two
       people don't edit at once (a save already warns when the file changed on disk meanwhile); test it on a network
       drive and in OneDrive / Google Drive / Dropbox folders
-- [ ] **„Gdzie trzymać” the program's files: build it** (wanted 2026-09-29; it's the „Obok danych / W programie” row
-      greyed out in Ustawienia › Pliki ustawień): „Obok danych” keeps `.heirloom/` (settings, history, backups) in
-      the archive folder — shared with everyone who has the folder; „W programie” keeps it on this computer only.
-      Switching moves the files with one click
+- [x] **„Gdzie trzymać” the program's files: build it** (wanted 2026-09-29) — superseded by 0.7.0: the greyed row
+      is gone; Ustawienia › Archiwum › „Sposób pracy” („Pracuj na archiwum” / „Nie ruszaj oryginału”) decides where
+      changes go, and in „Nie ruszaj oryginału” the settings and history live in the user's own folder
+      (`<Documents>\Heirloom\Moje zmiany`), see PLAN §11.2 rule 6
 - [ ] **Pictures inside a biography** (2026-09-29): a photo from the archive placed in a biography chapter's text,
       shown with its caption — or, if that is too much, a link in the text that opens the photo big. Biography
       chapters themselves already exist (see the answer of 2026-09-29)
@@ -523,10 +523,38 @@ This is the roadmap, with a checkbox per task.
 - [ ] **Import a GEDCOM file into an existing archive** (2026-09-29; to decide): a `.ged` from someone else goes
       through the Import's checking and matching, so the two trees join without doubled people (now a `.ged` can only
       be opened as its own archive)
-- [ ] **Where edits are saved** (your question, 2026-09-29): already works like this — Heirloom's own archive: into
-      `rodzina.ged`, after a backup copy of the old version; a file from another program: the first save asks
-      „Zapisać w tym pliku?” or „Zapisz jako nowe archiwum” (the original stays as it was). Anything more wanted here
-      is still open
+- [x] **Where edits are saved** (your question, 2026-09-29) — superseded by 0.7.0: the work modes „Pracuj na archiwum”
+      (into the archive, after a backup copy of the data file) and „Nie ruszaj oryginału” (into the user's own folder,
+      moved into the archive with „Przenieś zmiany do archiwum…” when the user decides). A file from another program:
+      the first save into it still asks („Zapisz jako nowe archiwum” is offered)
+
+## Manual checks on Windows (0.7.0 was built and tested on Linux; none of these has been run on Windows yet)
+- [ ] **Check 0.7.0 on Windows** (needs a Windows PC; run on copies of real archives):
+  - [ ] a USB stick whose drive letter changed since the changes were made („Nie ruszaj oryginału”): „Wskaż, gdzie
+        jest teraz…” and the banner when the stick is missing;
+  - [ ] Documents redirected to OneDrive: „Moje zmiany” and „Kopie zapasowe” are created there, online-only files
+        in a backup are announced and downloaded;
+  - [ ] a photo open in Zdjęcia (Photos) during a restructure („Przenieś pliki”): the held file is skipped and
+        reported, its path stays, the rest moves;
+  - [ ] an archive on a network share: write-back and restructure, also with the connection dropped midway;
+  - [ ] Windows Defender Controlled Folder Access switched on: the fallback to `%LOCALAPPDATA%\Heirloom` for
+        „Moje zmiany” and „Kopie zapasowe” works on first use;
+  - [ ] a real crash (kill the process, pull the stick) in the middle of a „Przenieś zmiany do archiwum” and in the
+        middle of a restructure: the next open finishes or rolls back from the journal, the banners say so;
+  - [ ] `MoveFileExW` without replace: moving onto an existing name never overwrites (a file created by hand between
+        plan and move; names differing only in case; Mac-made NFD names);
+  - [ ] cancelling a large backup with „Przerwij”: nothing half-written is left, the old zips are kept;
+  - [ ] a backup over 4 GB onto a FAT32 pendrive: the message „Na tym dysku nie zmieści się plik większy niż 4 GB…”;
+  - [ ] paths over 260 characters in the restructure plan (other genealogy programs fail on them).
+- [ ] **Deferred from the 0.7.0 review** (docs/.loki notes, none loses data):
+  - [ ] undoing a write-back (`Cofnij`) leaves an empty `.heirloom/historia.jsonl` in an original that had none, and
+        keeps the person in its editors list;
+  - [ ] a failed history append after a write-back is silent (the data is safe; no message to the user);
+  - [ ] a merge where two neighbouring children with the same tag were changed differently on both sides still
+        offers one choice for both (the per-place choice cannot split them);
+  - [ ] a relative who has the archive open during someone else's restructure sees the old paths until reloading
+        (photos show through the moved-files map; the next save reports a conflict);
+  - [ ] real use with an older relative: are „Zapisz” (into your folder) and „Przenieś zmiany do archiwum…” understood?
 
 ## Later (each approved separately)
 - [ ] "Ścieżka pokrewieństwa": how any two people are related (Polish kinship terms)

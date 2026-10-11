@@ -108,10 +108,47 @@ MIT — © 2026 Husarp. See [LICENSE](LICENSE).
 
 The family archive is a normal folder that you choose ([PLAN.md §11.2](PLAN.md#11-approved-proposals-2026-09-28)):
 - `rodzina.ged`: the family (GEDCOM 7, readable by other genealogy programs);
-- `media/`: photos and documents;
+- `media/`: photos and documents, either all together or in a folder per person (see below);
 - `zrodla-ai/`: the researcher's AI answers, kept as they were delivered;
 - `.heirloom/`: the app's settings for this archive, the change history and backup copies.
 
 Only rebuildable data (thumbnails) lives in `%LOCALAPPDATA%\Heirloom`, and the app's own
 preferences (recent archives, theme) in `%APPDATA%\Heirloom`. The archive is never stored in this project folder, so
 it can't end up in Git or on GitHub.
+
+### Two ways of working (since 0.7.0)
+The first time an archive is opened on a computer, Heirloom asks „Jak chcesz pracować z tym archiwum?”. The choice can be
+changed later in Ustawienia › Archiwum › „Sposób pracy”.
+- **„Pracuj na archiwum”**: for your own archive. Changes are saved in the archive itself (`rodzina.ged`, `media/`).
+  Before every save Heirloom keeps a copy of the data file in `.heirloom/kopie`.
+- **„Nie ruszaj oryginału”**: for an archive that is someone else's, shared, on a USB stick, or made by another program.
+  The archive stays exactly as it is. Your changes, new photos and imports are saved in a folder of their own,
+  `<Documents>\Heirloom\Moje zmiany\<archive name>` (`%LOCALAPPDATA%\Heirloom\Moje zmiany` if Documents can't be
+  written). It is a normal archive folder too, and a `CO TO JEST.txt` in it explains what it is. The Start screen shows
+  how many changes are not in the archive yet. When you decide, „Przenieś zmiany do archiwum…” (Ustawienia › Archiwum ›
+  „Twoje zmiany”) puts them into the original: first it offers a backup, then it copies the new files, merges the data
+  (if someone changed the archive meanwhile, you choose per person which version to keep) and writes the file. The move
+  can be undone with „Cofnij” while nobody else has changed the archive. „Porzuć moje zmiany…” starts again from the
+  current archive; the old folder is renamed, never deleted.
+- An older Heirloom (before 0.7.0) doesn't know about „Moje zmiany”: opened on the same computer, it would edit the
+  original directly.
+
+### Backups
+Before an import, before moving your changes into the archive and before moving files, Heirloom offers a backup of the
+whole archive („Zrób kopię zapasową”, or „Dalej bez kopii”). „Utwórz kopię zapasową” on Start and
+Ustawienia › Archiwum › Kopie zapasowe › „Utwórz kopię” make the same .zip any time. It is saved without asking in
+`<Documents>\Heirloom\Kopie zapasowe\<archive name>` (the folder can be changed there with „Zmień…”; a USB stick or an
+external disk is a better place than the same disk), as `Heirloom-<name>-RRRR-MM-DD-GGMM.zip`. Heirloom keeps the 5
+latest of its own copies and deletes older ones; zips saved elsewhere are never touched. A long backup can be stopped
+with „Przerwij”. „Przywróć z kopii…” unpacks a .zip into a new folder next to the archive („<name> (z kopii RRRR-MM-DD)”)
+and opens it; the current archive stays as it was.
+
+### Folders per person (since 0.7.0)
+Ustawienia › Archiwum › „Zdjęcia i pliki” › „Układ plików w folderze media” is „Wszystkie razem” (everything in `media/`)
+or „W folderach osób” (new photos go to e.g. `media/Kowalski Józef/`). The choice is stored in the archive and is the same
+for everyone using it. What is shown never depends on it: a photo is found by the path in `rodzina.ged`. Files move only
+when asked: „Przenieś pliki” in the switching dialog, or „Przejrzyj…” (also offered by a banner on Start) opens
+„Porządek w zdjęciach”, which lists files that are in another place than recorded („Popraw ścieżki”), photos of people
+lying loose, files nothing refers to (assign them to a person), folders put into `media/` and files outside the archive.
+The paths in `rodzina.ged` change together with the files, nothing is overwritten or deleted, and „Cofnij porządkowanie”
+undoes a run. In „Nie ruszaj oryginału” the files of the archive stay where they are.
