@@ -59,6 +59,7 @@ export function MissingFiles() {
   const { data, error, loading } = useApi<{ rows: MissingRow[] }>("media.missing");
   const rows = data?.rows ?? [];
   // The archive can't be reached (a pendrive unplugged): its photos are not lost, so there is nothing to look for.
+  const elsewhere = useStore((s) => s.scan?.counts.moved ?? 0);
   const originalMissing = useStore((s) => s.archive?.overlay?.originalMissing ?? false);
 
   /** Files with the same name found by the searches, per record. */
@@ -210,8 +211,8 @@ export function MissingFiles() {
           <div className="card">
             <EmptyState
               icon={<CircleCheck size={32} color="var(--accent-text)" />}
-              title="Wszystkie pliki są na miejscu."
-              text="Każdy plik opisany w archiwum jest w jego folderze."
+              title={elsewhere > 0 ? "Żaden plik nie zginął." : "Wszystkie pliki są na miejscu."}
+              text={elsewhere > 0 ? "Każdy plik opisany w archiwum jest gdzieś w jego folderze i widać go w programie." : "Każdy plik opisany w archiwum jest w jego folderze."}
               action={
                 <button className="link" style={{ fontSize: 13 }} onClick={() => go({ name: "media" })}>
                   Wróć do Mediów

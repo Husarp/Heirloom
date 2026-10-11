@@ -10,7 +10,8 @@ export function TidyBanners() {
   const archive = useStore((s) => s.archive);
   const setTidyOpen = useStore((s) => s.setTidyOpen);
   const combined = archive?.combined != null;
-  const left = archive?.layoutInterrupted ?? null;
+  // The scan is the fresher of the two; the status says it from the opening until the first scan.
+  const left = (scan ? scan.interrupted : archive?.layoutInterrupted) ?? null;
   const showTidy = bannerShows(scan, combined);
   if (combined || (!left && !showTidy)) return null;
   return (

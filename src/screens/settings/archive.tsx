@@ -13,7 +13,7 @@ import { makeBackup, restoreFromBackup } from "../../app/backup";
 import { discardMine, switchToInPlace, switchToOverlay } from "../../app/workMode";
 import { askUndo, finishMove, scanNow } from "../../app/layout";
 import type { MediaLayout } from "../../api/types";
-import { LAYOUT_OPTIONS, interruptedText, lastRunText, layoutAsInArchive, layoutNow, tidyFiles, tidyNote } from "../media/layoutText";
+import { LAYOUT_OPTIONS, foundElsewhereText, interruptedText, lastRunText, layoutAsInArchive, layoutNow, tidyFiles, tidyNote } from "../media/layoutText";
 import { SwitchLayoutDialog } from "../media/SwitchLayoutDialog";
 import { lastBackupNote, ROTATION_NOTE } from "../archive/backupText";
 import { lastWriteBackText, waitingText } from "../archive/workModes";
@@ -145,7 +145,7 @@ function MediaFilesSection({ archive }: { archive: ArchiveStatus }) {
     );
   }
   const layout = scan.layout.effective;
-  const left = scan.interrupted ?? archive.layoutInterrupted;
+  const left = scan.interrupted;
   const run = scan.journal?.state === "saved" ? scan.journal : null;
   const toTidy = tidyFiles(scan) + scan.counts.folders;
   return (
@@ -492,6 +492,8 @@ function ToolsSection({ onRebuilt }: { onRebuilt: () => void }) {
   const [problems, setProblems] = useState<CheckProblem[] | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
   const n = missing?.rows.length;
+  // Files found elsewhere in the archive aren't missing: they are shown, only their paths are out of date.
+  const elsewhere = useStore((s) => s.scan?.counts.moved ?? 0);
 
   const check = async () => {
     setChecking(true);
@@ -525,9 +527,13 @@ function ToolsSection({ onRebuilt }: { onRebuilt: () => void }) {
     <Section id="tools" title="Narzędzia">
       <SettingRow
         label="Brakujące pliki"
-        note={n == null ? "Sprawdzam…" : n === 0 ? "Wszystkie pliki są na miejscu" : `${count(n, "pliku", "plików", "plików")} nie ma na dysku`}
+        note={
+          n == null
+            ? "Sprawdzam…"
+            : (n === 0 ? "Wszystkie pliki są na miejscu" : `${count(n, "pliku", "plików", "plików")} nie ma na dysku`) + (elsewhere > 0 ? ` · ${foundElsewhereText(elsewhere)}` : "")
+        }
       >
-        <button className="btn secondary set-btn" disabled={!n} onClick={() => go({ name: "missingFiles" })}>
+        <button className="btn secondary set-btn" disabled={!n && !elsewhere} onClick={() => go({ name: "missingFiles" })}>
           Otwórz
         </button>
       </SettingRow>
