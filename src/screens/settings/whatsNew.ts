@@ -10,5 +10,6 @@ export const WHATS_NEW: string[] = [
   "Bezpieczny zapis: przed każdym zapisem kopia pliku danych, a na żądanie kopia całego archiwum w pliku .zip.",
   "Eksport GEDZIP: dane i zdjęcia w jednym pliku, dla innych programów.",
   "Dwa sposoby pracy: „Pracuj na archiwum” albo „Nie ruszaj oryginału” — wtedy Twoje zmiany czekają osobno, aż przeniesiesz je do archiwum. Przed importem Heirloom proponuje kopię zapasową całego archiwum.",
+  "Zdjęcia mogą leżeć razem w folderze media albo w folderach osób. Heirloom zauważa pliki nie na swoim miejscu i pomaga je uporządkować — niczego nie usuwa ani nie nadpisuje, a przenoszenie można cofnąć.",
   "Działa bez internetu. Aktualizacje sprawdza tylko na Twoją prośbę: „Sprawdź teraz” albo włączone „Sprawdzaj aktualizacje” w Ustawieniach. Jasny i ciemny motyw oraz większy tekst dla wygodnego czytania.",
 ];
