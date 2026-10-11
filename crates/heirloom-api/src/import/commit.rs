@@ -940,7 +940,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut s = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
         let (answer, photo) = example(dir.path());
-        let answer = answer.replacen("{ \"p\": \"P1\", \"role\": \"spouse\" }", "{ \"p\": \"P1\", \"role\": \"principal\" }", 1);
+        // A Windows checkout may give the example CRLF line endings.
+        let answer = answer.replace("\r\n", "\n").replacen("{ \"p\": \"P1\", \"role\": \"spouse\" }", "{ \"p\": \"P1\", \"role\": \"principal\" }", 1);
         assert!(answer.contains("\"role\": \"principal\" },\n        { \"p\": \"P4\""));
         let mut draft = None;
         load(&mut s, &mut draft, &answer, &photo);

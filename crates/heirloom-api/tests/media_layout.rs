@@ -912,7 +912,8 @@ fn only_thumbs_db_and_desktop_ini_go_with_an_emptied_folder() {
 fn a_new_folder_name_is_shortened_when_the_path_would_pass_240_characters() {
     let dir = tempfile::tempdir().unwrap();
     let mut api = computer(dir.path(), "ten");
-    let root = dir.path().join("r".repeat(60));
+    // The archive folder's full path is 100 characters wherever the temp folder is (Windows' is much longer).
+    let root = dir.path().join("r".repeat(99usize.saturating_sub(path(dir.path()).chars().count()).max(1)));
     run(&mut api, "archive.create", json!({ "folder": path(&root), "name": "Długa" }));
     let long_given = "Aleksander Maksymilian Konstanty";
     let p = person(&mut api, long_given, "Wiśniewski-Kowalczykowski", None);
