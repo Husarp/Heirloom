@@ -71,7 +71,7 @@ export interface Toast {
   text: string;
   /** A second, smaller line ("Nowakowie z Ciechanek · 4 zdjęcia, 3 źródła"). */
   detail?: string;
-  kind?: "info" | "err";
+  kind?: "info" | "err" | "warn";
   action?: { label: string; run: () => void };
   /** More than one action ("Cofnij import", "Pokaż w drzewie"). */
   actions?: { label: string; run: () => void }[];

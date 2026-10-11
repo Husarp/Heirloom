@@ -78,7 +78,7 @@ async function runMove(args: MoveArgs, allowForeign: boolean, then?: () => void)
     adopt(result);
     then?.();
     const toast = movedToast(result);
-    store().notify(toast.text, { detail: toast.detail, action: result.journal ? { label: "Cofnij porządkowanie", run: () => askUndo(result.journal!) } : undefined });
+    store().notify(toast.text, { kind: toast.kind, detail: toast.detail, action: result.journal ? { label: "Cofnij porządkowanie", run: () => askUndo(result.journal!) } : undefined });
   } catch (e) {
     fail(e);
     scanSoon();
@@ -97,7 +97,7 @@ export function finishMove(left: number) {
               const result = await withProgress(MOVING_LABEL, call<RestructureResult>("media.finishRestructure", { author: author(), allowForeign }));
               adopt(result);
               const toast = movedToast(result);
-              store().notify(toast.text, { detail: toast.detail, action: result.journal ? { label: "Cofnij porządkowanie", run: () => askUndo(result.journal!) } : undefined });
+              store().notify(toast.text, { kind: toast.kind, detail: toast.detail, action: result.journal ? { label: "Cofnij porządkowanie", run: () => askUndo(result.journal!) } : undefined });
             } catch (e) {
               fail(e);
               scanSoon();

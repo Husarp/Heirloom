@@ -17,6 +17,7 @@ import {
   switchTitle,
   tidyEmpty,
   tidyNote,
+  unknownApplyLabel,
   tidySections,
   undoneToast,
   unknownSection,
@@ -129,6 +130,25 @@ describe("the Start banner", () => {
   it("lists what was found", () => {
     expect(bannerText(scan({ counts: counts({ unknown: 5, folders: 1 }) }))).toBe(`W folderze media jest coś do uporządkowania: 5${NB}plików bez przypisania, 1${NB}folder.`);
     expect(bannerText(scan({ counts: counts({ moved: 12, looseLinked: 8, outside: 4, folders: 2 }) }))).toContain(`8${NB}plików luzem, 12${NB}plików w innym miejscu, 4${NB}pliki poza archiwum, 2${NB}foldery`);
+  });
+  it("in A1 counts only what the dialog can still do", () => {
+    const s = scan({ counts: counts({ looseLinked: 1, folders: 1 }), folders: [folder({ path: "media/u", question: "unpack" })], total: 2 });
+    expect(bannerShows(s, false, true)).toBe(false);
+    expect(bannerShows(s, false, false)).toBe(true);
+    expect(tidyNote(s, true)).toBe("Do uporządkowania: nic");
+    const w = scan({ counts: counts({ looseLinked: 1, folders: 2 }), folders: [folder({ question: "whose" }), folder({ path: "media/u", question: "unpack" })], total: 3 });
+    expect(bannerText(w, true)).toBe(`W folderze media jest coś do uporządkowania: 1${NB}folder.`);
+    expect(bannerShows(w, false, true)).toBe(true);
+  });
+  it("labels the unknown-files button by what will happen", () => {
+    expect(unknownApplyLabel(2, 0)).toBe(`Przypisz zaznaczone (2)`);
+    expect(unknownApplyLabel(0, 1)).toBe(`Zostaw zaznaczone (1)`);
+    expect(unknownApplyLabel(1, 1)).toBe(`Zastosuj wybór (2)`);
+    expect(unknownApplyLabel(0, 0)).toBe("Przypisz zaznaczone");
+  });
+  it("a move that moved nothing is not a success", () => {
+    expect(movedToast({ moved: 0, held: 1 }).kind).toBe("warn");
+    expect(movedToast({ moved: 2, held: 0 }).kind).toBeUndefined();
   });
   it("shows only for new findings, never for sets", () => {
     expect(bannerShows(scan({ total: 3 }), false)).toBe(true);

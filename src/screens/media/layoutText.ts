@@ -32,16 +32,21 @@ export function looseUnknown(scan: Pick<MediaScan, "unknown" | "folders" | "coun
   return scan.unknown.length === scan.counts.unknown ? scan.unknown.filter((u) => !asked.has(u.folder)).length : scan.counts.unknown;
 }
 
-/** Files (not folders) waiting to be tidied. */
-export function tidyFiles(scan: Pick<MediaScan, "unknown" | "folders" | "counts">): number {
+/** Files (not folders) waiting to be tidied. In „Nie ruszaj oryginału” nothing is moved, so loose files of people are not counted. */
+export function tidyFiles(scan: Pick<MediaScan, "unknown" | "folders" | "counts">, overlay = false): number {
   const c = scan.counts;
-  return c.moved + c.looseLinked + looseUnknown(scan) + c.outside;
+  return c.moved + (overlay ? 0 : c.looseLinked) + looseUnknown(scan, overlay) + c.outside;
+}
+
+/** Folders asked about; in A1 only „czyj to folder?” is asked (unpacking a folder moves files). */
+export function tidyFolders(scan: Pick<MediaScan, "folders" | "counts">, overlay = false): number {
+  return overlay ? scan.folders.filter((f) => f.question === "whose" && !f.leftAlone).length : scan.counts.folders;
 }
 
 /** „Do uporządkowania: 14 plików” (+ „, 1 folder”), or „nic”. */
-export function tidyNote(scan: Pick<MediaScan, "unknown" | "folders" | "counts">): string {
-  const files = tidyFiles(scan);
-  const folders = scan.counts.folders;
+export function tidyNote(scan: Pick<MediaScan, "unknown" | "folders" | "counts">, overlay = false): string {
+  const files = tidyFiles(scan, overlay);
+  const folders = tidyFolders(scan, overlay);
   const parts = [files > 0 ? filesWord(files) : null, folders > 0 ? foldersWord(folders) : null].filter(Boolean);
   return `Do uporządkowania: ${parts.length ? parts.join(", ") : "nic"}`;
 }
@@ -99,11 +104,12 @@ export function heldText(held: number): string {
   return `${filesWord(held)} ${were} w innym programie — ${stayed} na miejscu. Spróbuj ponownie później.`;
 }
 
-export function movedToast(r: Pick<RestructureResult, "moved" | "held"> & { assigned?: number }): { text: string; detail?: string } {
+export function movedToast(r: Pick<RestructureResult, "moved" | "held"> & { assigned?: number }): { text: string; detail?: string; kind?: "warn" } {
   const text = r.moved > 0 ? `Przeniesiono ${filesWord(r.moved)}.` : "Żaden plik nie został przeniesiony.";
   // Assigning the unpacked files is an ordinary change: it waits for Zapisz like any other.
   const detail = [r.held > 0 ? heldText(r.held) : null, (r.assigned ?? 0) > 0 ? `Przypisanie ${count(r.assigned!, "pliku", "plików", "plików")} czeka na zapis.` : null].filter(Boolean).join(" ");
-  return { text, detail: detail || undefined };
+  // Nothing moved is not a success: no green check.
+  return { text, detail: detail || undefined, ...(r.moved > 0 ? {} : { kind: "warn" as const }) };
 }
 
 export function undoneToast(r: Pick<UndoRestructureResult, "movedBack" | "notBack">): { text: string; detail?: string } {
@@ -126,25 +132,28 @@ export function interruptedText(i: Pick<LayoutInterrupted, "done" | "total">): s
 // ---- Start banner (B.5) ----
 
 /** „5 plików bez przypisania, 1 folder”. */
-export function bannerParts(scan: Pick<MediaScan, "unknown" | "folders" | "counts">): string {
+export function bannerParts(scan: Pick<MediaScan, "unknown" | "folders" | "counts">, overlay = false): string {
   const c = scan.counts;
   const parts: string[] = [];
-  const unknown = looseUnknown(scan);
+  const unknown = looseUnknown(scan, overlay);
   if (unknown > 0) parts.push(`${filesWord(unknown)} bez przypisania`);
-  if (c.looseLinked > 0) parts.push(`${filesWord(c.looseLinked)} luzem`);
+  if (!overlay && c.looseLinked > 0) parts.push(`${filesWord(c.looseLinked)} luzem`);
   if (c.moved > 0) parts.push(`${filesWord(c.moved)} w innym miejscu`);
   if (c.outside > 0) parts.push(`${filesWord(c.outside)} poza archiwum`);
-  if (c.folders > 0) parts.push(foldersWord(c.folders));
+  const folders = tidyFolders(scan, overlay);
+  if (folders > 0) parts.push(foldersWord(folders));
   return parts.join(", ");
 }
 
-export function bannerText(scan: Pick<MediaScan, "unknown" | "folders" | "counts">): string {
-  return `W folderze media jest coś do uporządkowania: ${bannerParts(scan)}.`;
+export function bannerText(scan: Pick<MediaScan, "unknown" | "folders" | "counts">, overlay = false): string {
+  return `W folderze media jest coś do uporządkowania: ${bannerParts(scan, overlay)}.`;
 }
 
-/** Calm: only when something is found, and "Nie teraz" wasn't said to exactly these findings; never for sets. */
-export function bannerShows(scan: Pick<MediaScan, "total" | "seen"> | null, combined: boolean): boolean {
-  return !!scan && !combined && scan.total > 0 && !scan.seen;
+/** Calm: only when something is found, and "Nie teraz" wasn't said to exactly these findings; never for sets. In A1 only
+ *  what the dialog can still do something about counts, so the banner never points to an empty dialog. */
+export function bannerShows(scan: Pick<MediaScan, "total" | "seen" | "unknown" | "folders" | "counts"> | null, combined: boolean, overlay = false): boolean {
+  if (!scan || combined || scan.seen) return false;
+  return overlay ? tidyFiles(scan, true) + tidyFolders(scan, true) > 0 : scan.total > 0;
 }
 
 // ---- Brakujące pliki ----
@@ -155,6 +164,13 @@ export const foundElsewhereText = (n: number) => `Znaleziono w innym folderze ar
 
 export const TIDY_TITLE = "Porządek w zdjęciach";
 export const A1_NOTE = "W trybie „Nie ruszaj oryginału” pliki w archiwum zostają na miejscu — możesz je tylko przypisać do osób.";
+/** The button under the unknown files: only rows set to a person are „przypisane”; rows left in the folder are just kept. */
+export function unknownApplyLabel(assign: number, leave: number): string {
+  if (assign + leave === 0) return "Przypisz zaznaczone";
+  if (leave === 0) return `Przypisz zaznaczone (${num(assign)})`;
+  if (assign === 0) return `Zostaw zaznaczone (${num(leave)})`;
+  return `Zastosuj wybór (${num(assign + leave)})`;
+}
 export const UNKNOWN_FOOTER = "Pliki zostawione w folderze nie pojawią się w programie. O te same pliki nie zapytamy ponownie.";
 
 export const movedSection = (n: number) =>

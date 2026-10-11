@@ -13,7 +13,7 @@ import { makeBackup, restoreFromBackup } from "../../app/backup";
 import { discardMine, switchToInPlace, switchToOverlay } from "../../app/workMode";
 import { askUndo, finishMove, scanNow } from "../../app/layout";
 import type { MediaLayout } from "../../api/types";
-import { LAYOUT_OPTIONS, foundElsewhereText, interruptedText, lastRunText, layoutAsInArchive, layoutNow, tidyFiles, tidyNote } from "../media/layoutText";
+import { LAYOUT_OPTIONS, foundElsewhereText, interruptedText, lastRunText, layoutAsInArchive, layoutNow, tidyFiles, tidyFolders, tidyNote } from "../media/layoutText";
 import { SwitchLayoutDialog } from "../media/SwitchLayoutDialog";
 import { lastBackupNote, ROTATION_NOTE } from "../archive/backupText";
 import { lastWriteBackText, waitingText } from "../archive/workModes";
@@ -147,7 +147,7 @@ function MediaFilesSection({ archive }: { archive: ArchiveStatus }) {
   const layout = scan.layout.effective;
   const left = scan.interrupted;
   const run = scan.journal?.state === "saved" ? scan.journal : null;
-  const toTidy = tidyFiles(scan) + scan.counts.folders;
+  const toTidy = tidyFiles(scan, overlay) + tidyFolders(scan, overlay);
   return (
     <Section id="files" title="Zdjęcia i pliki">
       <SettingRow label="Układ plików w folderze media" note={overlay ? layoutAsInArchive(layout) : layoutNow(scan)} last={overlay && toTidy === 0 && !left}>
@@ -170,7 +170,7 @@ function MediaFilesSection({ archive }: { archive: ArchiveStatus }) {
           </button>
         </SettingRow>
       )}
-      <SettingRow label={tidyNote(scan)} note="Pliki w folderze media, które leżą w złym miejscu albo nie są do nikogo przypisane" last={overlay || !run}>
+      <SettingRow label={tidyNote(scan, overlay)} note="Pliki w folderze media, które leżą w złym miejscu albo nie są do nikogo przypisane" last={overlay || !run}>
         <button className="btn secondary set-btn" disabled={toTidy === 0} onClick={() => setTidyOpen(true)}>
           Przejrzyj…
         </button>

@@ -24,6 +24,7 @@ import {
   personLabel,
   tidyEmpty,
   tidySections,
+  unknownApplyLabel,
   unknownSection,
   unpackQuestion,
   whoseQuestion,
@@ -247,6 +248,7 @@ function UnknownSection({ files }: { files: ScanUnknown[] }) {
   const current = (u: ScanUnknown): Choice | null => choice[u.path] ?? (suggestion(u) ? { kind: "person", person: suggestion(u)! } : null);
   const ticked = (u: ScanUnknown) => current(u) != null && !off.has(u.path);
   const chosen = shown.filter(ticked);
+  const leaveCount = chosen.filter((u) => current(u)?.kind === "leave").length;
 
   const set = (u: ScanUnknown, c: Choice) => {
     setChoice((x) => ({ ...x, [u.path]: c }));
@@ -339,7 +341,7 @@ function UnknownSection({ files }: { files: ScanUnknown[] }) {
           {UNKNOWN_FOOTER}
         </span>
         <button className="btn primary sm" disabled={chosen.length === 0} onClick={apply}>
-          Przypisz zaznaczone{chosen.length > 0 ? ` (${num(chosen.length)})` : ""}
+          {unknownApplyLabel(chosen.length - leaveCount, leaveCount)}
         </button>
       </div>
     </Block>

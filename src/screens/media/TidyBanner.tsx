@@ -12,7 +12,7 @@ export function TidyBanners() {
   const combined = archive?.combined != null;
   // The scan is the fresher of the two; the status says it from the opening until the first scan.
   const left = (scan ? scan.interrupted : archive?.layoutInterrupted) ?? null;
-  const showTidy = bannerShows(scan, combined);
+  const showTidy = bannerShows(scan, combined, archive?.workMode === "overlay");
   if (combined || (!left && !showTidy)) return null;
   return (
     <div className="col" style={{ gap: 8 }}>
@@ -35,7 +35,7 @@ export function TidyBanners() {
           <span style={{ flex: "none", display: "flex" }}>
             <FolderSearch size={16} color="var(--accent-text)" />
           </span>
-          <span className="grow">{bannerText(scan)}</span>
+          <span className="grow">{bannerText(scan, archive?.workMode === "overlay")}</span>
           <button className="btn secondary sm" onClick={() => setTidyOpen(true)}>
             Przejrzyj
           </button>
