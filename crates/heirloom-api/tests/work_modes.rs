@@ -933,7 +933,6 @@ fn scenario_conflict_merge_write_back_and_undo() {
     let done = run(&mut api, "archive.writeBack", json!({ "author": "Ewa" }));
     assert_eq!(done["status"]["overlay"]["canUndoWriteBack"], true);
     let data = fs::read_to_string(original.join("rodzina.ged")).unwrap();
-    // The record is kept whole from the side chosen (A.9): the user's name; their trade shows in „Pokaż różnice” only.
     // The choice covers the clashing name only; the archive's separate edit of the same record (the trade) survives.
     assert!(data.contains("Jan Piotr /Kowalski/") && !data.contains("Janek /"), "{data}");
     assert!(data.contains("1 OCCU Stolarz"), "the archive's non-clashing edit survives choosing mine: {data}");
@@ -953,4 +952,22 @@ fn scenario_conflict_merge_write_back_and_undo() {
     assert!(extra.iter().all(|p| p.contains("kopie")), "only the safety copy is new: {extra:?}");
     assert_eq!(run(&mut api, "archive.status", Value::Null)["overlay"]["pending"].as_u64().unwrap() > 0, true, "the user's changes wait again");
     assert!(mine.is_dir());
+}
+
+/// An archive with `.heirloom` but no history yet: the undo of a write-back leaves no empty history file behind.
+#[test]
+fn undoing_a_write_back_into_an_archive_without_history_leaves_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = family(dir.path());
+    let history = original.join(".heirloom").join("historia.jsonl");
+    let _ = fs::remove_file(&history);
+    let mut api = computer(dir.path(), "ten");
+    overlay_mode(&mut api, &original);
+    let jan = run(&mut api, "people.list", json!({}))["people"][0]["id"].as_str().unwrap().to_string();
+    run(&mut api, "person.update", json!({ "id": jan, "given": "Jan Piotr", "surname": "Kowalski" }));
+    run(&mut api, "archive.save", json!({ "author": "Ewa" }));
+    run(&mut api, "archive.writeBack", json!({ "author": "Ewa" }));
+    assert!(history.is_file(), "the write-back brought the history along");
+    run(&mut api, "archive.undoWriteBack", Value::Null);
+    assert!(!history.exists(), "no empty history file is left");
 }

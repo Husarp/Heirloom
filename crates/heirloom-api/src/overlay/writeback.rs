@@ -615,7 +615,10 @@ pub fn undo(s: &mut Session) -> ApiResult {
     rollback(&original_root, &mut files, Some(&keep));
     if let (Some(path), Some(before_len), Some(after_len)) = (original_history(&original_root), journal.header.history_bytes_before, journal.history_bytes_after) {
         if file_len(&path) == after_len {
-            if let Ok(file) = fs::OpenOptions::new().write(true).open(&path) {
+            if before_len == 0 {
+                // The archive had no history before: the file the write-back started goes again.
+                let _ = fsx::remove_own_file(&path);
+            } else if let Ok(file) = fs::OpenOptions::new().write(true).open(&path) {
                 let _ = file.set_len(before_len);
             }
         }
