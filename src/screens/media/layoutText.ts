@@ -99,9 +99,11 @@ export function heldText(held: number): string {
   return `${filesWord(held)} ${were} w innym programie — ${stayed} na miejscu. Spróbuj ponownie później.`;
 }
 
-export function movedToast(r: Pick<RestructureResult, "moved" | "held">): { text: string; detail?: string } {
+export function movedToast(r: Pick<RestructureResult, "moved" | "held"> & { assigned?: number }): { text: string; detail?: string } {
   const text = r.moved > 0 ? `Przeniesiono ${filesWord(r.moved)}.` : "Żaden plik nie został przeniesiony.";
-  return { text, detail: r.held > 0 ? heldText(r.held) : undefined };
+  // Assigning the unpacked files is an ordinary change: it waits for Zapisz like any other.
+  const detail = [r.held > 0 ? heldText(r.held) : null, (r.assigned ?? 0) > 0 ? `Przypisanie ${count(r.assigned!, "pliku", "plików", "plików")} czeka na zapis.` : null].filter(Boolean).join(" ");
+  return { text, detail: detail || undefined };
 }
 
 export function undoneToast(r: Pick<UndoRestructureResult, "movedBack" | "notBack">): { text: string; detail?: string } {

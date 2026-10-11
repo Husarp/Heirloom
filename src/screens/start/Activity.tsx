@@ -103,6 +103,8 @@ export function Activity() {
   const [undone, setUndone] = useState<ReadonlySet<number>>(() => new Set());
 
   const rows = data?.rows ?? [];
+  // Runs of „Uporządkuj” already taken back (their undo is a later row `<batch>-cofniecie`).
+  const takenBack = useMemo(() => new Set(rows.flatMap((r) => (r.batch?.endsWith("-cofniecie") ? [r.batch.slice(0, -"-cofniecie".length)] : []))), [rows]);
   const days = useMemo(() => {
     const out: { key: string; label: string; rows: FeedRow[] }[] = [];
     for (const row of data?.rows ?? []) {
@@ -199,7 +201,7 @@ export function Activity() {
                     </span>
                     <div className="col grow" style={{ lineHeight: 1.35 }}>
                       <span>
-                        <b style={{ fontWeight: 600 }}>{row.action}</b>{" "}
+                        <b style={{ fontWeight: 600 }}>{row.batch?.startsWith("porzadkowanie-") && row.batch.endsWith("-cofniecie") ? "Cofnięto porządkowanie" : row.action}</b>{" "}
                         {subjectId ? (
                           <button className="activity-subject" onClick={() => go({ name: "person", id: subjectId })}>
                             {row.subject}
@@ -217,12 +219,18 @@ export function Activity() {
                     {editing &&
                       (row.undo === "Cofnij porządkowanie" ? (
                         // A run of „Uporządkuj” is taken back through its journal (files move back), not history.undo.
-                        layoutJournal(row.batch) && (
+                        layoutJournal(row.batch) &&
+                        (takenBack.has(row.batch!) ? (
+                          <button className="btn secondary sm activity-undo" disabled>
+                            <Check size={13} />
+                            Cofnięto
+                          </button>
+                        ) : (
                           <button className="btn secondary sm activity-undo" onClick={() => askUndo(layoutJournal(row.batch)!)}>
                             <Undo2 size={13} />
                             {row.undo}
                           </button>
-                        )
+                        ))
                       ) : undone.has(row.index) ? (
                         <button className="btn secondary sm activity-undo" disabled>
                           <Check size={13} />

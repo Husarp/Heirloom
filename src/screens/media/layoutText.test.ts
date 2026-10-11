@@ -105,6 +105,7 @@ describe("results", () => {
   it("moved", () => {
     expect(movedToast({ moved: 1198, held: 0 })).toEqual({ text: `Przeniesiono 1${NB}198${NB}plików.`, detail: undefined });
     expect(movedToast({ moved: 0, held: 2 }).text).toBe("Żaden plik nie został przeniesiony.");
+    expect(movedToast({ moved: 3, held: 0, assigned: 3 }).detail).toBe(`Przypisanie 3${NB}plików czeka na zapis.`);
   });
   it("undone", () => {
     expect(undoneToast({ movedBack: 5, notBack: 0 }).text).toBe(`Cofnięto porządkowanie: 5${NB}plików wróciło na dawne miejsce.`);
