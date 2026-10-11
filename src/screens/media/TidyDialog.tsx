@@ -79,6 +79,18 @@ function pickPerson(placeholder: string): Promise<LayoutPerson | null> {
 function Body({ scan }: { scan: MediaScan }) {
   const archive = useStore((s) => s.archive);
   const close = () => useStore.getState().setTidyOpen(false);
+  // Esc belongs to the window on top (the people search, a question, the final-change dialog), not to this one below it;
+  // Dialog's own Esc would swallow it for them, so it is handled here.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const s = useStore.getState();
+      if (e.key !== "Escape" || s.paletteOpen || s.ask || s.finalChange || s.whoEditsOpen || s.busy) return;
+      e.stopPropagation();
+      close();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
   const overlay = archive?.workMode === "overlay";
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
   const sections = tidySections(scan, overlay, dismissed);
@@ -91,7 +103,7 @@ function Body({ scan }: { scan: MediaScan }) {
   };
 
   return (
-    <Dialog width={760} onClose={close} labelledBy="tidy-title">
+    <Dialog width={760} labelledBy="tidy-title">
       <div className="dialog-body" style={{ gap: 6, paddingBottom: 6, flex: "none" }}>
         <div id="tidy-title" className="dialog-title">
           {TIDY_TITLE}
