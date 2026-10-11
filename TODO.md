@@ -547,8 +547,7 @@ This is the roadmap, with a checkbox per task.
   - [ ] a backup over 4 GB onto a FAT32 pendrive: the message „Na tym dysku nie zmieści się plik większy niż 4 GB…”;
   - [ ] paths over 260 characters in the restructure plan (other genealogy programs fail on them).
 - [ ] **Deferred from the 0.7.0 review** (docs/.loki notes, none loses data):
-  - [ ] undoing a write-back (`Cofnij`) leaves an empty `.heirloom/historia.jsonl` in an original that had none, and
-        keeps the person in its editors list;
+  - [ ] undoing a write-back (`Cofnij`) keeps the person in the original's editors list (harmless);
   - [ ] a failed history append after a write-back is silent (the data is safe; no message to the user);
   - [ ] a merge where two neighbouring children with the same tag were changed differently on both sides still
         offers one choice for both (the per-place choice cannot split them);
