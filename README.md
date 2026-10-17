@@ -102,7 +102,9 @@ You need Rust (`%USERPROFILE%\.cargo\bin` on the PATH) and Node.js. Run `npm ins
 
 ## Licence
 
-MIT — © 2026 Husarp. See [LICENSE](LICENSE).
+**All rights reserved** — © 2026 Husarp. The code is public to read, and the releases are free to
+download and use, but the app may not be copied, changed, shared, sold or built upon without
+written permission. Full terms in [LICENSE](LICENSE).
 
 ## Your family data
 

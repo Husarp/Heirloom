@@ -22,7 +22,7 @@
   |---|---|---|
   | **Direction** | Our own app (option C) | Existing apps compared in [RESEARCH §1](docs/RESEARCH.md#1-existing-apps-could-we-use-one-instead-of-building) |
   | **Name** | Heirloom | App ID `com.husarp.heirloom` |
-  | **Licence** | MIT, like the other apps (confirmed 2026-09-28) | "Others can use it as they want". Consequence: we don't copy code from Gramps, which is GPL; we write our own Polish date and kinship logic from the rules in [RESEARCH §3](docs/RESEARCH.md#3-genealogy-domain-and-polish-specifics) |
+  | **Licence** | All rights reserved (changed 2026-10-17; was MIT from 2026-09-28) | Free to download and use, not to copy, change, share or sell. Consequence: we don't copy code from Gramps, which is GPL; we write our own Polish date and kinship logic from the rules in [RESEARCH §3](docs/RESEARCH.md#3-genealogy-domain-and-polish-specifics) |
   | **AI** | Not built into the app | The app imports files that an external AI chat makes by following [docs/AI_INSTRUCTIONS.md](docs/AI_INSTRUCTIONS.md) |
   | **Platform** | PC (Windows) only | A phone version isn't planned |
   | **UI language** | Polish | Built with translations in mind, so English can be added later |

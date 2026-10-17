@@ -3,7 +3,7 @@ name = "heirloom-bridge"
 description = "Development only: serves the app's commands over HTTP on 127.0.0.1, so the UI can be tested in a normal browser"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 authors.workspace = true
 publish = false
 

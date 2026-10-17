@@ -3,7 +3,7 @@ name = "heirloom-core"
 description = "Heirloom core: the family archive folder (GEDCOM + .heirloom files), change history and search cache"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 authors.workspace = true
 
 [dependencies]

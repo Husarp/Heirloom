@@ -3,7 +3,7 @@ name = "heirloom-api"
 description = "The app's commands (JSON in, JSON out), shared by the Tauri window and the browser bridge"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 authors.workspace = true
 publish = false
 
