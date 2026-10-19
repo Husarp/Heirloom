@@ -573,6 +573,15 @@ impl Api {
                 let id = str_arg(&args, "id")?;
                 lists::story(self.view()?, &id)
             }
+            // Own file categories: the archive's list and the names found on files (archives opened together have only
+            // the latter).
+            "media.categories" => {
+                let saved = match &self.combined {
+                    Some(_) => Vec::new(),
+                    None => lists::saved_categories(&self.session()?.archive.settings().display),
+                };
+                Ok(lists::media_categories(self.view()?, &saved))
+            }
             "media.list" | "media.get" | "media.missing" | "media.findMissing" => {
                 let roots = match &self.combined {
                     Some(c) => c.file_roots(),

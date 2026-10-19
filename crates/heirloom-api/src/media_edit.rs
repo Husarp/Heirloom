@@ -25,6 +25,8 @@ pub fn call(s: &mut Session, method: &str, args: &Value) -> ApiResult {
     match method {
         "media.add" => add(s, args),
         "media.update" => update(s, args),
+        "media.renameCategory" => rename_category(s, args),
+        "media.removeCategory" => remove_category(s, args),
         "media.link" => link(s, args),
         "media.unlink" => unlink(s, args),
         "media.setProfile" => set_profile(s, args),
@@ -115,6 +117,24 @@ pub fn resolve_in(layers: &[PathBuf], file: &str) -> PathBuf {
         return resolve(top, file);
     }
     layers.iter().map(|layer| resolve(layer, file)).find(|p| p.is_file()).unwrap_or_else(|| resolve(top, file))
+}
+
+/// Names an own category cannot take: they are the built-in kinds' (compared in lower case).
+const RESERVED_CATEGORIES: [&str; 6] = ["zdjęcie", "zdjęcia", "dokument", "dokumenty", "inne", "inny"];
+
+/// A category name as it is stored: on one line with single spaces, not empty, not too long, not a built-in kind.
+pub(crate) fn clean_category(name: &str) -> Result<String, ApiError> {
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    if name.is_empty() {
+        return Err(ApiError::new("bad_category", "Podaj nazwę kategorii."));
+    }
+    if name.chars().count() > 60 {
+        return Err(ApiError::new("bad_category", "Nazwa kategorii jest za długa (najwyżej 60 znaków)."));
+    }
+    if RESERVED_CATEGORIES.contains(&name.to_lowercase().as_str()) {
+        return Err(ApiError::new("bad_category", "Zdjęcie, Dokument i Inne to rodzaje wbudowane — wybierz inną nazwę."));
+    }
+    Ok(name)
 }
 
 fn is_image(name: &str) -> bool {
@@ -323,6 +343,12 @@ fn update(s: &mut Session, args: &Value) -> ApiResult {
             set_child_text(object, tag, value.as_str());
         }
     }
+    // The own category: a name sets it (the kind it behaves like is sent as `kind`), null takes it off.
+    match args.get("category") {
+        Some(Value::String(name)) => set_child_text(object, "_HLM_CATEGORY", Some(&clean_category(name)?)),
+        Some(Value::Null) => set_child_text(object, "_HLM_CATEGORY", None),
+        _ => {}
+    }
     if let Some(date) = args.get("date") {
         let gedcom = date.as_str().and_then(|t| heirloom_core::polish::parse_date_input(t).or_else(|| (!t.trim().is_empty()).then(|| t.trim().to_string())));
         set_child_text(object, "_HLM_DATE", gedcom.as_deref());
@@ -330,6 +356,49 @@ fn update(s: &mut Session, args: &Value) -> ApiResult {
     let edits = changes.into_edits();
     commit(s, edits)?;
     Ok(Value::Null)
+}
+
+/// The media records (not objects written inside a person) whose category is `name`.
+fn with_category(s: &Session, name: &str) -> Vec<String> {
+    s.archive
+        .doc
+        .records
+        .iter()
+        .filter(|r| r.tag == "OBJE" && r.child_value("_HLM_CATEGORY").map(str::trim) == Some(name))
+        .filter_map(|r| r.xref.clone())
+        .collect()
+}
+
+/// „Zmień nazwę…” of an own category: the new name on every file that has it, as one edit. The list in the archive's
+/// settings is the interface's to change.
+fn rename_category(s: &mut Session, args: &Value) -> ApiResult {
+    let from = req(args, "from")?.trim().to_string();
+    let to = clean_category(&req(args, "to")?)?;
+    let taken = s.archive.doc.records.iter().filter(|r| r.tag == "OBJE").filter_map(|r| r.child_value("_HLM_CATEGORY")).map(str::trim);
+    if from != to && taken.into_iter().any(|c| c != from && c.to_lowercase() == to.to_lowercase()) {
+        return Err(ApiError::new("bad_category", format!("Kategoria „{to}” już jest.")));
+    }
+    let ids = with_category(s, &from);
+    let mut changes = Changes::new(&s.archive.doc);
+    for id in &ids {
+        set_child_text(changes.get(id)?, "_HLM_CATEGORY", Some(&to));
+    }
+    let edits = changes.into_edits();
+    commit(s, edits)?;
+    Ok(json!({ "changed": ids.len() }))
+}
+
+/// „Usuń…” of an own category: the files lose the name and stay what they were (photos, documents).
+fn remove_category(s: &mut Session, args: &Value) -> ApiResult {
+    let name = req(args, "name")?.trim().to_string();
+    let ids = with_category(s, &name);
+    let mut changes = Changes::new(&s.archive.doc);
+    for id in &ids {
+        set_child_text(changes.get(id)?, "_HLM_CATEGORY", None);
+    }
+    let edits = changes.into_edits();
+    commit(s, edits)?;
+    Ok(json!({ "changed": ids.len() }))
 }
 
 fn link(s: &mut Session, args: &Value) -> ApiResult {
@@ -786,6 +855,96 @@ mod tests {
         let added = crate::edit::call(&mut s, "media.add", &json!({ "paths": [copy.to_string_lossy()], "person": "@I2@" })).unwrap();
         let link = s.archive.doc.record("@I2@").unwrap().child("OBJE").unwrap();
         assert!(link.pointer().is_some_and(|p| s.archive.doc.record(p).is_some()), "{link:?}, {added}");
+    }
+
+    /// Three files: a photo and a document with a category, one with none; one category is also in the settings list.
+    fn category_session(dir: &Path) -> Session {
+        let root = dir.join("a");
+        std::fs::create_dir_all(&root).unwrap();
+        let text = "0 HEAD\n1 SOUR HEIRLOOM\n1 GEDC\n2 VERS 7.0\n\
+0 @I1@ INDI\n1 NAME Anna /Nowak/\n1 OBJE @O1@\n1 OBJE @D1@\n\
+0 @O1@ OBJE\n1 FILE media/p1.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n1 _HLM_CATEGORY Pocztówki\n\
+0 @O2@ OBJE\n1 FILE media/p2.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n1 _HLM_CATEGORY Pocztówki\n\
+0 @D1@ OBJE\n1 FILE media/akt.pdf\n2 FORM application/pdf\n3 MEDI MANUSCRIPT\n1 _HLM_CATEGORY Listy\n\
+0 @O3@ OBJE\n1 FILE media/p3.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n0 TRLR\n";
+        std::fs::write(root.join("rodzina.ged"), text).unwrap();
+        Session::new(Archive::open(&root).unwrap())
+    }
+
+    fn category_of(s: &Session, id: &str) -> Option<String> {
+        s.archive.doc.record(id).unwrap().child_value("_HLM_CATEGORY").map(str::to_string)
+    }
+
+    #[test]
+    fn a_category_is_set_renamed_and_removed_as_undoable_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = category_session(dir.path());
+        // Set: the name and the kind it behaves like go together; null takes the name off again.
+        crate::edit::call(&mut s, "media.update", &json!({ "id": "@O3@", "kind": "document", "documentType": "", "category": "  Listy   rodzinne " })).unwrap();
+        assert_eq!(category_of(&s, "@O3@").as_deref(), Some("Listy rodzinne"));
+        let object = s.derived().view.media.get("@O3@").unwrap().clone();
+        assert_eq!((object.kind, object.category.as_deref()), (MediaKind::Document, Some("Listy rodzinne")));
+        let medi = s.archive.doc.record("@O3@").unwrap().child("FILE").unwrap().child("FORM").unwrap().child_value("MEDI").map(str::to_string);
+        assert_eq!(medi.as_deref(), Some("MANUSCRIPT"));
+        crate::edit::call(&mut s, "media.update", &json!({ "id": "@O3@", "kind": "photo", "category": null })).unwrap();
+        assert_eq!(category_of(&s, "@O3@"), None);
+        assert_eq!(s.derived().view.media.get("@O3@").unwrap().kind, MediaKind::Photo);
+        // A built-in kind's name, an empty name or one that is too long is refused.
+        for bad in ["Zdjęcie", " dokument ", "INNE", "  ", &"x".repeat(61)] {
+            assert!(crate::edit::call(&mut s, "media.update", &json!({ "id": "@O3@", "category": bad })).is_err(), "{bad:?}");
+        }
+        assert_eq!(category_of(&s, "@O3@"), None);
+        // Rename: every file that has it, one undo step; the rest stay.
+        let depth = s.archive.undo_depth();
+        let done = crate::edit::call(&mut s, "media.renameCategory", &json!({ "from": "Pocztówki", "to": "Kartki" })).unwrap();
+        assert_eq!(done["changed"], 2);
+        assert_eq!((category_of(&s, "@O1@").as_deref(), category_of(&s, "@O2@").as_deref(), category_of(&s, "@D1@").as_deref()), (Some("Kartki"), Some("Kartki"), Some("Listy")));
+        assert_eq!(s.archive.undo_depth(), depth + 1, "one edit");
+        // Not onto another category (even in other letters), not onto a built-in kind's name.
+        assert!(crate::edit::call(&mut s, "media.renameCategory", &json!({ "from": "Kartki", "to": "listy" })).is_err());
+        assert!(crate::edit::call(&mut s, "media.renameCategory", &json!({ "from": "Kartki", "to": "Dokument" })).is_err());
+        // Only the letters of its own name may change.
+        crate::edit::call(&mut s, "media.renameCategory", &json!({ "from": "Kartki", "to": "KARTKI" })).unwrap();
+        assert_eq!(category_of(&s, "@O1@").as_deref(), Some("KARTKI"));
+        // Remove: the files lose the name and stay what they were.
+        let done = crate::edit::call(&mut s, "media.removeCategory", &json!({ "name": "KARTKI" })).unwrap();
+        assert_eq!(done["changed"], 2);
+        assert_eq!((category_of(&s, "@O1@"), category_of(&s, "@O2@")), (None, None));
+        let d = s.derived();
+        assert!(d.view.media.get("@O1@").is_some_and(|m| m.kind == MediaKind::Photo) && d.view.media.get("@D1@").is_some_and(|m| m.kind == MediaKind::Document));
+        assert_eq!(category_of(&s, "@D1@").as_deref(), Some("Listy"));
+        // A name nobody has changes nothing and records nothing.
+        let depth = s.archive.undo_depth();
+        crate::edit::call(&mut s, "media.removeCategory", &json!({ "name": "Nikt" })).unwrap();
+        assert_eq!(s.archive.undo_depth(), depth);
+        // Undo brings the names back.
+        assert!(s.archive.undo());
+        assert_eq!(category_of(&s, "@O1@").as_deref(), Some("KARTKI"));
+    }
+
+    #[test]
+    fn the_categories_are_the_saved_list_plus_the_names_found_on_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = category_session(dir.path());
+        let display = |text: &str| -> serde_json::Map<String, Value> { serde_json::from_str::<Value>(text).unwrap().as_object().unwrap().clone() };
+        // The list has „Pocztówki” (kind from the list), an unused „Mapy”, a repeat and two wrong entries.
+        let saved = crate::lists::saved_categories(&display(
+            r#"{ "mediaCategories": [ { "name": "Mapy", "base": "document" }, { "name": "Pocztówki", "base": "photo" }, { "name": "Pocztówki", "base": "other" }, { "name": "", "base": "photo" }, { "name": "Zły", "base": "video" } ] }"#,
+        ));
+        assert_eq!(saved.iter().map(|(n, b)| (n.as_str(), b.code())).collect::<Vec<_>>(), [("Mapy", "document"), ("Pocztówki", "photo")]);
+        let rows = crate::lists::media_categories(s.derived(), &saved);
+        let rows: Vec<_> = rows.as_array().unwrap().iter().map(|r| (r["name"].as_str().unwrap(), r["base"].as_str().unwrap(), r["count"].as_u64().unwrap(), r["saved"].as_bool().unwrap())).collect();
+        // „Listy” is on a file but not in the list: it is shown all the same, its kind taken from the file.
+        assert_eq!(rows, [("Mapy", "document", 0, true), ("Pocztówki", "photo", 2, true), ("Listy", "document", 1, false)]);
+        // Without any settings the files still carry their categories.
+        let rows = crate::lists::media_categories(s.derived(), &[]);
+        assert_eq!(rows.as_array().unwrap().iter().map(|r| r["name"].as_str().unwrap()).collect::<Vec<_>>(), ["Listy", "Pocztówki"]);
+        // The media list and the profile carry the category (a document's „kind” is its name).
+        let roots = s.file_roots();
+        assert_eq!(crate::lists::media_get(s.derived(), "@D1@", &roots).unwrap()["category"], "Listy");
+        let profile = crate::people::profile(s.derived(), "@I1@", &[]).unwrap();
+        assert_eq!(profile["gallery"][0]["category"], "Pocztówki");
+        assert_eq!((profile["documents"][0]["category"].as_str(), profile["documents"][0]["kind"].as_str()), (Some("Listy"), Some("Listy")));
     }
 
     #[test]

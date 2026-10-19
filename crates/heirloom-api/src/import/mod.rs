@@ -41,6 +41,8 @@ pub struct Decision {
 #[derive(Debug, Clone, Default)]
 pub struct FileChoice {
     pub kind: Option<String>,
+    /// An own category („Pocztówki”); `kind` then is the kind it behaves like (photo, document, other).
+    pub category: Option<String>,
     pub caption: Option<String>,
     /// People added by hand (record ids of batch persons: P1…).
     pub people: Vec<String>,
@@ -165,12 +167,17 @@ pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Val
                     let _ = fix_date(&mut new, &event, &value);
                 }
             }
-            // Kinds chosen by hand in step 1 (by path): a reload (a file taken off, another dropped) keeps them.
+            // Kinds chosen by hand in step 1 (by path): a reload (a file taken off, another dropped) keeps them. A kind
+            // chosen as an own category comes with its name (`categories`, by path).
             if let Some(kinds) = args.get("kinds").and_then(Value::as_object) {
+                let categories = args.get("categories").and_then(Value::as_object);
                 for f in &new.files {
-                    if let Some(kind) = kinds.get(&f.path.display().to_string()).and_then(Value::as_str) {
+                    let path = f.path.display().to_string();
+                    if let Some(kind) = kinds.get(&path).and_then(Value::as_str) {
                         let key = f.m.map(m_label).unwrap_or_else(|| f.name.clone());
-                        new.file_choices.entry(key).or_default().kind = Some(kind.to_string());
+                        let choice = new.file_choices.entry(key).or_default();
+                        choice.kind = Some(kind.to_string());
+                        choice.category = categories.and_then(|c| c.get(&path)).and_then(Value::as_str).and_then(|c| crate::media_edit::clean_category(c).ok());
                     }
                 }
             }
@@ -280,6 +287,13 @@ pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Val
                     let choice = d.file_choices.entry(m).or_default();
                     if let Some(kind) = args.get("kind").and_then(Value::as_str) {
                         choice.kind = Some(kind.to_string());
+                        // A kind chosen with no category is a plain one.
+                        choice.category = None;
+                    }
+                    match args.get("category") {
+                        Some(Value::String(name)) => choice.category = Some(crate::media_edit::clean_category(name)?),
+                        Some(Value::Null) => choice.category = None,
+                        _ => {}
                     }
                     if let Some(caption) = args.get("caption").and_then(Value::as_str) {
                         choice.caption = Some(caption.to_string());
@@ -527,7 +541,7 @@ fn input_list(draft: &Draft, files: &[Value]) -> Vec<Value> {
         let who = [people, caption].into_iter().flatten().collect::<Vec<_>>().join(" · ");
         let (status, detail) = if choice.skip {
             ("skipped", "Pominięty — nie zostanie zapisany".to_string())
-        } else if kind == "other" {
+        } else if kind == "other" && choice.category.is_none() {
             ("assign", "Wybierz rodzaj pliku".to_string())
         } else if described || !names.is_empty() {
             let dup = if f["status"] == "dup" { " · już jest w archiwum" } else { "" };
@@ -538,6 +552,7 @@ fn input_list(draft: &Draft, files: &[Value]) -> Vec<Value> {
         out.push(json!({
             "name": f["name"],
             "kind": kind,
+            "category": choice.category,
             "path": f["path"],
             "size": f["size"],
             "m": m_number(key).map(m_label),
@@ -936,6 +951,7 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
             "size": input.map(|f| f.size),
             "status": status,
             "kind": choice.kind.clone().or(m.kind.clone()).unwrap_or_else(|| "photo".into()),
+            "category": choice.category,
             "documentType": m.document_type,
             "caption": choice.caption.clone().or(m.caption.clone()),
             "people": people.iter().map(|id| json!({ "id": id, "name": batch.persons.iter().find(|x| x.id == *id).map(batch_name) })).collect::<Vec<_>>(),
@@ -962,6 +978,7 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
             "size": f.size,
             "status": if choice.skip { "skipped" } else if draft.duplicates.contains_key(&key) { "dup" } else if !choice.people.is_empty() { "ok" } else { "und" },
             "kind": choice.kind.clone().unwrap_or_else(|| if check::is_image(&f.path) { "photo".into() } else { "document".into() }),
+            "category": choice.category,
             "caption": choice.caption,
             "people": choice.people.iter().map(|id| json!({ "id": id, "name": batch.persons.iter().find(|x| x.id == *id).map(batch_name) })).collect::<Vec<_>>(),
             "transcription": false,

@@ -25,8 +25,11 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { call } from "../../api/transport";
 import { useStore } from "../../app/store";
+import { useCategories } from "../../app/categories";
 import { useApi } from "../../app/useApi";
 import { Spinner, useDismiss } from "../../components/bits";
+import { CategoryDialog } from "../../components/CategoryDialog";
+import { BASE_LIKE, type Base, type Category } from "../../lib/categories";
 import { bytes, clock, count, people, shortWhen } from "../../lib/format";
 import { copyText, onFileDrop, pickFiles, pickFolders, pickSavePath, revealPath } from "../../lib/native";
 import { GUIDE_STEPS, guideOpenByDefault } from "./aiGuide";
@@ -61,6 +64,9 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
   const [stale, setStale] = useState(false);
   const [over, setOver] = useState(false);
   const { data: history } = useApi<PastImport[]>("import.history");
+  const own = useCategories();
+  // „+ Dodaj kategorię…” in a file's kind menu: the file the new category is for.
+  const [adding, setAdding] = useState<ImportInput | null>(null);
   // The guide is open at first while the archive has had no import; a click decides from then on.
   const [guide, setGuide] = useState<boolean | null>(null);
   const guideOpen = guide ?? guideOpenByDefault(history);
@@ -68,7 +74,7 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
   // Reads what was pasted and dropped a moment after the last change. Coming back to this step with a batch already
   // loaded keeps it (and the decisions made in the later steps).
   const load = async () => {
-    const { text, paths, exclude, kinds } = useWizard.getState();
+    const { text, paths, exclude, kinds, categories } = useWizard.getState();
     if (!text.trim() && paths.length === 0) {
       if (state) {
         await call("import.cancel").catch(() => {});
@@ -77,7 +83,7 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
       return;
     }
     setBusy(true);
-    await act("import.load", { texts: [text], paths, exclude, kinds });
+    await act("import.load", { texts: [text], paths, exclude, kinds, categories });
     setBusy(false);
   };
   const first = useRef(true);
@@ -219,6 +225,18 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
     else set({ exclude: [...out, input.path] });
   };
 
+  /** Gives a file the kind (and own category) chosen in its menu. Step 1's choices go with every reload of the list. */
+  const chooseKind = (input: ImportInput, kind: Base | "note", category: string | null) => {
+    if (input.path) {
+      const { kinds, categories } = useWizard.getState();
+      const rest = { ...categories };
+      if (category) rest[input.path] = category;
+      else delete rest[input.path];
+      set({ kinds: { ...kinds, [input.path]: kind }, categories: rest });
+    }
+    void act("import.file", { file: input.file, kind, ...(category ? { category } : {}) });
+  };
+
   const counts = state?.batch.counts;
   const firstError = state?.issues.find((i) => i.level === "error");
   const recognised = counts ? counts.persons > 0 || state!.files.length > 0 : false;
@@ -290,7 +308,7 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
               </div>
             )}
             {inputs.map((input, k) => (
-              <InputRow key={`${input.path ?? input.name}-${k}`} input={input} act={act} onRemove={() => remove(input)} />
+              <InputRow key={`${input.path ?? input.name}-${k}`} input={input} categories={own} onChoose={chooseKind} onAddCategory={() => setAdding(input)} onRemove={() => remove(input)} />
             ))}
           </div>
           {/* Stays after the list appears, so it's clear that more answers can still be pasted. The textarea is
@@ -435,6 +453,13 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
           )}
         </div>
       </div>
+      {adding && (
+        <CategoryDialog
+          base={adding.kind === "photo" || adding.kind === "document" ? adding.kind : "other"}
+          onClose={() => setAdding(null)}
+          onAdded={(name, base) => chooseKind(adding, base, name)}
+        />
+      )}
     </div>
   );
 }
@@ -510,13 +535,28 @@ const STATUS: Record<ImportInput["status"], { label: string; icon: React.ReactNo
 };
 
 /** One recognised file: its kind (a file's can be changed), what it holds or whom it shows, its state, „usuń”. */
-function InputRow({ input, act, onRemove }: { input: ImportInput; act: Act; onRemove: () => void }) {
-  const setKinds = useWizard((w) => w.set);
+function InputRow({
+  input,
+  categories,
+  onChoose,
+  onAddCategory,
+  onRemove,
+}: {
+  input: ImportInput;
+  categories: Category[];
+  onChoose: (input: ImportInput, kind: Base | "note", category: string | null) => void;
+  onAddCategory: () => void;
+  onRemove: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
   const status = STATUS[input.status];
   const changeable = input.kind !== "answer" && input.status !== "skipped" && !!input.file;
   const size = input.size != null ? bytes(input.size) : "";
+  const choose = (kind: Base | "note", category: string | null) => {
+    setOpen(false);
+    onChoose(input, kind, category);
+  };
   return (
     <div className={`imp-recog-row${input.status === "skipped" ? " skipped" : ""}`}>
       <span className="row" style={{ gap: 8, minWidth: 0 }}>
@@ -529,25 +569,37 @@ function InputRow({ input, act, onRemove }: { input: ImportInput; act: Act; onRe
         </span>
       </span>
       <div ref={ref} style={{ position: "relative", minWidth: 0 }}>
-        <button className={`imp-kind${input.kind === "other" ? " warn" : ""}`} disabled={!changeable} onClick={() => setOpen((o) => !o)} aria-haspopup={changeable ? "menu" : undefined}>
-          <span className="ellipsis">{KIND_LABEL[input.kind]}</span>
+        <button
+          className={`imp-kind${input.kind === "other" && !input.category ? " warn" : ""}`}
+          disabled={!changeable}
+          onClick={() => setOpen((o) => !o)}
+          aria-haspopup={changeable ? "menu" : undefined}
+        >
+          <span className="ellipsis">{input.category ?? KIND_LABEL[input.kind]}</span>
           {changeable && <ChevronDown size={13} />}
         </button>
         {open && (
-          <div className="popover" style={{ top: 36, left: 0, width: 190, padding: "4px 0" }}>
+          <div className="popover" style={{ top: 36, left: 0, width: 190, maxHeight: 300, overflow: "auto", padding: "4px 0" }}>
             {(["photo", "document", "note"] as const).map((k) => (
-              <button
-                key={k}
-                className={`menu-item${input.kind === k ? " on" : ""}`}
-                onClick={() => {
-                  setOpen(false);
-                  if (input.path) setKinds({ kinds: { ...useWizard.getState().kinds, [input.path]: k } });
-                  act("import.file", { file: input.file, kind: k });
-                }}
-              >
+              <button key={k} className={`menu-item${input.kind === k && !input.category ? " on" : ""}`} onClick={() => choose(k, null)}>
                 {KIND_LABEL[k]}
               </button>
             ))}
+            {categories.map((c) => (
+              <button key={c.name} className={`menu-item${input.category === c.name ? " on" : ""}`} title={`${c.name} (${BASE_LIKE[c.base]})`} onClick={() => choose(c.base, c.name)}>
+                <span className="ellipsis">{c.name}</span>
+              </button>
+            ))}
+            <button
+              className="menu-item"
+              onClick={() => {
+                setOpen(false);
+                onAddCategory();
+              }}
+            >
+              <Plus size={13} />
+              Dodaj kategorię…
+            </button>
           </div>
         )}
       </div>

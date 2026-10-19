@@ -21,6 +21,8 @@ export interface MediaItem {
   /** Relative to the archive folder ("media/x.jpg"); null when the record has no file. */
   path: string | null;
   kind: "photo" | "document" | "other";
+  /** The user's own category („Pocztówki”); `kind` is then the kind it behaves like. */
+  category: string | null;
   /** "akt urodzenia", "list"… */
   documentType: string | null;
   title: string | null;
@@ -69,9 +71,9 @@ export const isPdf = (path: string | null | undefined) => !!path && /\.pdf$/i.te
 
 const KIND_LABEL: Record<string, string> = { photo: "zdjęcie", document: "dokument", other: "inny plik" };
 
-/** "akt urodzenia" when the document type is known, else "zdjęcie" / "dokument" / "inny plik". */
-export function kindText(item: { kind?: string; documentType?: string | null }): string {
-  return item.documentType?.trim() || KIND_LABEL[item.kind ?? ""] || "plik";
+/** The own category's name; else "akt urodzenia" when the document type is known; else "zdjęcie" / "dokument" / "inny plik". */
+export function kindText(item: { kind?: string; category?: string | null; documentType?: string | null }): string {
+  return item.category?.trim() || item.documentType?.trim() || KIND_LABEL[item.kind ?? ""] || "plik";
 }
 
 /** File-dialog filters that offer files like `name` first ("Wskaż plik M0142.jpg"). */

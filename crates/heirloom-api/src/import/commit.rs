@@ -325,7 +325,9 @@ fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, St
             None => media_type(relative).starts_with("image/"),
         };
         let xref = changes.new_xref("O");
-        let mut medi = Node::with_value("MEDI", if photo { "PHOTO" } else { "MANUSCRIPT" });
+        // An own category whose kind is „inne” is the one case of a kind written as OTHER; the others are photos or documents.
+        let other = choice.category.is_some() && kind.as_deref() == Some("other");
+        let mut medi = Node::with_value("MEDI", if photo { "PHOTO" } else if other { "OTHER" } else { "MANUSCRIPT" });
         if let Some(t) = described.and_then(|m| m.document_type.clone()) {
             medi.children.push(Node::with_value("PHRASE", &t));
         }
@@ -351,6 +353,9 @@ fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, St
             if let Some(n) = &m.note {
                 obje.children.push(text_node("NOTE", n));
             }
+        }
+        if let Some(category) = &choice.category {
+            obje.children.push(Node::with_value("_HLM_CATEGORY", category));
         }
         obje.children.push(stamp("CREA"));
         batch_mark(&mut obje, &ctx.name);
@@ -1122,6 +1127,51 @@ mod tests {
         assert!(detail["transcription"].as_str().unwrap().starts_with("Состоялось"));
         assert!(detail["translation"].as_str().unwrap().starts_with("Działo się"));
         assert_eq!(call(&mut s, &mut draft, "import.fileDetail", json!({ "file": "M099" })).unwrap_err().code, "bad_args");
+    }
+
+    #[test]
+    fn a_file_imported_with_an_own_category_keeps_its_name_and_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("a");
+        let mut s = Session::new(Archive::create(&root, "A").unwrap());
+        let (answer, photo) = example(dir.path());
+        let loose = dir.path().join("pocztowka.jpg");
+        std::fs::write(&loose, b"jpg").unwrap();
+        let mut draft = None;
+        let args = |extra: Value| {
+            let mut a = json!({ "texts": [answer], "paths": [photo.to_string_lossy(), loose.to_string_lossy()] });
+            a.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            a
+        };
+        let file = |state: &Value, key: &str| state["files"].as_array().unwrap().iter().find(|f| f["file"] == key).cloned().unwrap();
+        // Step 1's choices go with every load of the list (by path): the photo is a „Pocztówki” (like a photo), the loose
+        // file a „Pamiątki” (like „inne”).
+        let (photo_path, loose_path) = (photo.to_string_lossy().into_owned(), loose.to_string_lossy().into_owned());
+        let state = call(
+            &mut s,
+            &mut draft,
+            "import.load",
+            args(json!({ "kinds": { photo_path.clone(): "photo", loose_path.clone(): "other" }, "categories": { photo_path: "Pocztówki", loose_path: "Pamiątki" } })),
+        )
+        .unwrap();
+        assert_eq!((file(&state, "M002")["kind"].as_str(), file(&state, "M002")["category"].as_str()), (Some("photo"), Some("Pocztówki")));
+        assert_eq!(file(&state, "pocztowka.jpg")["category"], "Pamiątki");
+        // Step 4 changes them: a plain kind takes the category off; a built-in kind's name is refused.
+        let state = call(&mut s, &mut draft, "import.file", json!({ "file": "M002", "kind": "document" })).unwrap();
+        assert!(file(&state, "M002")["category"].is_null());
+        assert!(call(&mut s, &mut draft, "import.file", json!({ "file": "M002", "kind": "photo", "category": "Zdjęcie" })).is_err());
+        call(&mut s, &mut draft, "import.file", json!({ "file": "M002", "kind": "photo", "category": "  Pocztówki " })).unwrap();
+        let state = call(&mut s, &mut draft, "import.file", json!({ "file": "pocztowka.jpg", "people": ["P1"] })).unwrap();
+        let row = state["inputs"].as_array().unwrap().iter().find(|i| i["name"] == "pocztowka.jpg").cloned().unwrap();
+        assert_eq!((row["kind"].as_str(), row["category"].as_str(), row["status"].as_str()), (Some("other"), Some("Pamiątki"), Some("ok")), "an own category is a kind: nothing left to choose");
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+        let d = s.derived();
+        let mut found: Vec<_> = d.view.media.values().filter(|m| m.category.is_some()).map(|m| (m.category.clone().unwrap(), m.kind)).collect();
+        found.sort_by(|a, b| a.0.cmp(&b.0));
+        use heirloom_core::gedcom::view::MediaKind;
+        assert_eq!(found, [("Pamiątki".to_string(), MediaKind::Other), ("Pocztówki".to_string(), MediaKind::Photo)]);
+        let medi: Vec<_> = s.archive.doc.records.iter().filter(|r| r.tag == "OBJE" && r.child("_HLM_CATEGORY").is_some()).filter_map(|r| r.child("FILE")?.child("FORM")?.child_value("MEDI").map(str::to_string)).collect();
+        assert!(medi.contains(&"PHOTO".to_string()) && medi.contains(&"OTHER".to_string()), "{medi:?}");
     }
 
     #[test]

@@ -642,6 +642,7 @@ pub fn profile(d: &Derived, id: &str, history: &[heirloom_core::history::Entry])
                 gallery.push(json!({
                     "id": object.id,
                     "path": object.file,
+                    "category": object.category,
                     "caption": link.title.clone().or_else(|| object.title.clone()),
                     "date": date.map(|dv| polish::format_date_short(&dv)).or_else(|| object.date_text.clone()),
                     "uncertain": date.is_some_and(|dv| polish::is_uncertain(&dv)),
@@ -661,7 +662,9 @@ pub fn profile(d: &Derived, id: &str, history: &[heirloom_core::history::Entry])
                 documents.push(json!({
                     "id": object.id,
                     "path": object.file,
-                    "kind": object.document_type.clone().unwrap_or_else(|| "dokument".into()),
+                    "category": object.category,
+                    // An own category names the kind; else the document type.
+                    "kind": object.category.clone().or_else(|| object.document_type.clone()).unwrap_or_else(|| "dokument".into()),
                     "title": object.title.clone().unwrap_or_else(|| file_name(object.file.as_deref())),
                     "meta": object.place,
                     "tags": tags,

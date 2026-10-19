@@ -57,6 +57,8 @@ export interface TextItem {
 export interface GalleryItem {
   id: string;
   path: string | null;
+  /** The file's own category („Pocztówki”), if it has one. */
+  category: string | null;
   caption: string | null;
   date: string | null;
   uncertain: boolean;
@@ -71,6 +73,9 @@ export interface GalleryItem {
 export interface DocumentItem {
   id: string;
   path: string | null;
+  /** The file's own category, if it has one. */
+  category: string | null;
+  /** What is shown as its kind: the own category, else the document type. */
   kind: string;
   title: string;
   meta: string | null;

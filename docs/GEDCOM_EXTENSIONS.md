@@ -53,6 +53,7 @@ note, a photo is still a normal `OBJE`.
 | `_HLM_PLAC` | `OBJE` | Where a photo was taken or a document was made. |
 | `_HLM_TRANSCRIPTION` | `OBJE` | A transcription of a document, as written. |
 | `_HLM_TRANSLATION` | `OBJE` | A Polish translation of a document. |
+| `_HLM_CATEGORY` | `OBJE` | The user's own category of a file („Pocztówki”). The file keeps the kind it behaves like in `FILE.FORM.MEDI` (`PHOTO` shows in the gallery and can be a profile photo, `MANUSCRIPT` is a document, `OTHER` anything else), so a program that does not know the tag still sees an ordinary photo or document. The list of categories (names and the kind each behaves like) is kept in `.heirloom/ustawienia.json`; a category used by a file but missing from that list is shown all the same (the file is the source of truth). |
 | `_HLM_KIND` | `SOUR` | The kind of source: `parish_record`, `civil_record`, `index`, `photo`, `letter`, `oral`, `note`, `book`, `website`, `other`. |
 | `_HLM_PARISH` | `SOUR` | The parish of a register. |
 | `_HLM_YEAR` | `SOUR` | The year of a register. |

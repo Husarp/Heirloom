@@ -18,6 +18,7 @@ import { SwitchLayoutDialog } from "../media/SwitchLayoutDialog";
 import { lastBackupNote, ROTATION_NOTE } from "../archive/backupText";
 import { lastWriteBackText, waitingText } from "../archive/workModes";
 import { writeBackRefusal } from "../archive/writeBack";
+import { CategoriesSection } from "./categories";
 import { BusyDialog, CheckDialog, type CheckProblem } from "./dialogs";
 import { failed, fileSafe, Keycap, saveSettings, Section, Select, showInFolder, today, whenDone } from "./parts";
 
@@ -41,6 +42,7 @@ export function ArchiveSections({ archive }: { archive: ArchiveStatus }) {
     <>
       <ArchiveSection archive={archive} measured={measured} />
       {!archive.combined && <MediaFilesSection archive={archive} />}
+      <CategoriesSection archive={archive} />
       {archive.overlay && <OverlaySection archive={archive} />}
       <SettingsFilesSection archive={archive} />
       <BackupSection archive={archive} setBusy={setBusy} />

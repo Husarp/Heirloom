@@ -5,8 +5,11 @@ import { ArrowRight, Check, CircleCheck, CircleHelp, Copy, ExternalLink, FileTex
 import { useEffect, useRef, useState } from "react";
 import { call, importFileUrl, type ApiError } from "../../api/transport";
 import { useStore } from "../../app/store";
+import { useCategories } from "../../app/categories";
+import { CategoryDialog } from "../../components/CategoryDialog";
 import { Dialog } from "../../components/Dialog";
 import { Avatar, Spinner, useDismiss } from "../../components/bits";
+import { choiceOf, choiceValue, type Base, type Category } from "../../lib/categories";
 import { count } from "../../lib/format";
 import { openPath, pickFiles } from "../../lib/native";
 import { Footer } from "./ImportWizard";
@@ -24,6 +27,7 @@ export function StepFiles({ state, act, goStep }: { state: ImportState; act: Act
   const highlight = useWizard((w) => w.file);
   const setWizard = useWizard((w) => w.set);
   const paths = useWizard((w) => w.paths);
+  const categories = useCategories();
   const [open, setOpen] = useState<string | null>(state.persons.find((p) => p.profile)?.id ?? null);
   const files = state.files;
   const n = (s: ImportFile["status"]) => files.filter((f) => f.status === s).length;
@@ -122,7 +126,7 @@ export function StepFiles({ state, act, goStep }: { state: ImportState; act: Act
           ) : (
             <div className="imp-file-grid" ref={grid}>
               {files.map((f) => (
-                <FileCard key={f.file} f={f} state={state} act={act} profileOf={profiles.get(f.file)?.name ?? null} highlighted={highlight === f.file} />
+                <FileCard key={f.file} f={f} state={state} act={act} categories={categories} profileOf={profiles.get(f.file)?.name ?? null} highlighted={highlight === f.file} />
               ))}
             </div>
           )}
@@ -168,13 +172,33 @@ function ProfilePicker({ current, images, onPick }: { current: string | null; im
   );
 }
 
-function FileCard({ f, state, act, profileOf, highlighted }: { f: ImportFile; state: ImportState; act: Act; profileOf: string | null; highlighted: boolean }) {
+const ADD_CATEGORY = "__add";
+
+function FileCard({
+  f,
+  state,
+  act,
+  categories,
+  profileOf,
+  highlighted,
+}: {
+  f: ImportFile;
+  state: ImportState;
+  act: Act;
+  categories: Category[];
+  profileOf: string | null;
+  highlighted: boolean;
+}) {
   const [caption, setCaption] = useState(f.caption ?? "");
   const [reading, setReading] = useState(false);
+  const [adding, setAdding] = useState(false);
   useEffect(() => setCaption(f.caption ?? ""), [f.caption]);
   const status = STATUS[f.status];
   const skipped = f.status === "skipped";
   const ext = (f.name ?? "").split(".").pop()?.toUpperCase();
+  /** The kind (and own category) of the file; the plain kinds clear a category. */
+  const setKind = (kind: Base, category: string | null) => act("import.file", { file: f.file, kind, ...(category ? { category } : {}) });
+  const kinds: Category[] = f.category && !categories.some((c) => c.name === f.category) ? [...categories, { name: f.category, base: (f.kind as Base) ?? "other", count: 0, saved: false }] : categories;
 
   const attach = async () => {
     const [path] = await pickFiles(`Wskaż plik ${f.file}`, undefined, false);
@@ -213,10 +237,29 @@ function FileCard({ f, state, act, profileOf, highlighted }: { f: ImportFile; st
           <span className="imp-file-name ellipsis grow" title={f.name ?? f.file}>
             {f.name ?? f.file}
           </span>
-          <select className="imp-kind" value={f.kind} disabled={skipped} onChange={(e) => act("import.file", { file: f.file, kind: e.target.value })}>
+          <select
+            className="imp-kind"
+            style={{ maxWidth: "45%" }}
+            value={choiceValue(f)}
+            disabled={skipped}
+            onChange={(e) => {
+              if (e.target.value === ADD_CATEGORY) {
+                setAdding(true);
+                return;
+              }
+              const choice = choiceOf(e.target.value, kinds);
+              if (choice) setKind(choice.kind, choice.category);
+            }}
+          >
             <option value="photo">zdjęcie</option>
             <option value="document">dokument</option>
             <option value="other">inne</option>
+            {kinds.map((c) => (
+              <option key={c.name} value={`cat:${c.name}`}>
+                {c.name}
+              </option>
+            ))}
+            <option value={ADD_CATEGORY}>+ Dodaj kategorię…</option>
           </select>
         </div>
         {f.documentType && <span style={{ fontSize: 12, color: "var(--text3)", marginTop: -3 }}>{f.documentType}</span>}
@@ -264,6 +307,7 @@ function FileCard({ f, state, act, profileOf, highlighted }: { f: ImportFile; st
         </div>
       </div>
       {reading && <TranscriptionDialog f={f} loadId={state.loadId} onClose={() => setReading(false)} />}
+      {adding && <CategoryDialog base={f.kind === "document" ? "document" : f.kind === "photo" ? "photo" : "other"} onClose={() => setAdding(false)} onAdded={(name, base) => setKind(base, name)} />}
     </div>
   );
 }

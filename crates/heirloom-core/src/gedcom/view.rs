@@ -184,6 +184,8 @@ pub struct MediaObject {
     pub file: Option<String>,
     pub format: Option<String>,
     pub kind: MediaKind,
+    /// The user's own category („Pocztówki”) from `_HLM_CATEGORY`; `kind` is the kind it behaves like.
+    pub category: Option<String>,
     /// The document type ("akt urodzenia"), from `MEDI … PHRASE`.
     pub document_type: Option<String>,
     pub title: Option<String>,
@@ -625,6 +627,8 @@ fn percent_decode(text: &str) -> String {
 pub fn media_kind_for(format: Option<&str>, medi: Option<&str>, file: Option<&str>) -> MediaKind {
     match medi.map(|m| m.trim().to_ascii_uppercase()).as_deref() {
         Some("PHOTO" | "TOMBSTONE" | "CARD") => return MediaKind::Photo,
+        // What Heirloom writes for „inne”, whatever the file looks like.
+        Some("OTHER") => return MediaKind::Other,
         Some("MANUSCRIPT" | "BOOK" | "NEWSPAPER" | "MAGAZINE" | "FICHE" | "FILM" | "ELECTRONIC" | "DOCUMENT") => {
             return MediaKind::Document;
         }
@@ -657,6 +661,7 @@ fn media_object(node: &Node, id: &str, version: Version) -> MediaObject {
         file,
         format,
         kind,
+        category: text_of(node, "_HLM_CATEGORY", version),
         title,
         date_text: text_of(node, "_HLM_DATE", version),
         place: text_of(node, "_HLM_PLAC", version),
@@ -799,5 +804,17 @@ mod tests {
         let flags: Vec<_> = d.media.iter().map(|m| (m.profile, m.profile_off)).collect();
         // `N` is read from _HLM_PROFILE only, and beats a `_PRIM Y` left on the same link.
         assert_eq!(flags, [(false, true), (false, false), (false, true), (true, false)]);
+    }
+
+    #[test]
+    fn an_own_category_is_read_from_the_object() {
+        let file = "0 HEAD\n1 GEDC\n2 VERS 7.0\n\
+0 @O1@ OBJE\n1 FILE media/a.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n1 _HLM_CATEGORY Pocztówki\n\
+0 @O2@ OBJE\n1 FILE media/b.pdf\n2 FORM application/pdf\n3 MEDI MANUSCRIPT\n1 _HLM_CATEGORY   \n\
+0 @O3@ OBJE\n1 FILE media/c.jpg\n2 FORM image/jpeg\n3 MEDI OTHER\n1 _HLM_CATEGORY Pamiątki\n0 TRLR\n";
+        let v = build(&Document::from_bytes(file.as_bytes()).0);
+        assert_eq!((v.media["@O1@"].category.as_deref(), v.media["@O1@"].kind), (Some("Pocztówki"), MediaKind::Photo));
+        assert_eq!(v.media["@O2@"].category, None, "an empty name is no category");
+        assert_eq!(v.media["@O3@"].kind, MediaKind::Other, "MEDI OTHER is „inne”, though the file is a picture");
     }
 }
