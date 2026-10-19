@@ -863,20 +863,6 @@
   color: var(--text3);
   border: 1px solid var(--border);
 }
-.imp-file-profile {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  background: var(--accent);
-  color: var(--accent-ink);
-}
 .imp-file-body {
   padding: 10px 12px;
   display: flex;
@@ -941,6 +927,39 @@
 .imp-file-body .link {
   font-size: 12px;
   white-space: nowrap;
+}
+
+/* Step 4: the star on a file with nobody assigned yet. */
+.imp-file-thumb .profile-star.outline:disabled {
+  cursor: default;
+  color: var(--text3);
+  box-shadow: 0 0 0 1px var(--line);
+}
+/* Step 4: „Przypisz” — the people to pick, over everything. */
+.popover.imp-assign-pop {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0 4px;
+  gap: 6px;
+}
+.imp-assign-search {
+  margin: 0 8px;
+  width: calc(100% - 16px);
+  height: 32px;
+}
+.imp-assign-list {
+  overflow-y: auto;
+  padding-bottom: 4px;
+}
+.imp-assign-pop .menu-item {
+  gap: 10px;
+}
+.imp-assign-none {
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--text3);
 }
 
 /* ---------- 5 Podsumowanie ---------- */

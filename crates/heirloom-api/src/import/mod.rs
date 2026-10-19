@@ -323,9 +323,15 @@ pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Val
                     fix_date(d, &id, &value)?;
                 }
                 "import.profile" => {
-                    let person = req(args, "person")?;
+                    // One person (`person`) or several at once (`persons`: one state reload for the star's list).
+                    let mut who: Vec<String> = args.get("persons").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
+                    if who.is_empty() {
+                        who.push(req(args, "person")?);
+                    }
                     let file = args.get("file").and_then(Value::as_str).map(str::to_string);
-                    d.profile.insert(person, file);
+                    for person in who {
+                        d.profile.insert(person, file.clone());
+                    }
                 }
                 "import.commit" => {
                     let author = req(args, "author")?;
@@ -547,7 +553,7 @@ fn input_list(draft: &Draft, files: &[Value]) -> Vec<Value> {
             let dup = if f["status"] == "dup" { " · już jest w archiwum" } else { "" };
             ("ok", format!("{}{dup}", if who.is_empty() { "Opisany w paczce".to_string() } else { who }))
         } else {
-            ("assign", "Nie ma go w paczce — wskaż osobę".to_string())
+            ("assign", "Nie ma go w paczce — osobę przypiszesz w kroku 4".to_string())
         };
         out.push(json!({
             "name": f["name"],
@@ -1099,5 +1105,26 @@ mod tests {
         let md = dir.path().join("Instrukcja.md");
         call(&mut session, &mut draft, "import.saveInstructions", &json!({ "path": md.to_string_lossy() })).unwrap();
         assert_eq!(std::fs::read(&md).unwrap(), AI_INSTRUCTIONS.as_bytes());
+    }
+
+    #[test]
+    fn profile_photo_is_set_for_one_person_or_several_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let mut draft = None;
+        let text = format!("```json\n{}\n```", check::extract_blocks(include_str!("../../../../docs/IMPORT_FORMAT.md"), "doc").into_iter().next().unwrap().text);
+        let state = call(&mut session, &mut draft, "import.load", &json!({ "texts": [text], "paths": [] })).unwrap();
+        let ids: Vec<String> = state["persons"].as_array().unwrap().iter().take(2).map(|p| p["id"].as_str().unwrap().to_string()).collect();
+        assert_eq!(ids.len(), 2);
+        let profile_of = |state: &Value, id: &str| state["persons"].as_array().unwrap().iter().find(|p| p["id"] == id).unwrap()["profile"].clone();
+
+        let state = call(&mut session, &mut draft, "import.profile", &json!({ "persons": ids, "file": "M001" })).unwrap();
+        assert_eq!((profile_of(&state, &ids[0]), profile_of(&state, &ids[1])), (json!("M001"), json!("M001")));
+        // One person's still works, and clearing is `file: null`.
+        let state = call(&mut session, &mut draft, "import.profile", &json!({ "person": ids[0], "file": null })).unwrap();
+        assert_eq!((profile_of(&state, &ids[0]), profile_of(&state, &ids[1])), (Value::Null, json!("M001")));
+        // Another photo replaces the first: one profile photo per person.
+        let state = call(&mut session, &mut draft, "import.profile", &json!({ "persons": [ids[1]], "file": "M002" })).unwrap();
+        assert_eq!(profile_of(&state, &ids[1]), json!("M002"));
     }
 }

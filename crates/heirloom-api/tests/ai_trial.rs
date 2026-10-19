@@ -153,7 +153,7 @@ fn everything_dropped_at_once_is_listed_with_what_it_is() {
     let m001 = inputs.iter().find(|i| i["m"] == "M001").unwrap();
     assert_eq!((m001["kind"].as_str(), m001["status"].as_str()), (Some("photo"), Some("ok")));
     assert!(m001["detail"].as_str().unwrap().contains("Sadowsk"), "whom the photo shows: {m001}");
-    assert_eq!((row("IMG_2291.jpg")["status"].as_str(), row("IMG_2291.jpg")["detail"].as_str()), (Some("assign"), Some("Nie ma go w paczce — wskaż osobę")));
+    assert_eq!((row("IMG_2291.jpg")["status"].as_str(), row("IMG_2291.jpg")["detail"].as_str()), (Some("assign"), Some("Nie ma go w paczce — osobę przypiszesz w kroku 4")));
     assert_eq!(row("notatki babci.txt")["kind"], "note");
     assert_eq!((row("skan.xyz")["kind"].as_str(), row("skan.xyz")["detail"].as_str()), (Some("other"), Some("Wybierz rodzaj pliku")));
 

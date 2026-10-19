@@ -156,3 +156,8 @@ export function bytes(n: number): string {
   const digits = value >= 10 || unit === 0 ? 0 : 1;
   return `${value.toFixed(digits).replace(".", ",")}${NBSP}${units[unit]}`;
 }
+
+/** Lower case without Polish diacritics (ł too), for searching: fold("Żółć") → "zolc". */
+export function fold(text: string): string {
+  return text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/ł/g, "l");
+}
