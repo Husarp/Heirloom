@@ -340,7 +340,10 @@ pub fn build_with(doc: &Document, display: &Display) -> Derived {
             .iter()
             .filter(|l| view.media.get(&l.object).is_some_and(|m| m.kind == MediaKind::Photo))
             .collect();
-        let profile = photos.iter().find(|l| l.profile).or(photos.first());
+        // Without any marker the first photo is the profile photo; once a photo was explicitly taken off (`N`), the
+        // person has none until another is chosen.
+        let marked = photos.iter().any(|l| l.profile || l.profile_off);
+        let profile = photos.iter().find(|l| l.profile).or(if marked { None } else { photos.first() });
         let photo = profile.and_then(|l| Some((l.object.clone(), view.media.get(&l.object)?.file.clone()?)));
         let given_first = p.display_name();
         let name = if display.surname_first && !p.surname().is_empty() && !p.given().is_empty() { format!("{} {}", p.surname(), p.given()) } else { given_first.clone() };

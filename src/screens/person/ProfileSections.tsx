@@ -23,7 +23,6 @@ import {
   Plus,
   Quote,
   Search,
-  Star,
   Trash2,
   TriangleAlert,
   Undo2,
@@ -32,13 +31,15 @@ import {
   UserPlus,
   X,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
-import { call } from "../../api/transport";
+import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { call, type ApiError } from "../../api/transport";
 import type { PersonSummary } from "../../api/types";
 import { afterChange, useStore } from "../../app/store";
 import { useApi } from "../../app/useApi";
 import { Avatar, rowButton, Segmented, Thumb, useDismiss } from "../../components/bits";
 import { Markdown, plainText } from "../../components/Markdown";
+import { ProfileStar, ProfileTag } from "../../components/ProfileStar";
 import { RichEditor } from "../../components/RichEditor";
 import { cardName, cardYears, clock, count, relativeTime } from "../../lib/format";
 import { openUrl, pickFiles } from "../../lib/native";
@@ -46,8 +47,9 @@ import { Lightbox } from "../media/Lightbox";
 import { runEdit } from "../media/shared";
 import { RelativeTools } from "./RelativeTools";
 import { FactCellEditor, FactForm, factKey } from "./FactEdit";
+import { moveNextTo, sameOrder, shiftBy, useTileDrag } from "./galleryOrder";
 import { SectionEditButton, SectionFoot, useDraftGuard, useSection, type SectionEdit } from "./sectionEdit";
-import type { Profile, TextItem, TimelineRow } from "./types";
+import type { GalleryItem, Profile, TextItem, TimelineRow } from "./types";
 
 type Props = { data: Profile };
 
@@ -819,12 +821,53 @@ export function BrokenLinksNotice({ data }: Props) {
 
 export function GallerySection({ data }: Props) {
   const editing = useEditing();
+  const canEdit = useStore((s) => s.mode === "edit" && !(s.archive?.combined || s.archive?.readOnly));
   const sec = useSection(`${data.person.id}:gallery`, "Galeria");
   const setAsk = useStore((s) => s.setAsk);
   const [all, setAll] = useState(false);
   const [viewing, setViewing] = useState<number | null>(null);
+  // The order just chosen, shown at once while the profile is fetched again.
+  const [pending, setPending] = useState<string[] | null>(null);
+  useEffect(() => setPending(null), [data.gallery]);
+  const list = pending ? pending.flatMap((id) => data.gallery.find((g) => g.id === id) ?? []) : data.gallery;
+  const ids = list.map((g) => g.id);
+  const reorderable = editing && sec.open && list.length > 1;
+  // Edits made from the stars outside the open gallery section finish the section that is open first.
+  const edit = (action: () => Promise<void>) => (sec.open ? runEdit(action) : useStore.getState().outsideSection(() => runEdit(action)));
+  const reorder = (order: string[]) => {
+    if (sameOrder(order, ids)) return;
+    setPending(order);
+    edit(async () => {
+      try {
+        await call("media.reorder", { person: data.person.id, order });
+        afterChange();
+      } catch (e) {
+        setPending(null);
+        throw e;
+      }
+    });
+  };
+  const { drag, onPointerDown, consumeClick } = useTileDrag(reorderable, (id, target, after) => reorder(moveNextTo(ids, id, target, after)));
+  // Alt ← and Alt → move the focused photo one place.
+  const [refocus, setRefocus] = useState<string | null>(null);
+  useEffect(() => {
+    if (refocus) document.querySelector<HTMLElement>(`[data-gallery-id="${CSS.escape(refocus)}"] .gallery-open`)?.focus();
+    setRefocus(null);
+  }, [refocus, list]);
+  const moveByKey = (e: KeyboardEvent<HTMLElement>, id: string) => {
+    if (!reorderable || !e.altKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+    // Alt ← → also mean Back and Forward everywhere else (useShortcuts); on a tile of the open gallery they move it.
+    e.preventDefault();
+    e.stopPropagation();
+    const next = shiftBy(ids, id, e.key === "ArrowLeft" ? -1 : 1);
+    if (sameOrder(next, ids)) return;
+    reorder(next);
+    setRefocus(id);
+  };
   if (!editing && data.gallery.length === 0) return null;
-  const shown = all ? data.gallery : data.gallery.slice(0, 8);
+  // While the section is open every photo is shown, so any can be dragged anywhere.
+  const shown = all || sec.open ? list : list.slice(0, 8);
+  const profile = list.find((g) => g.profile);
   const add = () =>
     runEdit(async () => {
       const paths = await pickFiles("Dodaj zdjęcia", [{ name: "Zdjęcia", extensions: ["jpg", "jpeg", "png", "webp", "tif", "tiff", "bmp", "gif"] }]);
@@ -832,11 +875,26 @@ export function GallerySection({ data }: Props) {
       await call("media.add", { paths, person: data.person.id, kind: "photo", profile: data.gallery.length === 0 });
       afterChange();
     });
-  const setProfile = (id: string) =>
-    runEdit(async () => {
-      await call("media.setProfile", { id, person: data.person.id });
+  const setProfile = (id: string, persons: string[]) =>
+    edit(async () => {
+      await call("media.setProfile", { id, persons });
       afterChange();
     });
+  const unsetProfile = (g: GalleryItem, persons: string[]) =>
+    edit(async () => {
+      await call("media.unsetProfile", { id: g.id, persons });
+      afterChange();
+      const names = persons.map((id) => g.people.find((p) => p.id === id)?.name).filter(Boolean);
+      useStore.getState().notify(`Zdjęcie nie jest już profilowe${names.length ? `: ${names.join(", ")}` : ""}.`, {
+        action: { label: "Cofnij", run: () => void useStore.getState().undo().catch((e: ApiError) => useStore.getState().notify(e.message, { kind: "err" })) },
+      });
+    });
+  const star = (g: GalleryItem) => (
+    <ProfileStar people={g.people} profileOf={g.profileOf} current={data.person.id} editable={canEdit} onSet={(persons) => setProfile(g.id, persons)} onUnset={(persons) => unsetProfile(g, persons)} />
+  );
+  const open = (g: GalleryItem) => {
+    if (!consumeClick()) setViewing(list.indexOf(g));
+  };
   const unlink = (id: string) =>
     setAsk({
       title: "Odłączyć zdjęcie od tej osoby?",
@@ -855,6 +913,7 @@ export function GallerySection({ data }: Props) {
         },
       ],
     });
+  const dragged = drag ? list.find((g) => g.id === drag.id) : undefined;
   return (
     <section id="sec-gallery" className={sectionClass(sec)} style={{ gap: 14 }}>
       <SectionHead
@@ -862,42 +921,68 @@ export function GallerySection({ data }: Props) {
         count={data.gallery.length}
         edit={sec}
         right={
-          data.gallery.length > 8 && (
+          data.gallery.length > 8 &&
+          !sec.open && (
             <button className="link" style={{ fontSize: 13 }} onClick={() => setAll((a) => !a)}>
               {all ? "Pokaż mniej" : `Pokaż wszystkie (${data.gallery.length})`}
             </button>
           )
         }
       />
-      <div className="gallery-grid">
-        {shown.map((g) => (
-          <div key={g.id} className="gallery-item">
-            <button style={{ position: "relative", display: "block", width: "100%" }} onClick={() => setViewing(data.gallery.indexOf(g))} title="Otwórz podgląd">
-              <Thumb path={g.path} size={512} icon={<ImageIcon size={18} />} style={{ aspectRatio: "4 / 3", width: "100%" }} />
-              {g.profile && (
-                <span className="star-badge" title="Zdjęcie profilowe">
-                  <Star size={11} fill="currentColor" />
+      {reorderable && <div className="gallery-hint">Przeciągnij zdjęcia, aby zmienić kolejność</div>}
+      <div className={`gallery-grid${drag ? " dragging" : ""}`}>
+        {profile && (
+          <div className="gallery-item gallery-spot">
+            <div className="gallery-thumb has-profile-star">
+              <button className="gallery-open" onClick={() => open(profile)} title="Otwórz podgląd">
+                <Thumb path={profile.path} size={1024} icon={<ImageIcon size={18} />} style={{ width: "100%", height: "100%" }} />
+              </button>
+              <span className="gallery-spot-label">Profilowe</span>
+              {star(profile)}
+            </div>
+            <span className="ellipsis" style={{ fontSize: 13 }}>
+              {profile.caption || "bez podpisu"}
+            </span>
+          </div>
+        )}
+        {shown.map((g) => {
+          const side = drag?.target === g.id ? (drag.after ? " drop-after" : " drop-before") : "";
+          return (
+            <div
+              key={g.id}
+              data-gallery-id={g.id}
+              className={`gallery-item${reorderable ? " reorderable" : ""}${drag?.id === g.id ? " lifted" : ""}${side}`}
+              onPointerDown={(e) => onPointerDown(e, g.id)}
+              onDragStart={(e) => e.preventDefault()}
+              onKeyDown={(e) => moveByKey(e, g.id)}
+            >
+              <div className="gallery-thumb has-profile-star">
+                <button className="gallery-open" onClick={() => open(g)} title={reorderable ? "Otwórz podgląd · przeciągnij, aby przesunąć (Alt ← →)" : "Otwórz podgląd"}>
+                  <Thumb path={g.path} size={512} icon={<ImageIcon size={18} />} style={{ aspectRatio: "4 / 3", width: "100%" }} />
+                </button>
+                {star(g)}
+              </div>
+              <span className="ellipsis" style={{ fontSize: 13 }}>
+                {g.caption || "bez podpisu"}
+              </span>
+              {g.date && <span className={g.uncertain ? "uncertain" : undefined} style={{ fontSize: 12, color: "var(--text3)", alignSelf: "flex-start" }}>{g.date}</span>}
+              {g.people.length > 1 && (
+                <span className="gallery-people">
+                  {g.people.map((p) => (
+                    <ProfileTag key={p.id} name={p.name} profile={g.profileOf.includes(p.id)} compact />
+                  ))}
                 </span>
               )}
-            </button>
-            <span className="ellipsis" style={{ fontSize: 13 }}>
-              {g.caption || "bez podpisu"}
-            </span>
-            {g.date && <span className={g.uncertain ? "uncertain" : undefined} style={{ fontSize: 12, color: "var(--text3)", alignSelf: "flex-start" }}>{g.date}</span>}
-            {sec.open && (
-              <span className="row" style={{ gap: 4 }}>
-                {!g.profile && (
-                  <button className="btn ghost xs" onClick={() => setProfile(g.id)}>
-                    <Star size={12} /> profilowe
+              {sec.open && (
+                <span className="row gallery-actions" style={{ gap: 4 }}>
+                  <button className="btn ghost xs" onClick={() => unlink(g.id)}>
+                    <X size={12} /> odłącz
                   </button>
-                )}
-                <button className="btn ghost xs" onClick={() => unlink(g.id)}>
-                  <X size={12} /> odłącz
-                </button>
-              </span>
-            )}
-          </div>
-        ))}
+                </span>
+              )}
+            </div>
+          );
+        })}
         {editing && (sec.open || data.gallery.length === 0) && (
           <button className="gallery-add" onClick={() => sec.start(add)}>
             <Plus size={18} />
@@ -905,9 +990,10 @@ export function GallerySection({ data }: Props) {
           </button>
         )}
       </div>
+      {drag && dragged && createPortal(<div className="gallery-ghost" style={{ left: drag.x, top: drag.y }}><Thumb path={dragged.path} size={256} icon={<ImageIcon size={18} />} style={{ width: "100%", height: "100%" }} /></div>, document.body)}
       <Foot edit={sec} />
       {viewing != null && (
-        <Lightbox items={data.gallery.map((g) => ({ id: g.id, path: g.path, title: g.caption, date: g.date }))} index={viewing} onClose={() => setViewing(null)} title={data.person.name} />
+        <Lightbox items={list.map((g) => ({ id: g.id, path: g.path, title: g.caption, date: g.date }))} index={viewing} onClose={() => setViewing(null)} title={data.person.name} />
       )}
     </section>
   );

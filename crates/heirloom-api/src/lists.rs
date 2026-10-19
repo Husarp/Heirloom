@@ -462,7 +462,7 @@ pub fn missing_files(d: &Derived, roots: &FileRoots) -> Vec<String> {
         .collect()
 }
 
-fn media_people(d: &Derived) -> HashMap<&str, Vec<usize>> {
+pub(crate) fn media_people(d: &Derived) -> HashMap<&str, Vec<usize>> {
     let mut map: HashMap<&str, Vec<usize>> = HashMap::new();
     for (i, p) in d.view.people.iter().enumerate() {
         for link in &p.media {

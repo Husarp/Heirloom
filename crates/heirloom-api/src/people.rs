@@ -616,21 +616,40 @@ pub fn profile(d: &Derived, id: &str, history: &[heirloom_core::history::Entry])
     let notes = section(TextKind::Note, &mut sources);
     let person_cites = sources.cite(&details.citations);
 
-    // Gallery and documents.
+    // Gallery and documents. The gallery keeps the order of the person's `OBJE` links (they can be dragged into
+    // another order); `people` is everyone on the photo (this person first), `profileOf` whose profile photo it is.
+    let people_of = if details.media.is_empty() { HashMap::new() } else { crate::lists::media_people(d) };
+    let on_photo = |object: &str| -> Vec<usize> {
+        let mut who: Vec<usize> = Vec::new();
+        for &p in people_of.get(object).map(Vec::as_slice).unwrap_or_default() {
+            if !who.contains(&p) {
+                who.push(p);
+            }
+        }
+        // Stable, so the others keep their order.
+        who.sort_by_key(|&p| p != i);
+        who
+    };
     let mut gallery = Vec::new();
     let mut documents = Vec::new();
     for link in &details.media {
         let Some(object) = d.view.media.get(&link.object) else { continue };
         let date = object.date_text.as_deref().and_then(heirloom_core::gedcom::date::parse);
         match object.kind {
-            MediaKind::Photo => gallery.push(json!({
-                "id": object.id,
-                "path": object.file,
-                "caption": link.title.clone().or_else(|| object.title.clone()),
-                "date": date.map(|dv| polish::format_date_short(&dv)).or_else(|| object.date_text.clone()),
-                "uncertain": date.is_some_and(|dv| polish::is_uncertain(&dv)),
-                "profile": info.photo.as_ref().is_some_and(|(id, _)| *id == object.id),
-            })),
+            MediaKind::Photo => {
+                let who = on_photo(&object.id);
+                let profile_of: Vec<&str> = who.iter().filter(|&&p| d.info[p].photo.as_ref().is_some_and(|(id, _)| *id == object.id)).map(|&p| d.xref(p)).collect();
+                gallery.push(json!({
+                    "id": object.id,
+                    "path": object.file,
+                    "caption": link.title.clone().or_else(|| object.title.clone()),
+                    "date": date.map(|dv| polish::format_date_short(&dv)).or_else(|| object.date_text.clone()),
+                    "uncertain": date.is_some_and(|dv| polish::is_uncertain(&dv)),
+                    "profile": info.photo.as_ref().is_some_and(|(id, _)| *id == object.id),
+                    "people": who.iter().map(|&p| json!({ "id": d.xref(p), "name": d.info[p].name })).collect::<Vec<_>>(),
+                    "profileOf": profile_of,
+                }));
+            }
             _ => {
                 let mut tags = Vec::new();
                 if object.transcription.is_some() {

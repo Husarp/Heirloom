@@ -28,6 +28,8 @@ pub fn call(s: &mut Session, method: &str, args: &Value) -> ApiResult {
         "media.link" => link(s, args),
         "media.unlink" => unlink(s, args),
         "media.setProfile" => set_profile(s, args),
+        "media.unsetProfile" => unset_profile(s, args),
+        "media.reorder" => reorder(s, args),
         "media.relink" => relink(s, args),
         "media.delete" => delete(s, args),
         "source.save" => save_source(s, args),
@@ -352,23 +354,117 @@ fn unlink(s: &mut Session, args: &Value) -> ApiResult {
     Ok(Value::Null)
 }
 
+/// The people a command is about: `persons` (several), or the single `person`.
+fn persons_arg(args: &Value) -> Result<Vec<String>, ApiError> {
+    let mut persons: Vec<String> = match args.get("persons").and_then(Value::as_array) {
+        Some(list) => list.iter().filter_map(Value::as_str).map(str::to_string).collect(),
+        None => vec![req(args, "person")?],
+    };
+    if persons.is_empty() {
+        return Err(ApiError::bad_args("persons"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    persons.retain(|p| seen.insert(p.clone()));
+    Ok(persons)
+}
+
+/// The photo becomes the profile photo of each person (one per person: the old one is taken off).
 fn set_profile(s: &mut Session, args: &Value) -> ApiResult {
     let id = req(args, "id")?;
-    let person = req(args, "person")?;
+    let persons = persons_arg(args)?;
     let mut changes = Changes::new(&s.archive.doc);
-    add_link(&mut changes, &person, &id, true)?;
-    if let Some(crop) = args.get("crop").and_then(Value::as_object) {
-        let indi = changes.get(&person)?;
-        if let Some(link) = indi.children.iter_mut().find(|c| c.tag == "OBJE" && c.pointer() == Some(id.as_str())) {
-            link.children.retain(|c| c.tag != "CROP");
-            let mut node = Node::new("CROP");
-            for key in ["TOP", "LEFT", "HEIGHT", "WIDTH"] {
-                if let Some(v) = crop.get(&key.to_ascii_lowercase()).and_then(Value::as_u64) {
-                    node.children.push(Node::with_value(key, &v.to_string()));
+    for person in &persons {
+        add_link(&mut changes, person, &id, true)?;
+        if let Some(crop) = args.get("crop").and_then(Value::as_object) {
+            let indi = changes.get(person)?;
+            if let Some(link) = indi.children.iter_mut().find(|c| c.tag == "OBJE" && c.pointer() == Some(id.as_str())) {
+                link.children.retain(|c| c.tag != "CROP");
+                let mut node = Node::new("CROP");
+                for key in ["TOP", "LEFT", "HEIGHT", "WIDTH"] {
+                    if let Some(v) = crop.get(&key.to_ascii_lowercase()).and_then(Value::as_u64) {
+                        node.children.push(Node::with_value(key, &v.to_string()));
+                    }
                 }
+                link.children.push(node);
             }
-            link.children.push(node);
         }
+    }
+    let edits = changes.into_edits();
+    commit(s, edits)?;
+    Ok(Value::Null)
+}
+
+/// The photo stops being the profile photo of each person: `_HLM_PROFILE N` on their link, so the first photo does
+/// not step in; they have none until another is chosen.
+fn unset_profile(s: &mut Session, args: &Value) -> ApiResult {
+    let id = req(args, "id")?;
+    let persons = persons_arg(args)?;
+    let mut changes = Changes::new(&s.archive.doc);
+    for person in &persons {
+        let indi = changes.get(person)?;
+        let link = indi
+            .children
+            .iter_mut()
+            .find(|c| c.tag == "OBJE" && c.pointer() == Some(id.as_str()))
+            .ok_or_else(|| ApiError::new("not_found", "To zdjęcie nie jest już na profilu tej osoby. Odśwież profil."))?;
+        mark_profile(link, "N");
+    }
+    let edits = changes.into_edits();
+    commit(s, edits)?;
+    Ok(Value::Null)
+}
+
+/// Replaces the profile marker of a photo link (`Y` or `N`; any `_PRIM` from another program goes).
+fn mark_profile(link: &mut Node, value: &str) {
+    link.children.retain(|c| c.tag != "_HLM_PROFILE" && c.tag != "_PRIM");
+    link.children.push(Node::with_value("_HLM_PROFILE", value));
+}
+
+/// „Własna kolejność”: puts the person's photos in the given order. The photo links change places only among the
+/// places photo links have now — documents and every other line of the person stay where they are. Photos missing
+/// from `order` follow, in their old order. The profile photo does not change: a person who has none marked gets
+/// the first photo (the one standing in for it) marked first.
+fn reorder(s: &mut Session, args: &Value) -> ApiResult {
+    let person = req(args, "person")?;
+    let order: Vec<String> = args.get("order").and_then(Value::as_array).ok_or_else(|| ApiError::bad_args("order"))?.iter().filter_map(Value::as_str).map(str::to_string).collect();
+    // The person's links as the profile reads them (same order as the `OBJE` lines): which are photos, which are marked.
+    let d = s.derived();
+    let i = d.index(&person).ok_or_else(|| crate::people::not_found(&person))?;
+    let links: Vec<(String, bool, bool)> = d.view.people[i]
+        .media
+        .iter()
+        .map(|l| (l.object.clone(), d.view.media.get(&l.object).is_some_and(|m| m.kind == heirloom_core::gedcom::view::MediaKind::Photo), l.profile || l.profile_off))
+        .collect();
+    let mut changes = Changes::new(&s.archive.doc);
+    let indi = changes.get(&person)?;
+    let lines: Vec<usize> = indi.children.iter().enumerate().filter(|(_, c)| c.tag == "OBJE").map(|(n, _)| n).collect();
+    if lines.len() != links.len() {
+        return Err(ApiError::new("stale", "Zdjęcia tej osoby zmieniły się. Odśwież profil."));
+    }
+    // The lines photos stand on. Each id in `order` takes the first photo line with that id not taken yet (a photo
+    // linked twice keeps both lines); the lines left follow in their old order.
+    let photos: Vec<usize> = (0..links.len()).filter(|&n| links[n].1).collect();
+    if let Some(unknown) = order.iter().find(|id| !photos.iter().any(|&n| links[n].0 == **id)) {
+        return Err(ApiError::new("not_found", format!("Zdjęcie {unknown} nie jest na profilu tej osoby. Odśwież profil.")));
+    }
+    let mut taken = vec![false; photos.len()];
+    let mut sequence: Vec<usize> = Vec::new();
+    for id in &order {
+        if let Some(k) = (0..photos.len()).find(|&k| !taken[k] && links[photos[k]].0 == *id) {
+            taken[k] = true;
+            sequence.push(k);
+        }
+    }
+    sequence.extend((0..photos.len()).filter(|&k| !taken[k]));
+    if sequence.iter().enumerate().all(|(at, &k)| at == k) {
+        return Ok(Value::Null);
+    }
+    if !photos.iter().any(|&n| links[n].2) {
+        mark_profile(&mut indi.children[lines[photos[0]]], "Y");
+    }
+    let before: Vec<Node> = photos.iter().map(|&n| indi.children[lines[n]].clone()).collect();
+    for (slot, &k) in photos.iter().zip(&sequence) {
+        indi.children[lines[*slot]] = before[k].clone();
     }
     let edits = changes.into_edits();
     commit(s, edits)?;
@@ -717,5 +813,115 @@ mod tests {
         assert!(cites(doc.record("@I2@").unwrap(), "@S1@"), "the wife's own citation stays");
         assert!(doc.record("@S1@").is_some(), "the source stays in the archive");
         assert_eq!(s.archive.undo_depth(), 1, "one undo step");
+    }
+
+    /// Two people, three photos (P1 is on both), one document in the middle of Anna's links. Nobody has a marker.
+    fn gallery_session(dir: &Path) -> Session {
+        let root = dir.join("a");
+        std::fs::create_dir_all(&root).unwrap();
+        let text = "0 HEAD\n1 SOUR HEIRLOOM\n1 GEDC\n2 VERS 7.0\n\
+0 @I1@ INDI\n1 NAME Anna /Nowak/\n1 OBJE @O1@\n1 OBJE @D1@\n1 OBJE @O2@\n1 NOTE Zostaje\n1 OBJE @O3@\n\
+0 @I2@ INDI\n1 NAME Jan /Nowak/\n1 OBJE @O2@\n1 OBJE @O3@\n\
+0 @O1@ OBJE\n1 FILE media/p1.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n\
+0 @O2@ OBJE\n1 FILE media/p2.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n\
+0 @O3@ OBJE\n1 FILE media/p3.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n\
+0 @D1@ OBJE\n1 FILE media/akt.pdf\n2 FORM application/pdf\n3 MEDI MANUSCRIPT\n0 TRLR\n";
+        std::fs::write(root.join("rodzina.ged"), text).unwrap();
+        Session::new(Archive::open(&root).unwrap())
+    }
+
+    fn links_of(s: &Session, person: &str) -> Vec<String> {
+        s.archive.doc.record(person).unwrap().children.iter().map(|c| format!("{} {}", c.tag, c.value.clone().unwrap_or_default())).collect()
+    }
+
+    fn profile_of(s: &mut Session, person: &str) -> Option<String> {
+        let d = s.derived();
+        d.info[d.index(person).unwrap()].photo.as_ref().map(|p| p.0.clone())
+    }
+
+    #[test]
+    fn reorder_moves_photos_only_and_keeps_the_profile_photo() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = gallery_session(dir.path());
+        assert_eq!(profile_of(&mut s, "@I1@").as_deref(), Some("@O1@"), "the first photo stands in");
+        crate::edit::call(&mut s, "media.reorder", &json!({ "person": "@I1@", "order": ["@O3@", "@O1@", "@O2@"] })).unwrap();
+        // Documents and other lines stay where they were; only the photo places are permuted.
+        assert_eq!(links_of(&s, "@I1@"), ["NAME Anna /Nowak/", "OBJE @O3@", "OBJE @D1@", "OBJE @O1@", "NOTE Zostaje", "OBJE @O2@", "CHAN "]);
+        assert_eq!(profile_of(&mut s, "@I1@").as_deref(), Some("@O1@"), "reordering does not change the profile photo");
+        assert_eq!(s.archive.doc.record("@I1@").unwrap().children.iter().filter(|c| c.tag == "OBJE").filter_map(|c| c.child_value("_HLM_PROFILE")).collect::<Vec<_>>(), ["Y"]);
+        assert_eq!(s.archive.undo_depth(), 1, "one edit");
+        // The gallery shows the new order.
+        let gallery: Vec<String> = crate::people::profile(s.derived(), "@I1@", &[]).unwrap()["gallery"].as_array().unwrap().iter().map(|g| g["id"].as_str().unwrap().to_string()).collect();
+        assert_eq!(gallery, ["@O3@", "@O1@", "@O2@"]);
+        // Photos missing from the list follow in their old order; the other person is untouched.
+        crate::edit::call(&mut s, "media.reorder", &json!({ "person": "@I1@", "order": ["@O2@"] })).unwrap();
+        let gallery: Vec<String> = crate::people::profile(s.derived(), "@I1@", &[]).unwrap()["gallery"].as_array().unwrap().iter().map(|g| g["id"].as_str().unwrap().to_string()).collect();
+        assert_eq!(gallery, ["@O2@", "@O3@", "@O1@"]);
+        assert_eq!(links_of(&s, "@I2@"), ["NAME Jan /Nowak/", "OBJE @O2@", "OBJE @O3@"]);
+        // Nothing to change, nothing recorded; a photo that is not hers (or a document) is refused.
+        let depth = s.archive.undo_depth();
+        crate::edit::call(&mut s, "media.reorder", &json!({ "person": "@I1@", "order": ["@O2@", "@O3@", "@O1@"] })).unwrap();
+        assert_eq!(s.archive.undo_depth(), depth);
+        assert!(crate::edit::call(&mut s, "media.reorder", &json!({ "person": "@I2@", "order": ["@O1@"] })).is_err());
+        assert!(crate::edit::call(&mut s, "media.reorder", &json!({ "person": "@I1@", "order": ["@D1@"] })).is_err());
+    }
+
+    #[test]
+    fn reorder_never_loses_a_photo_linked_twice() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("a");
+        std::fs::create_dir_all(&root).unwrap();
+        let text = "0 HEAD\n1 SOUR HEIRLOOM\n1 GEDC\n2 VERS 7.0\n0 @I1@ INDI\n1 NAME Anna /Nowak/\n1 OBJE @O1@\n1 OBJE @O1@\n1 OBJE @O2@\n\
+0 @O1@ OBJE\n1 FILE media/p1.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n0 @O2@ OBJE\n1 FILE media/p2.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n0 TRLR\n";
+        std::fs::write(root.join("rodzina.ged"), text).unwrap();
+        let mut s = Session::new(Archive::open(&root).unwrap());
+        crate::edit::call(&mut s, "media.reorder", &json!({ "person": "@I1@", "order": ["@O2@"] })).unwrap();
+        let objects: Vec<_> = s.archive.doc.record("@I1@").unwrap().children.iter().filter(|c| c.tag == "OBJE").filter_map(|c| c.pointer()).collect();
+        assert_eq!(objects, ["@O2@", "@O1@", "@O1@"]);
+    }
+
+    #[test]
+    fn unsetting_the_profile_photo_leaves_the_person_without_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = gallery_session(dir.path());
+        crate::edit::call(&mut s, "media.setProfile", &json!({ "id": "@O2@", "person": "@I1@" })).unwrap();
+        assert_eq!(profile_of(&mut s, "@I1@").as_deref(), Some("@O2@"));
+        crate::edit::call(&mut s, "media.unsetProfile", &json!({ "id": "@O2@", "persons": ["@I1@"] })).unwrap();
+        assert_eq!(profile_of(&mut s, "@I1@"), None, "the first photo does not step in");
+        let profile = crate::people::profile(s.derived(), "@I1@", &[]).unwrap();
+        assert!(profile["gallery"].as_array().unwrap().iter().all(|g| g["profile"] == false && !g["profileOf"].as_array().unwrap().contains(&json!("@I1@"))));
+        // The other person was not touched, and the `N` survives saving and opening the archive again.
+        assert_eq!(profile_of(&mut s, "@I2@").as_deref(), Some("@O2@"));
+        s.archive.save(&heirloom_core::SaveOptions { author: "test", batch: None, note: None, allow_foreign: false, kind: None }).unwrap();
+        let mut again = Session::new(Archive::open(&dir.path().join("a")).unwrap());
+        let marks: Vec<_> = again.archive.doc.record("@I1@").unwrap().children.iter().filter(|c| c.tag == "OBJE").filter_map(|c| c.child_value("_HLM_PROFILE").map(str::to_string)).collect();
+        assert_eq!(marks, ["N"]);
+        assert_eq!(profile_of(&mut again, "@I1@"), None);
+        // Choosing a photo again clears the `N`.
+        crate::edit::call(&mut again, "media.setProfile", &json!({ "id": "@O3@", "person": "@I1@" })).unwrap();
+        let marks: Vec<_> = again.archive.doc.record("@I1@").unwrap().children.iter().filter(|c| c.tag == "OBJE").filter_map(|c| c.child_value("_HLM_PROFILE").map(str::to_string)).collect();
+        assert_eq!(marks, ["Y"]);
+        assert_eq!(profile_of(&mut again, "@I1@").as_deref(), Some("@O3@"));
+        // A photo that is not on the person's profile is an error.
+        assert!(crate::edit::call(&mut again, "media.unsetProfile", &json!({ "id": "@O1@", "persons": ["@I2@"] })).is_err());
+    }
+
+    #[test]
+    fn a_photo_can_be_the_profile_photo_of_several_people_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = gallery_session(dir.path());
+        crate::edit::call(&mut s, "media.setProfile", &json!({ "id": "@O1@", "person": "@I1@" })).unwrap();
+        crate::edit::call(&mut s, "media.setProfile", &json!({ "id": "@O3@", "persons": ["@I1@", "@I2@"] })).unwrap();
+        assert_eq!((profile_of(&mut s, "@I1@").as_deref(), profile_of(&mut s, "@I2@").as_deref()), (Some("@O3@"), Some("@O3@")));
+        let marks = |s: &Session, p: &str| -> Vec<String> { s.archive.doc.record(p).unwrap().children.iter().filter(|c| c.tag == "OBJE").map(|c| c.child_value("_HLM_PROFILE").unwrap_or("-").to_string()).collect() };
+        assert_eq!(marks(&s, "@I1@"), ["-", "-", "-", "Y"], "one profile photo per person: the old marker is gone");
+        // The gallery lists everyone on the photo (this person first) and whose profile photo it is.
+        let gallery = crate::people::profile(s.derived(), "@I2@", &[]).unwrap()["gallery"].clone();
+        let shared = gallery.as_array().unwrap().iter().find(|g| g["id"] == "@O3@").unwrap();
+        assert_eq!(shared["people"], json!([{ "id": "@I2@", "name": "Jan Nowak" }, { "id": "@I1@", "name": "Anna Nowak" }]));
+        assert_eq!(shared["profileOf"], json!(["@I2@", "@I1@"]));
+        // Taking it off one of them leaves the other.
+        crate::edit::call(&mut s, "media.unsetProfile", &json!({ "id": "@O3@", "persons": ["@I2@"] })).unwrap();
+        assert_eq!((profile_of(&mut s, "@I1@").as_deref(), profile_of(&mut s, "@I2@")), (Some("@O3@"), None));
     }
 }

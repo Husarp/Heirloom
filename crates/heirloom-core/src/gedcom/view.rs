@@ -151,7 +151,11 @@ pub struct Crop {
 pub struct MediaLink {
     /// The media record, or `<person xref>#<n>` for a 5.5.1 object written inside the person.
     pub object: String,
+    /// The person's profile photo: `_HLM_PROFILE Y`, or `_PRIM Y` from another program.
     pub profile: bool,
+    /// `_HLM_PROFILE N`: this photo was explicitly taken off as the profile photo (the first photo then no longer
+    /// stands in for it). `_PRIM N` from other programs is not read.
+    pub profile_off: bool,
     pub crop: Option<Crop>,
     pub title: Option<String>,
 }
@@ -486,10 +490,13 @@ fn person_details(record: &Node, version: Version, this_year: i32) -> PersonDeta
                     Some(p) => p.to_string(),
                     None => format!("{}#{n}", record.xref.as_deref().unwrap_or_default()),
                 };
+                let marker = child.child_value("_HLM_PROFILE").map(str::trim);
+                let profile_off = marker == Some("N");
                 details.media.push(MediaLink {
                     object,
-                    profile: child.child_value("_HLM_PROFILE").map(str::trim) == Some("Y")
-                        || child.child_value("_PRIM").map(str::trim) == Some("Y"),
+                    // An explicit `N` wins over a `_PRIM Y` another program left on the same link.
+                    profile: marker == Some("Y") || (!profile_off && child.child_value("_PRIM").map(str::trim) == Some("Y")),
+                    profile_off,
                     crop: child.child("CROP").map(|c| Crop {
                         top: c.child_value("TOP").and_then(|v| v.trim().parse().ok()).unwrap_or(0),
                         left: c.child_value("LEFT").and_then(|v| v.trim().parse().ok()).unwrap_or(0),
@@ -782,5 +789,15 @@ mod tests {
         assert_eq!(d.media[0].object, "@I1@#0");
         let object = &v.media["@I1@#0"];
         assert_eq!((object.file.as_deref(), object.title.as_deref()), (Some("C:\\Zdjęcia\\jan.jpg"), Some("Jan")));
+    }
+
+    #[test]
+    fn profile_markers_on_photo_links() {
+        let file = "0 HEAD\n1 GEDC\n2 VERS 7.0\n0 @I1@ INDI\n1 NAME Jan /Nowak/\n1 OBJE @O1@\n2 _HLM_PROFILE N\n1 OBJE @O2@\n2 _PRIM N\n1 OBJE @O3@\n2 _PRIM Y\n2 _HLM_PROFILE N\n1 OBJE @O4@\n2 _PRIM Y\n0 TRLR\n";
+        let v = build(&Document::from_bytes(file.as_bytes()).0);
+        let (_, d) = v.person("@I1@").unwrap();
+        let flags: Vec<_> = d.media.iter().map(|m| (m.profile, m.profile_off)).collect();
+        // `N` is read from _HLM_PROFILE only, and beats a `_PRIM Y` left on the same link.
+        assert_eq!(flags, [(false, true), (false, false), (false, true), (true, false)]);
     }
 }

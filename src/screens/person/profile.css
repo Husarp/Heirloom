@@ -320,23 +320,102 @@
   gap: 14px;
 }
 .gallery-item {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
 }
-.star-badge {
+.gallery-thumb {
+  position: relative;
+}
+.gallery-open {
+  display: block;
+  width: 100%;
+}
+.gallery-hint {
+  margin-top: -6px;
+  font-size: 13px;
+  color: var(--text3);
+}
+/* The profile photo in its own, larger spot at the start (it still shows among the others too). */
+.gallery-spot {
+  grid-column: span 2;
+  grid-row: span 2;
+}
+.gallery-spot .gallery-thumb {
+  flex: 1 1 auto;
+  aspect-ratio: 4 / 3;
+}
+.gallery-spot .gallery-open {
   position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
+  inset: 0;
+  height: 100%;
+}
+.gallery-spot-label {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 1;
+  padding: 2px 8px;
+  border-radius: 4px;
   background: var(--accent);
   color: var(--accent-ink);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+}
+.gallery-people {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+.gallery-people .profile-tag {
+  flex: 0 1 auto;
+}
+/* Dragging a photo into a new place: the tile lifts, a bar shows where it lands. */
+.gallery-item.reorderable {
+  cursor: grab;
+  user-select: none;
+}
+.gallery-grid.dragging,
+.gallery-grid.dragging * {
+  cursor: grabbing;
+  user-select: none;
+}
+.gallery-item.lifted {
+  opacity: 0.4;
+}
+.gallery-item.drop-before::before,
+.gallery-item.drop-after::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  z-index: 3;
+}
+.gallery-item.drop-before::before {
+  left: -9px;
+}
+.gallery-item.drop-after::after {
+  right: -9px;
+}
+.gallery-ghost {
+  position: fixed;
+  z-index: 200;
+  width: 140px;
+  height: 105px;
+  margin: -52px 0 0 -70px;
+  opacity: 0.85;
+  border-radius: var(--r-ctl);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  pointer-events: none;
 }
 .gallery-add {
   aspect-ratio: 4 / 3;

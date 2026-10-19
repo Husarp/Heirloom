@@ -5,6 +5,7 @@ import type { PersonSummary } from "../../api/types";
 import { afterChange, useStore } from "../../app/store";
 import { Avatar, Lifespan, Segmented, useDismiss } from "../../components/bits";
 import { Dialog } from "../../components/Dialog";
+import { PROFILE_TAG_TITLE } from "../../components/ProfileStar";
 import { count } from "../../lib/format";
 import { pickFiles } from "../../lib/native";
 import {
@@ -295,24 +296,24 @@ function PersonChip({ item, person, editing, canBeProfile }: { item: MediaItem; 
       ],
     });
   return (
-    <span className={`media-person${editing ? " editing" : ""}`}>
+    <span className={`media-person${profile ? " profile-on" : ""}${editing ? " editing" : ""}`} title={profile ? PROFILE_TAG_TITLE : undefined}>
       {editing && canBeProfile ? (
         <button
           className="tool"
           onClick={setProfile}
           disabled={profile}
-          title={profile ? `Zdjęcie profilowe: ${person.name}` : `Ustaw jako zdjęcie profilowe: ${person.name}`}
+          title={profile ? PROFILE_TAG_TITLE : `Ustaw jako zdjęcie profilowe: ${person.name}`}
         >
           <Star size={13} fill={profile ? "currentColor" : "none"} />
         </button>
       ) : (
         profile && (
-          <span title="Zdjęcie profilowe" style={{ display: "inline-flex", marginRight: 2 }}>
+          <span style={{ display: "inline-flex", marginRight: 2 }}>
             <Star size={12} fill="currentColor" />
           </span>
         )
       )}
-      <button className="name" onClick={() => go({ name: "person", id: person.id })} title="Otwórz profil">
+      <button className="name" onClick={() => go({ name: "person", id: person.id })} title={profile ? `${PROFILE_TAG_TITLE} · otwórz profil` : "Otwórz profil"}>
         {person.name}
       </button>
       {editing && (
