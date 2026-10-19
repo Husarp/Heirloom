@@ -3,7 +3,7 @@
 Format: `X.Y.Z — YYYY-MM-DD HH:MM: description`. Newest on top.
 X = major change, Y = feature / bigger change, Z = small change.
 
-## 0.8.0 — unreleased: Fixes from the second test — tree, profile, gallery, import, archive list, AI instructions
+## 0.8.0 — 2026-10-19 14:20: Fixes from the second test — tree, profile, gallery, import, archive list, AI instructions
 - **Tree.**
   - **Rodzina: the descendants arrow unfolds in place.** The „+N” under a child draws that child's descendants
     below it and the person in the centre stays. With more than 2 generations below, a question offers „Wszystkich
@@ -24,7 +24,8 @@ X = major change, Y = feature / bigger change, Z = small change.
   - The contents list has icons for Dane osobowe, Rodzina, Życiorys and Galeria.
 - **Gallery and profile photos.**
   - Photos can be dragged into your own order (kept in the archive, used wherever the person's photos show).
-  - The profile photo has its own spot at the top of the gallery and still shows among the others.
+  - The profile photo has its own spot at the top of the gallery and still shows among the others. The spot is
+    always there, also with one photo or none yet (then it says how to choose one).
   - A star in each photo's corner makes it the profile photo; on a photo of several people a short list asks for whom
     („Dalej” / „Wszystkim”). Clicking it again asks whose profile photo it stops being. One profile photo per person.
     People tags show whose profile photo it is (green border and a star). The same star is in Import step 4.

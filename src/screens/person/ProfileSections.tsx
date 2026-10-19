@@ -869,7 +869,7 @@ export function GallerySection({ data }: Props) {
   const shown = all || sec.open ? list : list.slice(0, 8);
   // The profile photo's own, larger spot only when there is something else to show beside it: a gallery of one would
   // show the same photo twice.
-  const profile = list.length >= 2 ? list.find((g) => g.profile) : undefined;
+  const profile = list.find((g) => g.profile);
   const add = () =>
     runEdit(async () => {
       const paths = await pickFiles("Dodaj zdjęcia", [{ name: "Zdjęcia", extensions: ["jpg", "jpeg", "png", "webp", "tif", "tiff", "bmp", "gif"] }]);
@@ -933,6 +933,16 @@ export function GallerySection({ data }: Props) {
       />
       {reorderable && <div className="gallery-hint">Przeciągnij zdjęcia, aby zmienić kolejność</div>}
       <div className={`gallery-grid${drag ? " dragging" : ""}`}>
+        {!profile && (
+          <div className="gallery-item gallery-spot">
+            <div className="gallery-thumb gallery-spot-empty">
+              <span className="gallery-spot-label">Profilowe</span>
+            </div>
+            <span style={{ fontSize: 13, color: "var(--text3)" }}>
+              {list.length ? "Kliknij ☆ na zdjęciu, aby je ustawić" : "Brak zdjęcia profilowego"}
+            </span>
+          </div>
+        )}
         {profile && (
           <div className="gallery-item gallery-spot">
             <div className="gallery-thumb has-profile-star">

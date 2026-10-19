@@ -1038,3 +1038,8 @@
     font-size: 12px;
   }
 }
+/* No profile photo yet: the spot stays, so it's clear where the profile photo goes. */
+.gallery-spot-empty {
+  border: 2px dashed var(--border);
+  background: transparent;
+}
