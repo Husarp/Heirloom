@@ -8,6 +8,7 @@ import { scanSoon } from "../../app/layout";
 import { useStore } from "../../app/store";
 import { useApi } from "../../app/useApi";
 import { Checkbox, Spinner } from "../../components/bits";
+import { nameChoices } from "../../lib/editorNames";
 import { count, people as peopleCount, plural } from "../../lib/format";
 import type { Graph } from "../tree/graph";
 import { Footer } from "./ImportWizard";
@@ -40,6 +41,7 @@ export function StepSummary({ state, act, goStep }: { state: ImportState; act: A
   const [seen, setSeen] = useState<Set<string>>(new Set());
   const [author, setAuthor] = useState(editor ?? app?.lastEditor ?? archive?.editors[0]?.name ?? "");
   const [note, setNote] = useState("");
+  const picks = nameChoices(archive?.editors.map((e) => e.name) ?? [], app?.editorNames ?? [], author, 6);
   const [saving, setSaving] = useState(false);
 
   // Rows worth a second look: people the check warned about, and suggestions that were only probable.
@@ -285,13 +287,17 @@ export function StepSummary({ state, act, goStep }: { state: ImportState; act: A
           <div className="card" style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
             <label className="field">
               <span className="field-label">Kto importuje</span>
-              <input className="input sm" style={{ height: 36 }} list="imp-editors" value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="Imię" />
-              <datalist id="imp-editors">
-                {archive?.editors.map((e) => (
-                  <option key={e.name} value={e.name} />
-                ))}
-              </datalist>
+              <input className="input sm" style={{ height: 36 }} value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="Imię" />
             </label>
+            {picks.length > 0 && (
+              <div className="row" style={{ gap: 6, flexWrap: "wrap", marginTop: -6 }}>
+                {picks.map((n) => (
+                  <button key={n} type="button" className="chip" onClick={() => setAuthor(n)}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+            )}
             <label className="field">
               <span className="field-label">Notatka do historii zmian</span>
               <textarea className="input" style={{ height: 60, fontSize: 13 }} value={note} onChange={(e) => setNote(e.target.value)} placeholder="np. akty z Łęcznej, od cioci Heleny" />

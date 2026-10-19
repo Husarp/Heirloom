@@ -423,7 +423,7 @@ impl Api {
                 let allow_foreign = args.get("allowForeign").and_then(Value::as_bool).unwrap_or(false);
                 let progress = self.progress.clone();
                 let result = overlay::writeback::write_back(self.session()?, &author, allow_foreign, &progress)?;
-                self.update_config(|c| c.last_editor = Some(author));
+                self.update_config(|c| c.set_editor(author));
                 Ok(json!({ "result": result, "status": self.archive_status()? }))
             }
             "archive.undoWriteBack" => {
@@ -448,7 +448,7 @@ impl Api {
             "archive.setEditor" => {
                 // Remembered for "Kto edytuje?" next time; the name is added to the archive's list on the first save.
                 let name = str_arg(&args, "name")?;
-                self.update_config(|c| c.last_editor = Some(name));
+                self.update_config(|c| c.set_editor(name));
                 Ok(Value::Null)
             }
             "people.list" => Ok(people::list(self.view()?)),
@@ -637,7 +637,7 @@ impl Api {
             let record = s.overlay.is_none().then(|| (data_key(&s.archive.data_path()), s.archive.fingerprint_hex()));
             result["report"] = layout::run_scan(s);
             self.update_config(|c| {
-                c.last_editor = Some(author);
+                c.set_editor(author);
                 if let Some((u, hash)) = record.and_then(|(key, hash)| c.archives.get_mut(&key).filter(|u| u.mode == IN_PLACE).map(|u| (u, hash))) {
                     u.hash = Some(hash);
                 }
@@ -717,6 +717,7 @@ impl Api {
             "recent": self.config.recent,
             "appearance": self.config.appearance,
             "lastEditor": self.config.last_editor,
+            "editorNames": self.config.editor_names,
             "updates": self.config.updates,
             "archive": archive,
             // Where the open archive (or set) was left on this computer.
@@ -1247,7 +1248,7 @@ impl Api {
         // The data file's hash on this computer (A.2), for finding the archive again by its content.
         let record = s.overlay.is_none().then(|| (data_key(&s.archive.data_path()), s.archive.fingerprint_hex()));
         self.update_config(|c| {
-            c.last_editor = Some(author);
+            c.set_editor(author);
             if let Some(r) = record.and_then(|(key, hash)| c.archives.get_mut(&key).filter(|u| u.mode == IN_PLACE).map(|u| (u, hash))) {
                 r.0.hash = Some(r.1);
             }

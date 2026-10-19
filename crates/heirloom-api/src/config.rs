@@ -13,6 +13,8 @@ const RECENT_LIMIT: usize = 12;
 const PLACES_LIMIT: usize = 20;
 /// „Ostatnio oglądane” on Start.
 const VIEWED_LIMIT: usize = 8;
+/// Names kept for „Kto edytuje?” / „Kto importuje”.
+const EDITOR_NAMES_LIMIT: usize = 12;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -21,6 +23,8 @@ pub struct AppConfig {
     pub appearance: Appearance,
     /// The name last chosen in "Kto edytuje?", offered first next time.
     pub last_editor: Option<String>,
+    /// Every name used in „Kto edytuje?” on this computer, most recent first, unique, at most 12.
+    pub editor_names: Vec<String>,
     /// Where each archive was left, by archive id. Kept on this computer, never in the archive folder: on a shared
     /// server, one person's last screen must not move another's.
     pub places: BTreeMap<String, Place>,
@@ -32,6 +36,20 @@ pub struct AppConfig {
     pub changes_folder: Option<String>,
     /// Where the automatic backups (.zip) go; none: `<Dokumenty>\Heirloom\Kopie zapasowe`.
     pub backup_folder: Option<String>,
+}
+
+impl AppConfig {
+    /// Sets [`last_editor`](Self::last_editor) and moves the name to the front of [`editor_names`](Self::editor_names).
+    pub fn set_editor(&mut self, name: String) {
+        let name = name.trim().to_string();
+        if !name.is_empty() {
+            let key = name.to_lowercase();
+            self.editor_names.retain(|n| n.trim().to_lowercase() != key);
+            self.editor_names.insert(0, name.clone());
+            self.editor_names.truncate(EDITOR_NAMES_LIMIT);
+        }
+        self.last_editor = Some(name);
+    }
 }
 
 pub const IN_PLACE: &str = "inPlace";
@@ -223,6 +241,23 @@ fn same_path(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editor_names_are_recent_first_unique_and_limited() {
+        let mut config = AppConfig::default();
+        config.set_editor("Ewa".into());
+        config.set_editor(" Adam ".into());
+        config.set_editor("ewa".into());
+        assert_eq!(config.editor_names, ["ewa", "Adam"]);
+        assert_eq!(config.last_editor.as_deref(), Some("ewa"));
+        for i in 0..20 {
+            config.set_editor(format!("Osoba {i}"));
+        }
+        assert_eq!(config.editor_names.len(), 12);
+        assert_eq!(config.editor_names[0], "Osoba 19");
+        let old: AppConfig = serde_json::from_str(r#"{"lastEditor":"X"}"#).unwrap();
+        assert!(old.editor_names.is_empty());
+    }
 
     #[test]
     fn recent_list_moves_reopened_archives_to_the_top() {

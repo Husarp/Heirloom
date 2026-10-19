@@ -4,6 +4,7 @@ import { call } from "../api/transport";
 import type { ArchiveStatus } from "../api/types";
 import { useStore } from "../app/store";
 import { Dialog } from "../components/Dialog";
+import { computerOnlyNames } from "../lib/editorNames";
 import { count, displayPath, shortWhen } from "../lib/format";
 import { pickFolder } from "../lib/native";
 import { BackupBlock, useBackupBlock } from "./BackupBlock";
@@ -13,6 +14,7 @@ import { useWizard } from "../screens/import/types";
 export function WhoEditsDialog() {
   const archive = useStore((s) => s.archive);
   const lastEditor = useStore((s) => s.app?.lastEditor ?? null);
+  const computerNames = useStore((s) => s.app?.editorNames);
   const startEditing = useStore((s) => s.startEditing);
   const cancel = useStore((s) => s.cancelWhoEdits);
   const editors = archive?.editors ?? [];
@@ -21,6 +23,8 @@ export function WhoEditsDialog() {
   );
   const [adding, setAdding] = useState(editors.length === 0);
   const [newName, setNewName] = useState("");
+
+  const otherNames = computerOnlyNames(editors.map((e) => e.name), computerNames ?? []);
 
   const name = adding ? newName.trim() : chosen;
 
@@ -70,15 +74,29 @@ export function WhoEditsDialog() {
           );
         })}
         {adding ? (
-          <input
-            className="input"
-            autoFocus
-            placeholder="Imię, np. Ewa albo Ciocia Helena"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && newName.trim() && startEditing(newName.trim())}
-            style={{ marginTop: 4 }}
-          />
+          <>
+            <input
+              className="input"
+              autoFocus
+              placeholder="Imię, np. Ewa albo Ciocia Helena"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && newName.trim() && startEditing(newName.trim())}
+              style={{ marginTop: 4 }}
+            />
+            {otherNames.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                <span style={{ fontSize: 12, color: "var(--text3)" }}>Imiona używane na tym komputerze:</span>
+                <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                  {otherNames.map((n) => (
+                    <button key={n} type="button" className="chip" onClick={() => setNewName(n)}>
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         ) : (
           <button
             className="row"

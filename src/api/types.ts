@@ -249,6 +249,8 @@ export interface AppState {
   recent: RecentArchive[];
   appearance: Appearance;
   lastEditor: string | null;
+  /** Names used for „Kto edytuje?” on this computer, most recent first. */
+  editorNames: string[];
   /** „Sprawdzaj aktualizacje” (this computer's setting). */
   updates: { check: boolean };
   archive: ArchiveStatus | null;
