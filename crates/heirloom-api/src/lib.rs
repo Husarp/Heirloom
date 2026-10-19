@@ -529,8 +529,14 @@ impl Api {
                 let up = args.get("up").and_then(Value::as_u64).unwrap_or(2) as usize;
                 let down = args.get("down").and_then(Value::as_u64).unwrap_or(2) as usize;
                 let expand: Vec<String> = args.get("expand").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(|x| self.canonical(x.to_string())).collect()).unwrap_or_default();
+                // Rodzina's „+N” pill: [{id, depth}] unfolds that person's descendants `depth` generations down (null: all).
+                let unfold: Vec<tree::Unfold> = args
+                    .get("unfold")
+                    .and_then(Value::as_array)
+                    .map(|a| a.iter().filter_map(|u| Some((self.canonical(u.get("id")?.as_str()?.to_string()), u.get("depth").and_then(Value::as_u64).map(|n| n as usize)))).collect())
+                    .unwrap_or_default();
                 // Przodkowie asks for the whole line (spec §4.2), so `up` may go further than `down`.
-                tree::graph(self.view()?, &id, up.min(64), down.min(12), &expand)
+                tree::graph(self.view()?, &id, up.min(64), down.min(12), &expand, &unfold)
             }
             "tree.overview" => {
                 let focus = opt_str(&args, "focus").map(|f| self.canonical(f));
@@ -1587,6 +1593,28 @@ mod tests {
         let _held = std::fs::OpenOptions::new().read(true).share_mode(0).open(folder.join(".heirloom").join("historia.jsonl")).unwrap();
         let saved = api.call("archive.save", json!({ "author": "Ewa" })).unwrap();
         assert!(saved["history"].is_null() && saved["historyError"].is_string(), "{saved}");
+    }
+
+    /// `tree.graph` takes `unfold: [{id, depth}]` (null depth: all) and says what it unfolded.
+    #[test]
+    fn tree_graph_unfolds_a_child_by_the_args() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut api = Api::new(None, None);
+        api.call("archive.create", json!({ "folder": dir.path().join("a").to_str().unwrap(), "name": "A" })).unwrap();
+        let a = api.call("person.create", json!({ "given": "A" })).unwrap()["id"].as_str().unwrap().to_string();
+        let mut line = vec![a.clone()];
+        for given in ["B", "C", "D"] {
+            let of = line.last().unwrap().clone();
+            line.push(api.call("person.create", json!({ "given": given, "relation": { "kind": "child", "of": of } })).unwrap()["id"].as_str().unwrap().to_string());
+        }
+        let (b, d) = (line[1].clone(), line[3].clone());
+        let plain = api.call("tree.graph", json!({ "id": a, "up": 1, "down": 1 })).unwrap();
+        assert_eq!(plain["unfold"], json!([]));
+        let unfolded = api.call("tree.graph", json!({ "id": a, "up": 1, "down": 1, "unfold": [{ "id": b, "depth": null }, { "id": 7 }] })).unwrap();
+        assert_eq!(unfolded["unfold"], json!([{ "id": b, "depth": null }]));
+        assert!(unfolded["people"].get(&d).is_some() && plain["people"].get(&d).is_none(), "the grandchild's child comes with the unfold");
+        let two = api.call("tree.graph", json!({ "id": a, "up": 1, "down": 1, "unfold": [{ "id": b, "depth": 1 }] })).unwrap();
+        assert!(two["people"].get(&line[2]).is_some() && two["people"].get(&d).is_none());
     }
 
     #[test]

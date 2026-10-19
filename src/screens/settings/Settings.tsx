@@ -241,6 +241,18 @@ function TreeSection({ archive }: { archive: ArchiveStatus }) {
           ]}
         />
       </SettingRow>
+      <SettingRow label="Rozwijanie potomków (widok Rodzina)" note="Co robi „+N” pod dzieckiem, gdy jego linia ma więcej niż 2 pokolenia">
+        <Segmented
+          size={28}
+          value={(display.familyUnfold as string) ?? "ask"}
+          onChange={(v) => setDisplay("familyUnfold", v)}
+          options={[
+            { value: "ask", label: "Pytaj" },
+            { value: "all", label: "Wszyscy" },
+            { value: "two", label: "2 pokolenia" },
+          ]}
+        />
+      </SettingRow>
       {/* Manual order (dragging siblings in the tree) isn't built yet: siblings follow their birth dates. */}
       <SettingRow label="Kolejność rodzeństwa" soon>
         <Segmented

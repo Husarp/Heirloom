@@ -122,6 +122,7 @@ function graphOf(rows: [string, string, string | null, string | null, number][],
   };
   for (const p of Object.values(people)) {
     p.descendants = count(p.id, (q) => q.children);
+    p.descendantsNear = new Set(p.children.flatMap((k) => [k, ...people[k].children])).size;
     p.ancestors = count(p.id, (q) => q.parents);
   }
   return { focus, up: 64, down: 0, people, unions: [...unions.values()].map((u) => ({ ...u, allChildren: u.children.length })) };
@@ -135,6 +136,26 @@ function noOverlaps(scene: ReturnType<typeof layoutFamily>) {
       const apart = a.x + (a.w ?? CARD_W) <= b.x || b.x + (b.w ?? CARD_W) <= a.x || a.y + CARD_H <= b.y || b.y + CARD_H <= a.y;
       expect(apart, `${a.id} and ${b.id} overlap`).toBe(true);
     }
+}
+
+// Straight lines as segments; a vertical crossing a horizontal anywhere but at an end of either is a crossing.
+function crossings(scene: ReturnType<typeof layoutFamily>): string[] {
+  type Seg = { key: string; x1: number; y1: number; x2: number; y2: number };
+  const segs: Seg[] = [];
+  for (const l of scene.links) {
+    let x = 0;
+    let y = 0;
+    for (const [, op, a, b] of l.d.matchAll(/([MVH])(-?[\d.]+)(?: (-?[\d.]+))?/g)) {
+      if (op === "M") [x, y] = [+a, +b];
+      else if (op === "V") (segs.push({ key: l.key, x1: x, y1: Math.min(y, +a), x2: x, y2: Math.max(y, +a) }), (y = +a));
+      else (segs.push({ key: l.key, x1: Math.min(x, +a), y1: y, x2: Math.max(x, +a), y2: y }), (x = +a));
+    }
+  }
+  const out: string[] = [];
+  for (const v of segs.filter((s) => s.x1 === s.x2))
+    for (const h of segs.filter((s) => s.y1 === s.y2 && s.x1 !== s.x2))
+      if (v.x1 > h.x1 && v.x1 < h.x2 && h.y1 > v.y1 && h.y1 < v.y2) out.push(`${v.key} × ${h.key}`);
+  return out;
 }
 
 describe("Przodkowie", () => {
@@ -287,26 +308,6 @@ describe("Potomkowie", () => {
     for (const scene of scenes) for (const l of scene.links) expect(l.d, l.key).not.toMatch(/NaN|Infinity/);
   });
 
-  // Straight lines as segments; a vertical crossing a horizontal anywhere but at an end of either is a crossing.
-  function crossings(scene: ReturnType<typeof layoutFamily>): string[] {
-    type Seg = { key: string; x1: number; y1: number; x2: number; y2: number };
-    const segs: Seg[] = [];
-    for (const l of scene.links) {
-      let x = 0;
-      let y = 0;
-      for (const [, op, a, b] of l.d.matchAll(/([MVH])(-?[\d.]+)(?: (-?[\d.]+))?/g)) {
-        if (op === "M") [x, y] = [+a, +b];
-        else if (op === "V") (segs.push({ key: l.key, x1: x, y1: Math.min(y, +a), x2: x, y2: Math.max(y, +a) }), (y = +a));
-        else (segs.push({ key: l.key, x1: Math.min(x, +a), y1: y, x2: Math.max(x, +a), y2: y }), (x = +a));
-      }
-    }
-    const out: string[] = [];
-    for (const v of segs.filter((s) => s.x1 === s.x2))
-      for (const h of segs.filter((s) => s.y1 === s.y2 && s.x1 !== s.x2))
-        if (v.x1 > h.x1 && v.x1 < h.x2 && h.y1 > v.y1 && h.y1 < v.y2) out.push(`${v.key} × ${h.key}`);
-    return out;
-  }
-
   it("keeps two marriages' lines apart: no child's line crosses the other marriage's bar", () => {
     // E ∞ R (first, right) → r1; E ∞ L (second, left) → l1…l4; E alone → k1, k2. L's children reach right past the
     // markers, so a bar above them must not be crossed by the later drops.
@@ -392,5 +393,117 @@ describe("Potomkowie", () => {
     expect(scene.cards.some((c) => c.partner)).toBe(false);
     expect(card(scene, "root").sub).toBe("∞ wife");
     expect(scene.unions).toEqual([]);
+  });
+});
+
+describe("Rodzina: a child's descendants unfold in place", () => {
+  // c ∞ w → k1, k2, k3; k1 ∞ kw → g1 ∞ gw, g2; g1 → gg1 → ggg1 → gggg1; k2 → h1 (k2 has no partner).
+  const rows: [string, string, string | null, string | null, number][] = [
+    ["c", "M", null, null, 1900],
+    ["w", "F", null, null, 1902],
+    ["kw", "F", null, null, 1926],
+    ["gw", "F", null, null, 1951],
+    ["k1", "M", "c", "w", 1925],
+    ["k2", "F", "c", "w", 1927],
+    ["k3", "M", "c", "w", 1930],
+    ["g1", "M", "k1", "kw", 1950],
+    ["g2", "F", "k1", "kw", 1952],
+    ["gg1", "M", "g1", "gw", 1975],
+    ["ggg1", "M", "gg1", null, 2000],
+    ["gggg1", "M", "ggg1", null, 2025],
+    ["h1", "F", null, "k2", 1955],
+  ];
+  const graph = graphOf(rows, "c", [["c", "w"], ["g1", "gw"]]);
+  const folded = layoutFamily(graph, "c", { editing: false });
+  const open = (entries: [string, number | null][], extra: { rounded?: boolean } = {}) => layoutFamily(graph, "c", { editing: false, unfolded: new Map(entries), ...extra });
+  const ids = (scene: ReturnType<typeof layoutFamily>) => scene.cards.map((c) => c.id);
+
+  it("shows „+N” pills that unfold under the children, and none on a child without descendants", () => {
+    expect(folded.pills.map((p) => [p.target, p.label, p.unfold, p.fold])).toEqual([
+      ["k1", "+5", true, undefined],
+      ["k2", "+1", true, undefined],
+    ]);
+    expect(folded.pills.every((p) => p.direction === "down")).toBe(true);
+  });
+
+  it("draws all of the descendants below the child, the centre and its row staying where they were", () => {
+    const scene = open([["k1", null]]);
+    for (const id of ["g1", "g2", "gg1", "ggg1", "gggg1"]) expect(ids(scene), id).toContain(id);
+    expect(ids(scene)).not.toContain("h1");
+    expect(new Set(ids(scene)).size).toBe(scene.cards.length);
+    expect(card(scene, "c")).toMatchObject({ x: 0, y: 0, focus: true });
+    for (const id of ["c", "w"]) expect(card(scene, id)).toMatchObject({ x: card(folded, id).x, y: card(folded, id).y });
+    // Top-down, one generation to a row, the way Potomkowie draws it.
+    const pitch = card(scene, "g1").y - card(scene, "k1").y;
+    expect(pitch).toBe(180);
+    expect(card(scene, "gg1").y - card(scene, "g1").y).toBe(pitch);
+    expect(card(scene, "gggg1").y - card(scene, "k1").y).toBe(4 * pitch);
+    // The spouse is the sub-line; the child's own card keeps its line.
+    expect(card(scene, "g1").sub).toBe("∞ gw");
+    expect(card(scene, "k1").sub).toBe(card(folded, "k1").sub);
+    // Their edit tools show only when chosen.
+    expect(card(scene, "g1")).toMatchObject({ deep: true, rel: { of: "k1", kind: "child" } });
+    expect(card(scene, "k1").deep).toBeUndefined();
+    noOverlaps(scene);
+    expect(crossings(scene)).toEqual([]);
+  });
+
+  it("stops at the depth asked for, with „+N” on the last ones", () => {
+    const scene = open([["k1", 2]]);
+    for (const id of ["g1", "g2", "gg1"]) expect(ids(scene), id).toContain(id);
+    expect(ids(scene)).not.toContain("ggg1");
+    const more = scene.pills.find((p) => p.target === "gg1")!;
+    expect(more).toMatchObject({ label: "+2", unfold: true, direction: "down" });
+    expect(more.fold).toBeUndefined();
+    // Nothing is drawn below one generation either.
+    expect(ids(open([["k1", 1]]))).not.toContain("gg1");
+  });
+
+  it("turns the unfolded child's pill into a „Zwiń” that folds it", () => {
+    const scene = open([["k1", 2]]);
+    expect(scene.pills.find((p) => p.target === "k1")).toMatchObject({ label: "Zwiń", fold: true, unfold: true, direction: "up" });
+    expect(scene.pills.find((p) => p.target === "k2")!.fold).toBeUndefined();
+    expect(scene.pills.filter((p) => p.target === "k1")).toHaveLength(1);
+  });
+
+  it("goes on from a pill inside the branch the same way, and folds that one too", () => {
+    const scene = open([["k1", 2], ["gg1", null]]);
+    for (const id of ["ggg1", "gggg1"]) expect(ids(scene), id).toContain(id);
+    expect(scene.pills.find((p) => p.target === "gg1")).toMatchObject({ label: "Zwiń", fold: true });
+    // The deepest ones have nothing below, so nothing to unfold.
+    expect(scene.pills.map((p) => p.target).sort()).toEqual(["gg1", "k1", "k2"]);
+    noOverlaps(scene);
+  });
+
+  it("makes room: the children spread so no subtree touches the next child's", () => {
+    const scene = open([["k1", null], ["k2", null]]);
+    const reach = (ofIds: string[]) => Math.max(...ofIds.map((id) => card(scene, id).x + CARD_W));
+    expect(card(scene, "k2").x).toBeGreaterThan(card(folded, "k2").x);
+    expect(card(scene, "k2").x).toBeGreaterThanOrEqual(reach(["k1", "g1", "g2", "gg1", "ggg1", "gggg1"]) + 24);
+    expect(card(scene, "k3").x).toBeGreaterThanOrEqual(reach(["k2", "h1"]) + 24);
+    // The children still hang from the marker of c ∞ w.
+    const marker = scene.unions[0];
+    expect(marker.x).toBeGreaterThan(card(scene, "k1").x);
+    expect(marker.x).toBeLessThan(card(scene, "k3").x + CARD_W);
+    noOverlaps(scene);
+    expect(crossings(scene)).toEqual([]);
+  });
+
+  it("keeps the line from each child to its own children, straight or rounded", () => {
+    for (const rounded of [false, true]) {
+      const scene = open([["k1", null], ["k2", null]], { rounded });
+      for (const l of scene.links) expect(l.d, l.key).not.toMatch(/NaN|Infinity/);
+      expect(scene.links.some((l) => l.key.startsWith("d-k1"))).toBe(true);
+      expect(scene.links.some((l) => l.key.startsWith("d-g1"))).toBe(true);
+    }
+  });
+
+  it("ignores a child with nothing below and an unfold that the graph in hand doesn't have people for yet", () => {
+    expect(open([["k3", null]]).cards).toEqual(folded.cards);
+    const bare: Graph = { ...graph, unions: graph.unions.filter((u) => !u.partners.includes("k1")) };
+    const scene = layoutFamily(bare, "c", { editing: false, unfolded: new Map([["k1", null]]) });
+    expect(ids(scene)).not.toContain("g1");
+    expect(scene.pills.find((p) => p.target === "k1")).toMatchObject({ label: "+5" });
+    expect(scene.pills.find((p) => p.target === "k1")!.fold).toBeUndefined();
   });
 });

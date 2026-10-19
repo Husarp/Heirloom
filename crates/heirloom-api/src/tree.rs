@@ -22,6 +22,27 @@ fn descendant_count(d: &Derived, i: usize) -> usize {
     seen.len()
 }
 
+/// Generations below a person that „Kolejne 2 pokolenia” (Rodzina's unfold question) adds (graph.ts `UNFOLD_NEAR`).
+pub const UNFOLD_NEAR: usize = 2;
+
+/// Their children and grandchildren: the descendants within `UNFOLD_NEAR` generations.
+fn descendant_count_near(d: &Derived, i: usize) -> usize {
+    let mut seen = HashSet::new();
+    let mut level: Vec<usize> = vec![i];
+    for _ in 0..UNFOLD_NEAR {
+        let mut next = Vec::new();
+        for &p in &level {
+            for &c in &d.info[p].children {
+                if c != i && seen.insert(c) {
+                    next.push(c);
+                }
+            }
+        }
+        level = next;
+    }
+    seen.len()
+}
+
 fn ancestor_count(d: &Derived, i: usize) -> usize {
     let mut seen = HashSet::new();
     let mut queue: VecDeque<usize> = d.info[i].parents.iter().copied().collect();
@@ -67,9 +88,13 @@ fn union_json(d: &Derived, fam: &str, included: &HashSet<usize>) -> Option<Value
 /// Generations one click on „+N potomków” unfolds below that person (layout.ts `UNFOLD`).
 pub const UNFOLD: usize = 3;
 
+/// Rodzina's unfolded child: the person and how many generations below them to show (`None`: all of them).
+pub type Unfold = (String, Option<usize>);
+
 /// People around `id`: ancestors `up` generations, descendants `down` generations (UNFOLD more below each person in
-/// `expand`), the siblings, and every partner of the people shown with their parents' count.
-pub fn graph(d: &Derived, id: &str, up: usize, down: usize, expand: &[String]) -> Result<Value, ApiError> {
+/// `expand`; the people in `unfold` get their own depth below them, Rodzina's „+N” pill), the siblings, and every
+/// partner of the people shown with their parents' count.
+pub fn graph(d: &Derived, id: &str, up: usize, down: usize, expand: &[String], unfold: &[Unfold]) -> Result<Value, ApiError> {
     let focus = d.index(id).ok_or_else(|| not_found(id))?;
     let mut included: HashSet<usize> = HashSet::from([focus]);
     // Ancestors, by generation.
@@ -89,23 +114,34 @@ pub fn graph(d: &Derived, id: &str, up: usize, down: usize, expand: &[String]) -
     // Each person carries how many more generations below them to show; an expanded person („+12 potomków”
     // clicked) gets UNFOLD more.
     let expanded: HashSet<usize> = expand.iter().filter_map(|x| d.index(x)).collect();
-    let mut queue: VecDeque<(usize, usize)> = VecDeque::from([(focus, down)]);
+    // Rodzina: a child's descendants down to the asked depth; a person shown already (a child, or one an earlier
+    // unfold brought in) is the start, anyone else is ignored.
+    let mut pending: Vec<(usize, usize)> = unfold.iter().filter_map(|(x, depth)| Some((d.index(x)?, depth.unwrap_or(usize::MAX)))).collect();
     let mut best: HashMap<usize, usize> = HashMap::new();
-    while let Some((p, budget)) = queue.pop_front() {
-        let budget = if expanded.contains(&p) { budget.max(UNFOLD) } else { budget };
-        if best.get(&p).is_some_and(|&b| b >= budget) {
-            continue;
-        }
-        best.insert(p, budget);
-        for &partner in &d.info[p].partners {
-            included.insert(partner);
-        }
-        if budget > 0 {
-            for &c in &d.info[p].children {
-                included.insert(c);
-                queue.push_back((c, budget - 1));
+    let mut walk = |start: usize, from: usize, included: &mut HashSet<usize>| {
+        let mut queue: VecDeque<(usize, usize)> = VecDeque::from([(start, from)]);
+        while let Some((p, budget)) = queue.pop_front() {
+            let budget = if expanded.contains(&p) { budget.max(UNFOLD) } else { budget };
+            if best.get(&p).is_some_and(|&b| b >= budget) {
+                continue;
+            }
+            best.insert(p, budget);
+            for &partner in &d.info[p].partners {
+                included.insert(partner);
+            }
+            if budget > 0 {
+                for &c in &d.info[p].children {
+                    included.insert(c);
+                    queue.push_back((c, budget - 1));
+                }
             }
         }
+    };
+    walk(focus, down, &mut included);
+    // An unfold inside another's branch waits until that one has brought its person in.
+    while let Some(k) = pending.iter().position(|(p, _)| included.contains(p)) {
+        let (p, depth) = pending.swap_remove(k);
+        walk(p, depth, &mut included);
     }
     // Siblings and the partners' parents (Rodzina).
     for s in kin::siblings(d, focus) {
@@ -125,6 +161,7 @@ pub fn graph(d: &Derived, id: &str, up: usize, down: usize, expand: &[String]) -
         v["children"] = json!(d.info[i].children.iter().map(|&c| d.xref(c)).collect::<Vec<_>>());
         v["partners"] = json!(d.info[i].partners.iter().map(|&c| d.xref(c)).collect::<Vec<_>>());
         v["descendants"] = json!(descendant_count(d, i));
+        v["descendantsNear"] = json!(descendant_count_near(d, i));
         v["ancestors"] = json!(ancestor_count(d, i));
         v["hasParents"] = json!(!d.info[i].parents.is_empty());
         let p = &d.view.model.persons[i];
@@ -136,7 +173,8 @@ pub fn graph(d: &Derived, id: &str, up: usize, down: usize, expand: &[String]) -
         people.insert(d.xref(i).to_string(), v);
     }
     let unions: Vec<Value> = families.iter().filter_map(|f| union_json(d, f, &included)).collect();
-    Ok(json!({ "focus": id, "up": up, "down": down, "expand": expand, "people": people, "unions": unions }))
+    let unfolded: Vec<Value> = unfold.iter().map(|(x, depth)| json!({ "id": x, "depth": depth })).collect();
+    Ok(json!({ "focus": id, "up": up, "down": down, "expand": expand, "unfold": unfolded, "people": people, "unions": unions }))
 }
 
 /// [father, mother] as indices, either missing: the first man and the first woman among the parents, a parent of
@@ -288,7 +326,7 @@ mod tests {
         let bytes = doc.to_bytes();
         let d = crate::derive::build(&Document::from_bytes(&bytes).0);
         let someone = (0..d.info.len()).find(|&i| !d.info[i].parents.is_empty() && !d.info[i].children.is_empty()).unwrap();
-        let g = graph(&d, d.xref(someone), 2, 2, &[]).unwrap();
+        let g = graph(&d, d.xref(someone), 2, 2, &[], &[]).unwrap();
         let people = g["people"].as_object().unwrap();
         assert!(people.contains_key(d.xref(someone)));
         for &p in &d.info[someone].parents {
@@ -312,9 +350,9 @@ mod tests {
         };
         let grandchild = d.info[root].children.iter().flat_map(|&c| d.info[c].children.clone()).max_by_key(|&g| descendant_count(&d, g)).unwrap();
         assert!(descendant_count(&d, grandchild) > 0);
-        let plain = graph(&d, d.xref(root), 0, 2, &[]).unwrap();
+        let plain = graph(&d, d.xref(root), 0, 2, &[], &[]).unwrap();
         assert_eq!(generations(&plain, grandchild), 0);
-        let unfolded = graph(&d, d.xref(root), 0, 2, &[d.xref(grandchild).to_string()]).unwrap();
+        let unfolded = graph(&d, d.xref(root), 0, 2, &[d.xref(grandchild).to_string()], &[]).unwrap();
         let below = generations(&unfolded, grandchild);
         assert!((1..=UNFOLD).contains(&below), "{below} generations below");
         assert_eq!(unfolded["expand"][0], d.xref(grandchild));
@@ -335,5 +373,84 @@ mod tests {
             let key = (p[1].as_f64().unwrap() as i64, p[2].as_f64().unwrap() as i64);
             assert!(cells.insert(key), "overlap at {key:?}");
         }
+    }
+
+    /// Rodzina: a child's „+N” unfolds their descendants to the asked depth, no deeper, and every person says how many
+    /// descendants are within two generations (the question „wszystkich czy 2 pokolenia” is needed when there are more).
+    #[test]
+    fn unfold_a_child_to_a_depth_or_all_and_the_near_counts() {
+        let options = heirloom_gen::Options { people: 600, media: 0, seed: 5, name: "T".into() };
+        let (doc, _) = heirloom_gen::generate(&options);
+        let d = crate::derive::build(&Document::from_bytes(&doc.to_bytes()).0);
+        // A centre with a child whose line goes at least four generations below them.
+        let depth_below = |i: usize| -> usize {
+            let (mut level, mut frontier) = (0, vec![i]);
+            loop {
+                frontier = frontier.iter().flat_map(|&p| d.info[p].children.clone()).collect();
+                if frontier.is_empty() {
+                    return level;
+                }
+                level += 1;
+            }
+        };
+        let child = (0..d.info.len()).filter(|&i| !d.info[i].parents.is_empty()).max_by_key(|&i| (depth_below(i), descendant_count(&d, i))).unwrap();
+        assert!(depth_below(child) >= 3, "the generated family is deep enough: {}", depth_below(child));
+        let centre = d.info[child].parents[0];
+        let (child_id, centre_id) = (d.xref(child).to_string(), d.xref(centre).to_string());
+        let shown = |g: &Value| -> usize {
+            // How many generations below `child` the graph holds (following only people in it).
+            let people = g["people"].as_object().unwrap();
+            let (mut level, mut frontier) = (0, vec![child]);
+            loop {
+                frontier = frontier.iter().flat_map(|&p| d.info[p].children.clone()).filter(|&c| people.contains_key(d.xref(c))).collect();
+                if frontier.is_empty() {
+                    return level;
+                }
+                level += 1;
+            }
+        };
+        let plain = graph(&d, &centre_id, 1, 1, &[], &[]).unwrap();
+        assert_eq!(shown(&plain), 0, "Rodzina shows the children only");
+        let two = graph(&d, &centre_id, 1, 1, &[], &[(child_id.clone(), Some(2))]).unwrap();
+        assert_eq!(shown(&two), 2);
+        assert_eq!(two["unfold"][0], json!({ "id": child_id, "depth": 2 }));
+        let all = graph(&d, &centre_id, 1, 1, &[], &[(child_id.clone(), None)]).unwrap();
+        assert_eq!(shown(&all), depth_below(child));
+        assert!(all["unfold"][0]["depth"].is_null());
+        // The same people as walking the whole line.
+        let everyone = descendant_count(&d, child);
+        let from_child = all["people"].as_object().unwrap().keys().filter(|k| *k != &child_id).filter(|k| {
+            let mut up = vec![d.index(k).unwrap()];
+            let mut seen = HashSet::new();
+            while let Some(p) = up.pop() {
+                if p == child {
+                    return true;
+                }
+                if seen.insert(p) {
+                    up.extend(d.info[p].parents.iter().copied());
+                }
+            }
+            false
+        });
+        assert_eq!(from_child.count(), everyone);
+        // A second unfold inside the first one's branch, listed before it, still comes (the nested one goes deeper).
+        let grandchild = *d.info[child].children.iter().max_by_key(|&&g| depth_below(g)).unwrap();
+        assert!(depth_below(grandchild) >= 2);
+        let nested = graph(&d, &centre_id, 1, 1, &[], &[(d.xref(grandchild).to_string(), None), (child_id.clone(), Some(1))]).unwrap();
+        assert_eq!(shown(&nested), 1 + depth_below(grandchild));
+        // Someone outside the picture is ignored.
+        let stray = (0..d.info.len()).find(|&i| i != centre && !all["people"].as_object().unwrap().contains_key(d.xref(i)) && !d.info[i].children.is_empty()).unwrap();
+        let ignored = graph(&d, &centre_id, 1, 1, &[], &[(d.xref(stray).to_string(), Some(2))]).unwrap();
+        assert_eq!(ignored["people"].as_object().unwrap().len(), plain["people"].as_object().unwrap().len());
+
+        // descendantsNear: children and grandchildren, not further; descendants stays the whole line.
+        for (i, p) in all["people"].as_object().unwrap() {
+            let at = d.index(i).unwrap();
+            let kids: HashSet<usize> = d.info[at].children.iter().copied().collect();
+            let grand: HashSet<usize> = kids.iter().flat_map(|&k| d.info[k].children.iter().copied()).filter(|g| !kids.contains(g) && *g != at).collect();
+            assert_eq!(p["descendantsNear"], json!(kids.len() + grand.len()), "{i}");
+            assert!(p["descendantsNear"].as_u64() <= p["descendants"].as_u64());
+        }
+        assert!(all["people"][&child_id]["descendants"].as_u64() > all["people"][&child_id]["descendantsNear"].as_u64(), "more than two generations: the question is asked");
     }
 }

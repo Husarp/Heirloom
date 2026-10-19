@@ -63,15 +63,15 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
   onSelect: (id: string | null) => void;
   onOpen: (id: string) => void;
   onHover: (id: string | null) => void;
-  onPill: (target: string, unfold: boolean) => void;
+  onPill: (target: string, unfold: boolean, fold: boolean) => void;
   onBox: (action: string, of?: string) => void;
   onZoom: (zoom: number) => void;
   focusId: string;
   photos: boolean;
   /** Where the person starts on screen: the middle (Rodzina), the right (Przodkowie) or the top (Potomkowie). */
   anchor: "center" | "right" | "top";
-  /** In a new layout of the same centre, the card that keeps its place on screen (the one just unfolded); else the
-   *  centre person's. */
+  /** In a new layout of the same centre, the card that keeps its place on screen (the one just unfolded or folded);
+   *  else the centre person's. */
   pin?: string;
   /** A camera to come back to (Back, „Ostatnie miejsce”), used instead of the usual placement once the centre
    *  person's card is laid out; `onRestored` then says it was used. */
@@ -380,8 +380,8 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
               key={p.key}
               className={`tree-pill ${p.direction}`}
               style={{ left: p.x, top: p.y }}
-              onClick={() => onPill(p.target, !!p.unfold)}
-              title={p.unfold ? "Rozwiń kolejne 3 pokolenia tej gałęzi" : p.direction === "down" ? "Potomkowie — pokaż od tej osoby" : "Dalsi przodkowie — pokaż od tej osoby"}
+              onClick={() => onPill(p.target, !!p.unfold, !!p.fold)}
+              title={p.title ?? (p.unfold ? "Rozwiń kolejne 3 pokolenia tej gałęzi" : p.direction === "down" ? "Potomkowie — pokaż od tej osoby" : "Dalsi przodkowie — pokaż od tej osoby")}
             >
               {p.direction === "up" ? <ChevronsUp size={12} /> : p.direction === "left" ? <ChevronLeft size={12} /> : <ChevronsDown size={12} />}
               {p.label}
@@ -392,7 +392,7 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
           scene.cards.map((c) => {
             const p = graph.people[c.id];
             const of = c.rel && graph.people[c.rel.of];
-            if (!c.rel || !p || !of || c.stub || (tools === "selected" && selected !== c.id)) return null;
+            if (!c.rel || !p || !of || c.stub || ((tools === "selected" || c.deep) && selected !== c.id)) return null;
             const [parent, child] = c.rel.kind === "parent" ? [c.id, c.rel.of] : [c.rel.of, c.id];
             const union = c.rel.kind === "parent" || c.rel.kind === "child" ? graph.unions.find((u) => u.partners.includes(parent) && u.children.some((k) => k.id === child)) : undefined;
             // Under the card, or beside it at the top where the next card is too close below (Przodkowie's last column).
