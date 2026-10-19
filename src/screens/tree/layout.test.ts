@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Graph, GraphPerson } from "./graph";
-import { barLevels, CARD_W, CARD_H, layoutAncestors, layoutDescendants, layoutFamily, NARROW_W } from "./layout";
+import { barLevels, CARD_W, CARD_H, layoutAncestors, layoutDescendants, layoutFamily, NARROW_W, pathEnds, type Scene } from "./layout";
 
 // father+mother → older, me, younger (+ extra children); father+other → half; me+wife, me+second (2nd partner, left).
 function family(extra = 0): Graph {
@@ -505,5 +505,72 @@ describe("Rodzina: a child's descendants unfold in place", () => {
     expect(ids(scene)).not.toContain("g1");
     expect(scene.pills.find((p) => p.target === "k1")).toMatchObject({ label: "+5" });
     expect(scene.pills.find((p) => p.target === "k1")!.fold).toBeUndefined();
+  });
+});
+
+describe("link end points", () => {
+  it("reads the first and last point of every path shape the layouts write", () => {
+    expect(pathEnds("M10 20 H50")).toEqual([{ x: 10, y: 20 }, { x: 50, y: 20 }]);
+    expect(pathEnds("M10 20 V90")).toEqual([{ x: 10, y: 20 }, { x: 10, y: 90 }]);
+    expect(pathEnds("M0 0 V40 Q0 50 10 50 H90 Q100 50 100 60 V72")[1]).toEqual({ x: 100, y: 72 });
+    expect(pathEnds("M5 6 V7 H8 V9")[0]).toEqual({ x: 5, y: 6 });
+  });
+
+  const rows: [string, string, string | null, string | null, number][] = [
+    ["root", "M", null, null, 1800],
+    ["wife", "F", null, null, 1802],
+    ["c1", "M", "root", "wife", 1825],
+    ["c2", "F", "root", "wife", 1827],
+    ["w1", "F", null, null, 1826],
+    ["g1", "M", "c1", "w1", 1850],
+    ["g3", "M", null, "c2", 1855],
+  ];
+  const graph = graphOf(rows, "root", [["root", "wife"]]);
+  const onEdge = (scene: Scene, e: { x: number; y: number }) =>
+    scene.cards.filter((c) => {
+      const w = c.w ?? CARD_W;
+      const inX = e.x >= c.x - 0.5 && e.x <= c.x + w + 0.5;
+      const inY = e.y >= c.y - 0.5 && e.y <= c.y + CARD_H + 0.5;
+      return (inX && inY) && (Math.abs(e.x - c.x) <= 0.5 || Math.abs(e.x - c.x - w) <= 0.5 || Math.abs(e.y - c.y) <= 0.5 || Math.abs(e.y - c.y - CARD_H) <= 0.5);
+    });
+
+  const scenes: [string, Scene][] = [
+    ["Rodzina", layoutFamily(family(2), "me", { editing: true })],
+    ["Rodzina, rounded", layoutFamily(family(9), "me", { editing: true, rounded: true })],
+    ["Przodkowie", layoutAncestors(graph, "g1")],
+    ["Przodkowie, rounded", layoutAncestors(graph, "g1", true)],
+    ["Potomkowie", layoutDescendants(graph, "root", { depth: 3 })],
+    ["Potomkowie with partners, rounded", layoutDescendants(graph, "root", { depth: 3, partners: true, rounded: true })],
+  ];
+
+  for (const [name, scene] of scenes) {
+    it(`${name}: every end on a card's edge names that card, and the ends are where the path starts and stops`, () => {
+      expect(scene.links.length).toBeGreaterThan(0);
+      for (const l of scene.links) {
+        expect(l.d.startsWith(`M${l.ends[0].x} ${l.ends[0].y}`), l.key).toBe(true);
+        for (const e of l.ends) {
+          expect(Number.isFinite(e.x) && Number.isFinite(e.y), l.key).toBe(true);
+          const touching = onEdge(scene, e).map((c) => c.id);
+          if (touching.length) expect(touching, l.key).toContain(e.card);
+          else expect(e.card, l.key).toBeUndefined();
+        }
+      }
+    });
+  }
+
+  it("ends a child's line on the child's top, a partner's line on both partners' sides", () => {
+    for (const rounded of [false, true]) {
+      const scene = layoutDescendants(graph, "root", { depth: 3, partners: true, rounded });
+      const kids = scene.links.filter((l) => /^d-.*-(c1|c2|g1|g3)$/.test(l.key));
+      expect(kids.length).toBeGreaterThan(0);
+      for (const l of kids) expect(l.ends[1].card, l.key).toBe(l.key.split("-").pop());
+      const partner = scene.links.find((l) => l.key === "dp-root-wife")!;
+      expect(partner.ends.map((e) => e.card)).toEqual(["root", "wife"]);
+    }
+    const family1 = layoutFamily(family(), "me", { editing: false });
+    expect(family1.links.find((l) => l.key === "partner-wife")!.ends.map((e) => e.card)).toEqual(["me", "wife"]);
+    // A single known parent: the line leaves the parent's bottom edge.
+    const single = layoutFamily(family(), "me", { editing: false }).links.find((l) => l.key === "half-father-down");
+    expect(single?.ends[0].card).toBe("father");
   });
 });

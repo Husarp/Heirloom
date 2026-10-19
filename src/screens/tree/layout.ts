@@ -36,13 +36,26 @@ export interface SceneCard {
   deep?: boolean;
 }
 
+/** Where a line starts or stops; `card` when that point lies on the edge of that card's box (FocusCanvas continues
+ *  such a line to the card's shape when the card is drawn as a dot). */
+export interface LinkEnd {
+  x: number;
+  y: number;
+  card?: string;
+}
+
 export interface SceneLink {
   key: string;
   d: string;
   kind: LinkKind;
   /** The people a link joins; it is highlighted when all of them are on the highlighted line. */
   people: string[];
+  /** Its two end points: where `d` starts and where it stops. */
+  ends: [LinkEnd, LinkEnd];
 }
+
+/** What the layouts push; `finish` adds the ends. */
+type LinkDraft = Omit<SceneLink, "ends">;
 
 export interface SceneUnion {
   key: string;
@@ -97,7 +110,48 @@ export interface Scene {
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
-function bounds(scene: Omit<Scene, "bounds">): Scene["bounds"] {
+/** The first and last point of a path made of M, H, V, L and Q with absolute coordinates (all this file writes). */
+export function pathEnds(d: string): [{ x: number; y: number }, { x: number; y: number }] {
+  let x = 0;
+  let y = 0;
+  let first: { x: number; y: number } | null = null;
+  for (const [, cmd, args] of d.matchAll(/([MHVLQ])([^MHVLQ]*)/g)) {
+    const n = args.trim().split(/[\s,]+/).filter(Boolean).map(Number);
+    if (cmd === "H") x = n[n.length - 1];
+    else if (cmd === "V") y = n[n.length - 1];
+    else {
+      x = n[n.length - 2];
+      y = n[n.length - 1];
+    }
+    first ??= { x, y };
+  }
+  return [first ?? { x: 0, y: 0 }, { x, y }];
+}
+
+const EDGE = 0.5;
+
+/** The card whose box edge the point lies on (the sides, the top or the bottom), if any. */
+function cardAt(cards: SceneCard[], pt: { x: number; y: number }): string | undefined {
+  const near = (a: number, b: number) => Math.abs(a - b) <= EDGE;
+  const within = (v: number, lo: number, hi: number) => v >= lo - EDGE && v <= hi + EDGE;
+  return cards.find((c) => {
+    const w = c.w ?? CARD_W;
+    const onSide = (near(pt.x, c.x) || near(pt.x, c.x + w)) && within(pt.y, c.y, c.y + CARD_H);
+    const onTopBottom = (near(pt.y, c.y) || near(pt.y, c.y + CARD_H)) && within(pt.x, c.x, c.x + w);
+    return onSide || onTopBottom;
+  })?.id;
+}
+
+/** Completes a scene: the links' end points and the bounds. */
+function finish(scene: Omit<Scene, "bounds" | "links"> & { links: LinkDraft[] }): Scene {
+  const links = scene.links.map((l): SceneLink => {
+    const [a, b] = pathEnds(l.d);
+    return { ...l, ends: [{ ...a, card: cardAt(scene.cards, a) }, { ...b, card: cardAt(scene.cards, b) }] };
+  });
+  return { ...scene, links, bounds: bounds(scene) };
+}
+
+function bounds(scene: Pick<Scene, "cards" | "boxes" | "labels">): Scene["bounds"] {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -156,7 +210,7 @@ function bend(x0: number, y0: number, y1: number, x1: number): string {
 }
 
 /** Parents above, a descent line to a sibling bar and down into each child (spec §3.9 routing). */
-function descent(links: SceneLink[], key: string, fromX: number, fromY: number, children: { id: string; x: number; y: number; w?: number; kind: LinkKind }[], barOffset: number, parents: string[], rounded = false) {
+function descent(links: LinkDraft[], key: string, fromX: number, fromY: number, children: { id: string; x: number; y: number; w?: number; kind: LinkKind }[], barOffset: number, parents: string[], rounded = false) {
   if (!children.length) return;
   const barY = children[0].y - barOffset;
   if (rounded) {
@@ -177,13 +231,13 @@ function descent(links: SceneLink[], key: string, fromX: number, fromY: number, 
  *  descendants hang below them (the centre and its rows stay where they are, the children spread to make room). */
 export function layoutFamily(graph: Graph, focusId: string, options: { editing: boolean; rounded?: boolean; unfolded?: ReadonlyMap<string, number | null> }): Scene {
   const cards: SceneCard[] = [];
-  const links: SceneLink[] = [];
+  const links: LinkDraft[] = [];
   const unions: SceneUnion[] = [];
   const pills: ScenePill[] = [];
   const boxes: SceneBox[] = [];
   const labels: SceneLabel[] = [];
   const focus = graph.people[focusId];
-  if (!focus) return { cards, links, unions, pills, boxes, labels, bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 } };
+  if (!focus) return { cards, links: [], unions, pills, boxes, labels, bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 } };
   const placed = new Map<string, SceneCard>();
   const place = (id: string, x: number, y: number, extra: Partial<SceneCard> = {}) => {
     const card = { id, x, y, sub: subLine(graph.people[id]), ...extra };
@@ -392,8 +446,7 @@ export function layoutFamily(graph: Graph, focusId: string, options: { editing: 
     cursor = left + width + SIBLING_GAP * 2;
   });
 
-  const scene = { cards, links, unions, pills, boxes, labels };
-  return { ...scene, bounds: bounds(scene) };
+  return finish({ cards, links, unions, pills, boxes, labels });
 }
 
 /** Przodkowie: the person on the right and their whole line of ancestors to the left, as far back as it is known,
@@ -401,7 +454,7 @@ export function layoutFamily(graph: Graph, focusId: string, options: { editing: 
  *  that ends early leaves its room to the others. */
 export function layoutAncestors(graph: Graph, focusId: string, rounded = false): Scene {
   const cards: SceneCard[] = [];
-  const links: SceneLink[] = [];
+  const links: LinkDraft[] = [];
   const pills: ScenePill[] = [];
   const labels: SceneLabel[] = [];
   type Node = { id: string; gen: number; stub?: string; again?: string; parents: Node[]; offsets: number[] };
@@ -476,8 +529,7 @@ export function layoutAncestors(graph: Graph, focusId: string, rounded = false):
   const titles = ["Osoba", "Rodzice", "Dziadkowie", "Pradziadkowie"];
   const top = Math.min(...cards.map((c) => c.y));
   for (let g = 0; g <= Math.min(last, titles.length - 1); g++) labels.push({ key: `gen-${g}`, x: x(g), y: top - 24, text: titles[g], stick: "top" });
-  const scene = { cards, links, unions: [], pills, boxes: [], labels };
-  return { ...scene, bounds: bounds(scene) };
+  return finish({ cards, links, unions: [], pills, boxes: [], labels });
 }
 
 /** Potomkowie with partners: how high each marriage's bar goes (0 the lowest, just above the children), so that no
@@ -505,7 +557,7 @@ export function barLevels(groups: { from: number; kids: number[] }[], centre: nu
 export const UNFOLD = 3;
 
 /** What a descendants tree is drawn into: the parts of a scene. */
-type DescendantSink = Pick<Scene, "cards" | "links" | "unions" | "pills">;
+type DescendantSink = Pick<Scene, "cards" | "unions" | "pills"> & { links: LinkDraft[] };
 
 /** The pill under a child in Rodzina: „+N” unfolds that person's descendants in place; once unfolded, „Zwiń” folds
  *  them again (FocusCanvas calls `onPill` with `unfold`, and `fold` for the second). */
@@ -642,8 +694,7 @@ export function layoutDescendants(graph: Graph, focusId: string, options: { dept
   const titles = ["Osoba", "Dzieci", "Wnuki", "Prawnuki", "Praprawnuki"];
   const levels = new Set(cards.map((c) => c.y / DESCENDANT_PITCH));
   for (const level of [...levels].sort((a, b) => a - b)) labels.push({ key: `row-${level}`, x: 0, y: level * DESCENDANT_PITCH, text: titles[level] ?? `Pokolenie +${level}`, stick: "left" });
-  const scene = { ...out, boxes: [], labels };
-  return { ...scene, bounds: bounds(scene) };
+  return finish({ ...out, boxes: [], labels });
 }
 
 /** Everyone on the line of `id`: its ancestors and descendants within the graph (for highlights and dimming). */

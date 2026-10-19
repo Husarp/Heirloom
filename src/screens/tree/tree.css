@@ -221,7 +221,8 @@
   filter: grayscale(0.8);
 }
 
-/* Compact: the box scales with the zoom, the text keeps its screen size. */
+/* Compact: the box scales with the zoom, the text keeps its screen size down to 50 %, then shrinks with the card
+   (--ts, see compactTextScale), never below 8 px for the years. */
 .tree-card.compact {
   background: var(--card);
   border: 1px solid var(--card-border);
@@ -229,10 +230,10 @@
   overflow: hidden;
   display: flex;
   align-items: center;
-  padding: 0 calc(6px * var(--inv)) 0 calc(9px * var(--inv));
+  padding: 0 calc(6px * var(--inv) * var(--ts, 1)) 0 calc(9px * var(--inv) * var(--ts, 1));
 }
 .tree-card.compact .stripe {
-  width: calc(3px * var(--inv));
+  width: calc(3px * var(--inv) * var(--ts, 1));
 }
 .tree-card.compact.selected {
   border: calc(2px * var(--inv)) solid var(--accent);
@@ -245,14 +246,14 @@
 }
 .tree-card.compact .compact-name {
   font-family: var(--f-serif);
-  font-size: calc(13px * var(--inv));
+  font-size: calc(13px * var(--inv) * var(--ts, 1));
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .tree-card.compact .compact-years {
-  font-size: calc(11px * var(--inv));
+  font-size: max(calc(8px * var(--inv)), calc(11px * var(--inv) * var(--ts, 1)));
   color: var(--text2);
   white-space: nowrap;
 }
