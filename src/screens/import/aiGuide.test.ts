@@ -24,10 +24,13 @@ describe("the AI guide in Import · Wczytaj", () => {
   });
 
   it("says what the AI instructions say", () => {
-    for (const phrase of ["ZRÓB PLIK", "Wgrywam M001–M006", "czesc-1.json", "M001", "dalej", "Część B"]) {
+    for (const phrase of ["Pliki do Tadeusza", "„gotowe”", "„tak”", "ponumerowane pytania", "czesc-1.json", "M001", "dalej", "Część B"]) {
       expect(instructions).toContain(phrase);
       expect(guide).toContain(phrase);
     }
+    // „ZRÓB PLIK” is no longer the trigger, only kept working for people used to it.
+    expect(guide).not.toContain("ZRÓB PLIK");
+    expect(instructions).toContain("ZRÓB PLIK");
   });
 
   it("is open at first only while there were no imports", () => {

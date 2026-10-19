@@ -21,11 +21,19 @@ export const GUIDE_STEPS: GuideStep[] = [
   },
   {
     title: "Otwórz nową rozmowę z AI",
-    text: "(ChatGPT, Claude, Gemini) i wklej instrukcję jako pierwszą wiadomość. Potem dołącz pliki i napisz, które numery wgrywasz, np. „Wgrywam M001–M006”. Tekst notatek możesz wkleić wprost.",
+    text: "(ChatGPT, Claude, Gemini) i wklej instrukcję jako pierwszą wiadomość — tylko raz, potem nic nie tłumaczysz. AI napisze, że jest gotowe.",
   },
   {
-    title: "Sprawdź przepisane akty",
-    text: "— AI najpierw je przepisze. Popraw imiona, nazwiska, daty i miejscowości, a potem napisz: ZRÓB PLIK. Gdy AI poprosi, napisz „dalej” — dostaniesz kolejną część.",
+    title: "Wrzucaj materiały osoba po osobie:",
+    text: "dołącz pliki lub wklej tekst i napisz jednym zdaniem, czego dotyczą, np. „Pliki do Tadeusza: M001–M004”, a potem następna osoba. Zwykle nie musisz nic więcej tłumaczyć.",
+  },
+  {
+    title: "Odpowiadaj na pytania AI.",
+    text: "Gdy AI nie jest pewne (do kogo należy plik, jaka to data, czy to ta sama osoba), zada krótkie, ponumerowane pytania. „Nie wiem” jest dobrą odpowiedzią.",
+  },
+  {
+    title: "Sprawdź podsumowanie i przepisane akty.",
+    text: "Gdy skończysz wrzucać, napisz „gotowe”. AI wypisze, kto jest kim, co trafi do kogo i które transkrypcje sprawdzić. Popraw imiona, nazwiska, daty i miejscowości, a gdy się zgadza, napisz „tak” — dopiero wtedy powstaje plik. Duże paczki AI samo podzieli na części; gdy poprosi, napisz „dalej”.",
   },
   {
     title: "Skopiuj odpowiedź",

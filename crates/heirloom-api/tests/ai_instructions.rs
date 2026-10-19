@@ -58,7 +58,7 @@ const ANSWER: &str = r#"Oto część 1 z 2.
 {
   "format": "heirloom-import",
   "version": "1.0",
-  "prompt_rev": "2026-10-05",
+  "prompt_rev": "2026-10-19",
   "batch": "Nowakowie-Ciechanki-2026-10-05",
   "part": 1,
   "created": "2026-10-05",
@@ -130,7 +130,7 @@ Oto część 2 z 2.
 {
   "format": "heirloom-import",
   "version": "1.0",
-  "prompt_rev": "2026-10-05",
+  "prompt_rev": "2026-10-19",
   "batch": "Nowakowie-Ciechanki-2026-10-05",
   "part": 2,
   "created": "2026-10-05",
