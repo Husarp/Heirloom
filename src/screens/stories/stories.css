@@ -9,7 +9,7 @@
   grid-template-rows: minmax(0, 1fr);
 }
 .stories.with-panel {
-  grid-template-columns: minmax(0, 1fr) 540px;
+  grid-template-columns: minmax(0, 1fr) clamp(380px, 46%, 540px);
 }
 
 .stories-main {
@@ -21,9 +21,19 @@
 
 .stories-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
   padding: 20px 24px 12px;
+}
+.stories-head .page-title {
+  flex: 1 0 auto;
+  white-space: nowrap;
+}
+/* Four options in a narrow list: the row wraps whole buttons. */
+.stories-filters .seg {
+  flex-wrap: wrap;
+  max-width: 100%;
 }
 .stories-count {
   font-size: 18px;

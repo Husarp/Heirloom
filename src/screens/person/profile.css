@@ -1007,3 +1007,34 @@
 .combined-diff tr + tr > * {
   border-top: 1px solid var(--border);
 }
+
+/* A short window: „Utwórz osobę” stays in view under the scrolling form. */
+.new-person .section-foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding-bottom: 10px;
+  background: var(--bg);
+}
+
+/* The narrowest windows (1000 px): the form gets the room the photo and the margins gave back. */
+@media (max-width: 1100px) {
+  .hero,
+  .hero.editing {
+    gap: 24px;
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+  .profile-body {
+    gap: 28px;
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+  .pf-events {
+    grid-template-columns: 70px 120px minmax(0, 1fr) 110px;
+  }
+  .personal-form .seg > button {
+    padding: 0 6px;
+    font-size: 12px;
+  }
+}

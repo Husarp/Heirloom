@@ -387,11 +387,19 @@
 }
 
 /* Toolbars and controls over the canvas (spec §3.2–§3.3). */
-.tree-toolbar {
+/* Both rows in one box, so a first row that wraps on a narrow window pushes the second one down. */
+.tree-toolbars {
   position: absolute;
+  top: 14px;
   left: 16px;
   right: 16px;
   z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+.tree-toolbar {
   display: flex;
   gap: 12px;
   pointer-events: none;
@@ -403,11 +411,11 @@
   white-space: nowrap;
 }
 .tree-toolbar.row1 {
-  top: 14px;
   justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 8px;
 }
 .tree-toolbar.row2 {
-  top: 62px;
   gap: 6px;
   flex-wrap: wrap;
   font-size: 13px;
@@ -495,7 +503,7 @@
 
 /* The selected person (spec §4.1 side panel). */
 .tree-panel {
-  width: 340px;
+  width: clamp(290px, 31vw, 340px);
   flex: none;
   background: var(--surface);
   border-left: 1px solid var(--border);

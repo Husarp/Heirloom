@@ -504,6 +504,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
         ) : (
           firstLoad && <Loading count={archive?.people ?? 0} busy />
         )}
+        <div className="tree-toolbars">
         <div className="tree-toolbar row1">
           <Segmented
             value={view}
@@ -580,6 +581,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
               ]}
             />
           )}
+        </div>
         </div>
         {view !== "overview" && scene && (
           <>

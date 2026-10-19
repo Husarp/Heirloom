@@ -985,3 +985,15 @@ textarea.input {
     animation-duration: 0s !important;
   }
 }
+
+/* A narrow window: a dialog never wider than the window, its footer stays whole. */
+.dialog {
+  max-width: calc(100vw - 32px);
+}
+.dialog-foot {
+  flex: none;
+}
+/* On a short window the body scrolls; its parts keep their size instead of being squeezed. */
+.dialog-body > * {
+  flex-shrink: 0;
+}

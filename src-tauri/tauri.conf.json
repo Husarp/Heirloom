@@ -16,8 +16,8 @@
         "title": "Heirloom",
         "width": 1440,
         "height": 900,
-        "minWidth": 1100,
-        "minHeight": 700,
+        "minWidth": 1000,
+        "minHeight": 540,
         "center": true,
         "backgroundColor": "#F7F4EE"
       }

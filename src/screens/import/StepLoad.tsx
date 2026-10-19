@@ -481,7 +481,7 @@ function AiGuide({ open, onToggle, onCopy, onSave }: { open: boolean; onToggle: 
                 <b>{step.title}</b> {step.text}
               </span>
               {step.copy && (
-                <span className="row" style={{ gap: 8, alignSelf: "flex-start", marginTop: 6 }}>
+                <span className="row" style={{ gap: 8, alignSelf: "flex-start", marginTop: 6, flexWrap: "wrap" }}>
                   <CopyButtons onCopy={onCopy} onSave={onSave} />
                 </span>
               )}
@@ -491,7 +491,7 @@ function AiGuide({ open, onToggle, onCopy, onSave }: { open: boolean; onToggle: 
       ) : (
         <>
           <span style={{ color: "var(--text2)" }}>Instrukcja mówi AI, w jakim formacie przygotować osoby, fakty i źródła.</span>
-          <span className="row" style={{ gap: 8, alignSelf: "flex-start", marginTop: 2 }}>
+          <span className="row" style={{ gap: 8, alignSelf: "flex-start", marginTop: 2, flexWrap: "wrap" }}>
             <CopyButtons onCopy={onCopy} onSave={onSave} />
           </span>
         </>

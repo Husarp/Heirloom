@@ -309,6 +309,7 @@ export function Tabs<T extends string>({
           style={{
             height: 40,
             padding: "0 10px",
+            whiteSpace: "nowrap",
             fontSize: 14,
             color: t.value === value ? "var(--text)" : "var(--text2)",
             fontWeight: t.value === value ? 600 : 400,
@@ -434,6 +435,10 @@ export function AzRail({ active, has, onPick, width = 28 }: { active?: string | 
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "space-between",
+        // On a short window the letters scroll instead of running past the bottom edge.
+        overflowY: "auto",
+        minHeight: 0,
+        scrollbarWidth: "none",
         fontSize: 11,
         fontWeight: 600,
         color: "var(--text3)",
@@ -449,6 +454,7 @@ export function AzRail({ active, has, onPick, width = 28 }: { active?: string | 
             style={{
               width: 22,
               height: 18,
+              flex: "none",
               borderRadius: 4,
               background: l === active ? "var(--accent-soft)" : undefined,
               color: l === active ? "var(--accent-text)" : on ? "var(--text2)" : "var(--text3)",

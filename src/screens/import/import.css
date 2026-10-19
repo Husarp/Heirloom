@@ -31,7 +31,8 @@
   max-width: 36%;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 100px;
 }
 .imp-step {
   display: inline-flex;
@@ -85,6 +86,17 @@
   background: var(--border);
   margin: 0 4px;
   flex: none;
+}
+
+/* A small window: only the current step keeps its name (the others show it as a tooltip), so the stepper fits. */
+@media (max-width: 1400px) {
+  .imp-step:not(.current) .imp-step-label {
+    display: none;
+  }
+  .imp-step-sep {
+    width: 16px;
+    margin: 0 2px;
+  }
 }
 
 /* ---------- Body and footer ---------- */
@@ -1059,6 +1071,22 @@
   .imp-compare-row {
     grid-template-columns: 84px minmax(0, 1fr) minmax(0, 1.2fr) 170px;
     column-gap: 10px;
+  }
+}
+
+/* The summary's two columns stack on a small window (the list of changes keeps the whole width). */
+@media (max-width: 1150px) {
+  .imp-summary {
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: max-content;
+    align-content: start;
+    overflow: auto;
+  }
+  .imp-summary > .scroll {
+    overflow: visible;
+  }
+  .imp-change-detail {
+    width: 120px;
   }
 }
 
