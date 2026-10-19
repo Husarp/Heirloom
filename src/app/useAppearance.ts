@@ -1,10 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { inTauri } from "../api/transport";
 import { useStore } from "./store";
+
+/** The branch colour palette of the open archive (Ustawienia › Drzewo › Kolory gałęzi): "light" or "bright"; the
+ *  default, „Stonowane”, is no `data-palette` at all. */
+export function useBranchPalette(): "light" | "bright" | undefined {
+  const palette = useStore((s) => s.archive?.display?.branchPalette);
+  return palette === "light" || palette === "bright" ? palette : undefined;
+}
 
 /** Applies the theme, text size, density and animation settings to the whole window. */
 export function useAppearance() {
   const appearance = useStore((s) => s.app?.appearance);
+  const palette = useBranchPalette();
   const [systemDark, setSystemDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
 
   useEffect(() => {
@@ -24,6 +32,13 @@ export function useAppearance() {
     root.classList.toggle("no-anim", appearance?.animations === false);
     root.classList.toggle("compact", appearance?.density === "compact");
   }, [dark, appearance?.animations, appearance?.density]);
+
+  // Before any effect of the screens below, so the tree can read the new colours when it recolours itself.
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (palette) root.dataset.palette = palette;
+    else delete root.dataset.palette;
+  }, [palette]);
 
   useEffect(() => {
     // The whole interface grows, like the browser zoom: the design is drawn in px at 100 %.

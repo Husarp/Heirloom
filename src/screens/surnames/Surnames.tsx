@@ -2,12 +2,13 @@
 // similar surnames and the people born with the surname or given it by marriage.
 
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Network, Search, Signature, Sparkles } from "lucide-react";
+import { ChevronDown, Network, Search, Signature, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { call } from "../../api/transport";
 import type { ArchiveStatus, PersonSummary } from "../../api/types";
 import { afterChange, useStore } from "../../app/store";
 import { useApi } from "../../app/useApi";
+import { BRANCH_NAMES, BranchColorPicker, useBranchColors } from "../../components/BranchColorPicker";
 import { AzRail, BranchShape, EmptyState, Lifespan, Spinner, Tabs } from "../../components/bits";
 import { num, people, plural } from "../../lib/format";
 import { SuggestionBar, collator, fold, useCrumb, usePaneRows } from "./split";
@@ -66,9 +67,6 @@ interface PeopleList {
 
 /** The pseudo-group of people without a birth surname, also used as its route key. */
 const NO_SURNAME = "(bez nazwiska)";
-
-/** Branch colour names (spec §1.2) for „Gałąź 1 · Terakota”. */
-const BRANCH_NAMES = ["Terakota", "Morska", "Fiolet", "Ochra", "Błękit", "Oliwka", "Morwa", "Łupek", "Bursztyn", "Turkus", "Wiśnia", "Szałwia"];
 
 function yearSpan(from: number | null, to: number | null): string {
   if (from == null || to == null) return "";
@@ -272,6 +270,8 @@ function SurnameDetail({ groupKey, pane }: { groupKey: string; pane: RefObject<H
 
 function SurnamePage({ data, stale, pane }: { data: SurnameData; stale: boolean; pane: RefObject<HTMLDivElement | null> }) {
   const go = useStore((s) => s.go);
+  const mode = useStore((s) => s.mode);
+  const colours = useBranchColors();
   const [tab, setTab] = useState<"born" | "married">(data.bornCount === 0 && data.marriedCount > 0 ? "married" : "born");
   const listRef = useRef<HTMLDivElement>(null);
   const rows = tab === "born" ? data.born : data.married;
@@ -289,8 +289,26 @@ function SurnamePage({ data, stale, pane }: { data: SurnameData; stale: boolean;
       <div className="sn-title">
         <div className="col grow" style={{ gap: 4, minWidth: 0 }}>
           <span className="sn-branch">
-            <BranchShape branch={data.branch} />
-            Gałąź {data.branch} · {BRANCH_NAMES[data.branch - 1]}
+            {mode === "edit" && colours.canChange ? (
+              // Choosing the colour is an edit action: the line becomes the picker's button.
+              <BranchColorPicker
+                value={data.branch}
+                chosen={data.key in colours.chosen}
+                onPick={(n) => colours.set(data.key, n)}
+                onAuto={() => colours.clear(data.key)}
+                label={`Zmień kolor gałęzi ${data.plural}`}
+                align="left"
+              >
+                <BranchShape branch={data.branch} />
+                Gałąź {data.branch} · {BRANCH_NAMES[data.branch - 1]}
+                <ChevronDown size={13} color="var(--text3)" />
+              </BranchColorPicker>
+            ) : (
+              <>
+                <BranchShape branch={data.branch} />
+                Gałąź {data.branch} · {BRANCH_NAMES[data.branch - 1]}
+              </>
+            )}
           </span>
           <h2>{data.plural}</h2>
         </div>

@@ -6,6 +6,7 @@ import { Application, BitmapFont, BitmapText, Container, Graphics, Sprite, type 
 import { Minus, Plus, LocateFixed, Maximize } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { TreeCamera } from "../../app/store";
+import { useBranchPalette } from "../../app/useAppearance";
 import { cardYears, count, roman } from "../../lib/format";
 import { cameraOf, viewOf } from "./camera";
 import { placeLabels } from "./labels";
@@ -126,7 +127,9 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
   const restored = useRef(onRestored);
   restored.current = onRestored;
 
-  useEffect(() => api.current?.recolor(), [colorFor]);
+  // The colours are read from CSS, so a palette change (Ustawienia › Kolory gałęzi) re-tints too.
+  const branchPalette = useBranchPalette();
+  useEffect(() => api.current?.recolor(), [colorFor, branchPalette]);
   useEffect(() => api.current?.drawSelection(), [selected]);
   useEffect(() => api.current?.drawLine(), [focus]);
   // While the app is starting, it picks up `restore` itself.

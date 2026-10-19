@@ -746,6 +746,44 @@ textarea.input {
   padding: 8px 12px 4px;
 }
 
+/* The branch colour picker (BranchColorPicker.tsx): a button, and under it the 12 colours and „Automatycznie”. */
+.bcp {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.bcp-pop {
+  top: calc(100% + 4px);
+  width: 216px;
+  padding: 6px;
+}
+.bcp-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.bcp-swatch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  border: 1.5px solid transparent;
+  border-radius: var(--r-ctl);
+}
+.bcp-swatch:hover {
+  background: var(--surface2);
+}
+.bcp-swatch.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.bcp-pop .menu-item {
+  border-radius: var(--r-ctl);
+}
+
 /* ---------- Toasts (design 17f): bottom right, 420 px, newest at the bottom, at most 3 ---------- */
 
 .toasts {

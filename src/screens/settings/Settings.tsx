@@ -1,9 +1,13 @@
-import { Archive, Calendar, Import, Info, Network, Palette, Users } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { Archive, Calendar, Check, ChevronDown, Import, Info, Network, Palette, Users } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { call } from "../../api/transport";
 import type { AppState, Appearance, ArchiveStatus } from "../../api/types";
 import { useStore } from "../../app/store";
-import { Segmented, SettingRow, Toggle } from "../../components/bits";
+import { useApi } from "../../app/useApi";
+import { BRANCH_NAMES, BranchColorPicker, useBranchColors } from "../../components/BranchColorPicker";
+import { BranchShape, Segmented, SettingRow, Toggle } from "../../components/bits";
+import { num, people } from "../../lib/format";
+import { collator } from "../surnames/split";
 import { ArchiveSections } from "./archive";
 import { AboutSection, EditorsSection, ImportSection } from "./more";
 import { failed, Section, Select, setDisplay } from "./parts";
@@ -265,14 +269,90 @@ function TreeSection({ archive }: { archive: ArchiveStatus }) {
           ]}
         />
       </SettingRow>
-      <SettingRow label="Kolory gałęzi" note="Każda gałąź ma swój kolor i kształt" soon last>
-        <span className="swatches">
-          {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
-            <span key={n} style={{ background: `var(--b${n})`, borderRadius: n % 3 === 0 ? "50%" : 3 }} />
-          ))}
-        </span>
-      </SettingRow>
+      <BranchColorSettings display={display} />
     </Section>
+  );
+}
+
+/** Wersje zestawu kolorów gałęzi (tokens.css: `.pal-*`). */
+const PALETTES = [
+  { value: "muted", label: "Stonowane" },
+  { value: "light", label: "Jasne" },
+  { value: "bright", label: "Żywe" },
+] as const;
+
+interface BranchGroup {
+  key: string;
+  name: string;
+  plural: string;
+  branch: number;
+  born: number;
+  married: number;
+}
+
+/** „Kolory gałęzi”: the set of colours, and the colour of each branch (surname group, the biggest first). */
+function BranchColorSettings({ display }: { display: Record<string, unknown> }) {
+  const { data } = useApi<{ groups: BranchGroup[] }>("surnames.list");
+  const { chosen, set, clear, reset } = useBranchColors();
+  const [all, setAll] = useState(false);
+  const palette = display.branchPalette === "light" || display.branchPalette === "bright" ? display.branchPalette : "muted";
+  // Largest family first, as on the Nazwiska screen.
+  const groups = useMemo(() => [...(data?.groups ?? [])].sort((a, b) => b.born - a.born || collator.compare(a.name, b.name)), [data]);
+  const shown = all ? groups : groups.slice(0, 12);
+  return (
+    <>
+      <SettingRow label="Zestaw kolorów" note="Jak mocne są kolory gałęzi w drzewie i na listach">
+        <div className="pal-options" role="radiogroup" aria-label="Zestaw kolorów">
+          {PALETTES.map((p) => (
+            <button key={p.value} className={`pal-option${palette === p.value ? " on" : ""}`} role="radio" aria-checked={palette === p.value} onClick={() => setDisplay("branchPalette", p.value)}>
+              <span className="pal-check">{palette === p.value && <Check size={14} />}</span>
+              <span className="pal-name">{p.label}</span>
+              <span className={`pal-colours pal-${p.value}`}>
+                {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                  <BranchShape key={n} branch={n} size={12} />
+                ))}
+              </span>
+            </button>
+          ))}
+        </div>
+      </SettingRow>
+      <SettingRow label="Kolor każdej gałęzi" note="Gałąź to rodzina o jednym nazwisku. Bez wyboru kolory dostają po kolei, od największej" last>
+        <button className="btn secondary set-btn" disabled={Object.keys(chosen).length === 0} onClick={reset}>
+          Przywróć automatyczne kolory
+        </button>
+      </SettingRow>
+      {shown.length > 0 && (
+        <div className="bc-list" style={{ borderTop: "1px solid var(--border)" }}>
+          {shown.map((g, i) => {
+            const picked = g.key in chosen;
+            return (
+              <div key={g.key} className="bc-row" style={i === shown.length - 1 && groups.length <= shown.length ? { borderBottom: "none" } : undefined}>
+                <BranchShape branch={g.branch} size={14} />
+                <span className="name ellipsis">{g.plural}</span>
+                <span className="count grow">{g.born > 0 ? people(g.born) : `${people(g.married)} przez małżeństwo`}</span>
+                <BranchColorPicker
+                  value={g.branch}
+                  chosen={picked}
+                  onPick={(n) => set(g.key, n)}
+                  onAuto={() => clear(g.key)}
+                  label={`Kolor gałęzi ${g.plural}`}
+                >
+                  <span>{picked ? `${g.branch} · ${BRANCH_NAMES[g.branch - 1]}` : "Automatycznie"}</span>
+                  <ChevronDown size={13} color="var(--text3)" />
+                </BranchColorPicker>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {groups.length > 12 && (
+        <div className="bc-foot">
+          <button className="btn ghost" onClick={() => setAll((a) => !a)}>
+            {all ? "Pokaż tylko największe" : `Pokaż wszystkie (${num(groups.length)})`}
+          </button>
+        </div>
+      )}
+    </>
   );
 }
 

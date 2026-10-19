@@ -171,14 +171,86 @@
   font-variant-numeric: tabular-nums;
 }
 
-.swatches {
+/* Kolory gałęzi: the three palettes to choose from, each with its 12 colours (.pal-* shows it in the current theme),
+   and a row per branch. */
+.pal-options {
   display: flex;
+  flex-direction: column;
   gap: 6px;
   flex: none;
 }
-.swatches span {
-  width: 22px;
-  height: 22px;
+.pal-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 12px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  background: var(--surface);
+  font-size: 13px;
+  color: var(--text);
+}
+.pal-option:hover:not(.on) {
+  border-color: var(--line);
+}
+.pal-option.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.pal-option .pal-check {
+  width: 14px;
+  flex: none;
+}
+.pal-option .pal-name {
+  width: 76px;
+  text-align: left;
+}
+.pal-option .pal-colours {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 4px;
+  border-radius: var(--r-ctl-2);
+  /* The colours are drawn on the card they appear on in the tree. */
+  background: var(--card);
+  height: 24px;
+}
+
+.bc-list {
+  display: flex;
+  flex-direction: column;
+}
+.bc-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 6px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.bc-row .name {
+  font-size: 14px;
+  font-weight: 500;
+  min-width: 0;
+}
+.bc-row .count {
+  font-size: 12px;
+  color: var(--text3);
+}
+.bc-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+  font-size: 12px;
+  color: var(--text3);
+}
+.bc-foot .btn.ghost {
+  height: 30px;
+  color: var(--accent-text);
 }
 
 /* Zajęte miejsce (§5.20). */

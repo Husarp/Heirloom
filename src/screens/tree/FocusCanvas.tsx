@@ -511,11 +511,11 @@ function Card({
     );
   }
   if (lod === 3) {
-    // Dark ink on the light branch colours 4, 6, 9 and 10 (D3); per theme through the tokens.
-    const ink = color && [4, 6, 9, 10].includes(color) ? "var(--lod-ink-dk)" : "var(--lod-ink)";
+    // The ink made for that branch colour (D3), per palette and theme through the tokens.
+    const ink = color ? `var(--b${color}-ink)` : "var(--lod-ink)";
     return (
       <div className={`tree-card mini${selected ? " selected" : ""}${card.partner ? " partner" : ""}`} style={{ ...base, background: branchColor }} {...events}>
-        <span className="mini-letter" style={{ color: color ? ink : "var(--lod-ink)" }}>
+        <span className="mini-letter" style={{ color: ink }}>
           {(p.given || p.name).charAt(0)}
         </span>
       </div>

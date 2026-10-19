@@ -69,6 +69,18 @@
   font-size: 13px;
   color: var(--text2);
 }
+/* In edit mode the branch line is a button that opens the colour picker. */
+.sn-branch .chip {
+  height: 28px;
+  margin-left: -10px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text2);
+}
+.sn-branch .chip:hover:not(:disabled) {
+  background: var(--surface2);
+  border-color: var(--border);
+}
 
 .sn-stats {
   display: grid;

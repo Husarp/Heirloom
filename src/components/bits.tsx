@@ -117,7 +117,7 @@ export function ArchiveDot({ from, size = 12, style }: { from: string[] | undefi
       ? `var(--arch${((colours[0] - 1) % 6) + 1})`
       : `conic-gradient(${colours.map((c, i) => `var(--arch${((c - 1) % 6) + 1}) ${(i / colours.length) * 360}deg ${((i + 1) / colours.length) * 360}deg`).join(", ")})`;
   const letter = colours.length === 1 && size >= 15 ? (archives.get(from[0])?.name ?? "").charAt(0).toUpperCase() : "";
-  const ink = [4, 6, 9, 10].includes(archBranch(colours[0])) ? "var(--lod-ink-dk)" : "var(--lod-ink)";
+  const ink = `var(--b${archBranch(colours[0])}-ink)`;
   return (
     <span className="arch-dot" title={fromText(from, archives)} style={{ width: size, height: size, background, color: ink, fontSize: Math.round(size * 0.6), ...style }}>
       {letter}

@@ -37,25 +37,11 @@
   --toast-icon: #9fd0be;
   --toast-action: #9fd0be;
   --toast-err: #e08a7c;
-  /* The letter on a mini card (LOD 3, D3): white, or dark ink on the light branch colours 4, 6, 9 and 10. */
+  /* The letter on an uncoloured mini card (LOD 3, D3); on a branch colour it is that colour's --bN-ink. */
   --lod-ink: #ffffff;
-  --lod-ink-dk: #1f1c18;
-
-  --b1: #b5562f;
-  --b2: #2f7a6b;
-  --b3: #7a5ba6;
-  --b4: #a8861e;
-  --b5: #3d6fa8;
-  --b6: #6e8b2e;
-  --b7: #b0437a;
-  --b8: #4f5d75;
-  --b9: #c07a1a;
-  --b10: #2e8fa3;
-  --b11: #8c3b3b;
-  --b12: #5e7f5b;
 
   /* Archives opened together (a set): each archive's colour, taken from the branch colours so the tree's „Koloruj
-     wg: archiwum” and the badges agree (bits.tsx ARCH_BRANCH). Follows the theme through the --b tokens. */
+     wg: archiwum” and the badges agree (bits.tsx ARCH_BRANCH). Follows the theme and the palette through the --b tokens. */
   --arch1: var(--b5);
   --arch2: var(--b9);
   --arch3: var(--b3);
@@ -115,8 +101,104 @@
   --toast-action: #2f5d50;
   --toast-err: #a3392b;
   --lod-ink: #10201a;
-  --lod-ink-dk: #10201a;
 
+  color-scheme: dark;
+}
+
+/* ---------- Branch colours ----------
+   --b1 … --b12 are the colours of the 12 branches, --b1-ink … --b12-ink the ink for a letter on each. Three palettes:
+   „Stonowane” (the default, no data-palette), „Jasne” and „Żywe” (data-palette on <html>, from the archive's
+   display.branchPalette), each for the light and the dark theme. The hue order is the same in all of them, so a
+   branch keeps its colour family when the palette changes. Every colour is at least 3 : 1 on --card and --canvas and
+   every ink at least 4.5 : 1 on its colour: src/styles/palettes.test.ts checks all six sets. The .pal-* classes show
+   a palette on its own in the current theme (the choice in Ustawienia › Drzewo). */
+
+:root,
+.pal-muted {
+  --b1: #b5562f;
+  --b2: #2f7a6b;
+  --b3: #7a5ba6;
+  --b4: #a48218;
+  --b5: #3d6fa8;
+  --b6: #6e8b2e;
+  --b7: #b0437a;
+  --b8: #4f5d75;
+  --b9: #bc7613;
+  --b10: #2e8fa3;
+  --b11: #8c3b3b;
+  --b12: #5c7d59;
+  --b1-ink: #ffffff;
+  --b2-ink: #ffffff;
+  --b3-ink: #ffffff;
+  --b4-ink: #15120e;
+  --b5-ink: #ffffff;
+  --b6-ink: #15120e;
+  --b7-ink: #ffffff;
+  --b8-ink: #ffffff;
+  --b9-ink: #15120e;
+  --b10-ink: #15120e;
+  --b11-ink: #ffffff;
+  --b12-ink: #ffffff;
+}
+
+:root[data-palette="light"],
+.pal-light {
+  --b1: #c56f4e;
+  --b2: #539284;
+  --b3: #957abe;
+  --b4: #9e8430;
+  --b5: #5d8abd;
+  --b6: #769042;
+  --b7: #c96695;
+  --b8: #68758b;
+  --b9: #b97832;
+  --b10: #4391a3;
+  --b11: #a75c5a;
+  --b12: #718e6e;
+  --b1-ink: #15120e;
+  --b2-ink: #15120e;
+  --b3-ink: #15120e;
+  --b4-ink: #15120e;
+  --b5-ink: #15120e;
+  --b6-ink: #15120e;
+  --b7-ink: #15120e;
+  --b8-ink: #ffffff;
+  --b9-ink: #15120e;
+  --b10-ink: #15120e;
+  --b11-ink: #ffffff;
+  --b12-ink: #15120e;
+}
+
+:root[data-palette="bright"],
+.pal-bright {
+  --b1: #bf4600;
+  --b2: #057a68;
+  --b3: #823fcb;
+  --b4: #9f8407;
+  --b5: #086ac1;
+  --b6: #688a02;
+  --b7: #c10e7b;
+  --b8: #425a84;
+  --b9: #c5710a;
+  --b10: #0f8da3;
+  --b11: #a30021;
+  --b12: #448140;
+  --b1-ink: #ffffff;
+  --b2-ink: #ffffff;
+  --b3-ink: #ffffff;
+  --b4-ink: #15120e;
+  --b5-ink: #ffffff;
+  --b6-ink: #15120e;
+  --b7-ink: #ffffff;
+  --b8-ink: #ffffff;
+  --b9-ink: #15120e;
+  --b10-ink: #15120e;
+  --b11-ink: #ffffff;
+  --b12-ink: #ffffff;
+}
+
+:root[data-theme="dark"],
+:root[data-theme="dark"] .pal-muted {
   --b1: #e0875f;
   --b2: #5fb8a5;
   --b3: #a98bd6;
@@ -129,6 +211,72 @@
   --b10: #5fc0d2;
   --b11: #c7716f;
   --b12: #8fb38b;
+  --b1-ink: #10201a;
+  --b2-ink: #10201a;
+  --b3-ink: #10201a;
+  --b4-ink: #10201a;
+  --b5-ink: #10201a;
+  --b6-ink: #10201a;
+  --b7-ink: #10201a;
+  --b8-ink: #10201a;
+  --b9-ink: #10201a;
+  --b10-ink: #10201a;
+  --b11-ink: #10201a;
+  --b12-ink: #10201a;
+}
 
-  color-scheme: dark;
+:root[data-theme="dark"][data-palette="light"],
+:root[data-theme="dark"] .pal-light {
+  --b1: #fdb392;
+  --b2: #97dbcb;
+  --b3: #ccb4f3;
+  --b4: #f0db8b;
+  --b5: #a1c8f7;
+  --b6: #c6e093;
+  --b7: #faa8cd;
+  --b8: #b5c1d6;
+  --b9: #f6ba7a;
+  --b10: #9ae4f3;
+  --b11: #e59c99;
+  --b12: #bad7b6;
+  --b1-ink: #10201a;
+  --b2-ink: #10201a;
+  --b3-ink: #10201a;
+  --b4-ink: #10201a;
+  --b5-ink: #10201a;
+  --b6-ink: #10201a;
+  --b7-ink: #10201a;
+  --b8-ink: #10201a;
+  --b9-ink: #10201a;
+  --b10-ink: #10201a;
+  --b11-ink: #10201a;
+  --b12-ink: #10201a;
+}
+
+:root[data-theme="dark"][data-palette="bright"],
+:root[data-theme="dark"] .pal-bright {
+  --b1: #fd7124;
+  --b2: #03c0a5;
+  --b3: #b379fc;
+  --b4: #d5b316;
+  --b5: #4fa1fe;
+  --b6: #97bf0d;
+  --b7: #ff51b0;
+  --b8: #839bc7;
+  --b9: #ed9306;
+  --b10: #0fc5df;
+  --b11: #e85258;
+  --b12: #7bba75;
+  --b1-ink: #10201a;
+  --b2-ink: #10201a;
+  --b3-ink: #10201a;
+  --b4-ink: #10201a;
+  --b5-ink: #10201a;
+  --b6-ink: #10201a;
+  --b7-ink: #10201a;
+  --b8-ink: #10201a;
+  --b9-ink: #10201a;
+  --b10-ink: #10201a;
+  --b11-ink: #10201a;
+  --b12-ink: #10201a;
 }
