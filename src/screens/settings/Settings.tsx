@@ -245,7 +245,7 @@ function TreeSection({ archive }: { archive: ArchiveStatus }) {
           ]}
         />
       </SettingRow>
-      <SettingRow label="Rozwijanie potomków (widok Rodzina)" note="Co robi „+N” pod dzieckiem, gdy jego linia ma więcej niż 2 pokolenia">
+      <SettingRow wide label="Rozwijanie potomków (widok Rodzina)" note="Co robi „+N” pod dzieckiem, gdy jego linia ma więcej niż 2 pokolenia">
         <Segmented
           size={28}
           value={(display.familyUnfold as string) ?? "ask"}
@@ -293,7 +293,8 @@ interface BranchGroup {
 /** „Kolory gałęzi”: the set of colours, and the colour of each branch (surname group, the biggest first). */
 function BranchColorSettings({ display }: { display: Record<string, unknown> }) {
   const { data } = useApi<{ groups: BranchGroup[] }>("surnames.list");
-  const { chosen, set, clear, reset } = useBranchColors();
+  const { chosen, canChange, set, clear, reset } = useBranchColors();
+  const readOnlyNote = "Archiwa otwarte razem są tylko do przeglądania";
   const [all, setAll] = useState(false);
   const palette = display.branchPalette === "light" || display.branchPalette === "bright" ? display.branchPalette : "muted";
   // Largest family first, as on the Nazwiska screen.
@@ -301,10 +302,10 @@ function BranchColorSettings({ display }: { display: Record<string, unknown> }) 
   const shown = all ? groups : groups.slice(0, 12);
   return (
     <>
-      <SettingRow label="Zestaw kolorów" note="Jak mocne są kolory gałęzi w drzewie i na listach">
+      <SettingRow wide label="Zestaw kolorów" note={canChange ? "Jak mocne są kolory gałęzi w drzewie i na listach" : readOnlyNote}>
         <div className="pal-options" role="radiogroup" aria-label="Zestaw kolorów">
           {PALETTES.map((p) => (
-            <button key={p.value} className={`pal-option${palette === p.value ? " on" : ""}`} role="radio" aria-checked={palette === p.value} onClick={() => setDisplay("branchPalette", p.value)}>
+            <button key={p.value} className={`pal-option${palette === p.value ? " on" : ""}`} role="radio" aria-checked={palette === p.value} disabled={!canChange} onClick={() => setDisplay("branchPalette", p.value)}>
               <span className="pal-check">{palette === p.value && <Check size={14} />}</span>
               <span className="pal-name">{p.label}</span>
               <span className={`pal-colours pal-${p.value}`}>
@@ -316,8 +317,8 @@ function BranchColorSettings({ display }: { display: Record<string, unknown> }) 
           ))}
         </div>
       </SettingRow>
-      <SettingRow label="Kolor każdej gałęzi" note="Gałąź to rodzina o jednym nazwisku. Bez wyboru kolory dostają po kolei, od największej" last>
-        <button className="btn secondary set-btn" disabled={Object.keys(chosen).length === 0} onClick={reset}>
+      <SettingRow wide label="Kolor każdej gałęzi" note={canChange ? "Gałąź to rodzina o jednym nazwisku. Bez wyboru kolory dostają po kolei, od największej" : readOnlyNote} last>
+        <button className="btn secondary set-btn" disabled={!canChange || Object.keys(chosen).length === 0} onClick={reset}>
           Przywróć automatyczne kolory
         </button>
       </SettingRow>
@@ -333,6 +334,7 @@ function BranchColorSettings({ display }: { display: Record<string, unknown> }) 
                 <BranchColorPicker
                   value={g.branch}
                   chosen={picked}
+                  disabled={!canChange}
                   onPick={(n) => set(g.key, n)}
                   onAuto={() => clear(g.key)}
                   label={`Kolor gałęzi ${g.plural}`}

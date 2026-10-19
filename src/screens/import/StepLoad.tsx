@@ -274,25 +274,27 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
             <span className="icon-tile" style={{ width: 40, height: 40 }}>
               <Files size={20} />
             </span>
-            <span className="col grow" style={{ minWidth: 0 }}>
-              <span className="serif" style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.2 }}>
+            <span className="col grow imp-recog-title" style={{ minWidth: 0 }}>
+              <span className="serif" style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.2, whiteSpace: "nowrap" }}>
                 Rozpoznane pliki <span style={{ fontSize: 16, color: "var(--text2)", fontWeight: 400 }}>{inputs.length}</span>
               </span>
               <span style={{ fontSize: 13, color: "var(--text2)" }}>
                 {droppedAt ? `Upuszczone o ${clock(droppedAt)} · ` : ""}nic nie zostało jeszcze zapisane
               </span>
             </span>
-            <button className="btn ghost" onClick={clearAll}>
-              Wyczyść listę
-            </button>
-            <button className="btn secondary" onClick={() => pickFolders("Dodaj foldery").then(addPaths)}>
-              <Plus size={14} />
-              Dodaj folder
-            </button>
-            <button className="btn secondary" onClick={() => pickFiles("Dodaj pliki").then(addPaths)}>
-              <Plus size={14} />
-              Dodaj pliki
-            </button>
+            <span className="imp-recog-actions">
+              <button className="btn ghost" onClick={clearAll}>
+                Wyczyść listę
+              </button>
+              <button className="btn secondary" onClick={() => pickFolders("Dodaj foldery").then(addPaths)}>
+                <Plus size={14} />
+                Dodaj folder
+              </button>
+              <button className="btn secondary" onClick={() => pickFiles("Dodaj pliki").then(addPaths)}>
+                <Plus size={14} />
+                Dodaj pliki
+              </button>
+            </span>
           </div>
           <div className="imp-recog-row head">
             <span>Plik</span>

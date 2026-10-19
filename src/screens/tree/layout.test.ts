@@ -574,3 +574,57 @@ describe("link end points", () => {
     expect(single?.ends[0].card).toBe("father");
   });
 });
+
+describe("Rodzina: pills", () => {
+  // c ∞ w → k1, k2; k1 → g2, k2 → h1, and g2 ∞ h1 → z (z is drawn once, under g2).
+  const rows: [string, string, string | null, string | null, number][] = [
+    ["c", "M", null, null, 1900],
+    ["w", "F", null, null, 1902],
+    ["k1", "M", "c", "w", 1925],
+    ["k2", "F", "c", "w", 1927],
+    ["g2", "F", "k1", null, 1950],
+    ["h1", "M", null, "k2", 1955],
+    ["z", "M", "g2", "h1", 1980],
+  ];
+  const graph = graphOf(rows, "c", [["c", "w"]]);
+
+  it("hangs a pill on the top or the bottom of its card, whatever its icon points to", () => {
+    const folded = layoutFamily(graph, "c", { editing: false });
+    expect(folded.pills.find((p) => p.target === "k1")).toMatchObject({ at: "bottom", direction: "down" });
+    const open = layoutFamily(graph, "c", { editing: false, unfolded: new Map([["k1", null]]) });
+    expect(open.pills.find((p) => p.target === "k1")).toMatchObject({ at: "bottom", direction: "up", fold: true });
+    expect(layoutAncestors(graph, "z", false).pills.every((p) => p.direction === "left" || p.at === "top")).toBe(true);
+  });
+
+  it("shows no „+N” under a person whose descendants are all drawn elsewhere", () => {
+    const scene = layoutFamily(graph, "c", { editing: false, unfolded: new Map([["k1", null], ["k2", null]]) });
+    expect(scene.cards.filter((c) => c.id === "z")).toHaveLength(1);
+    expect(scene.pills.find((p) => p.target === "h1")).toBeUndefined();
+    expect(scene.pills.find((p) => p.target === "k2")).toMatchObject({ fold: true });
+  });
+});
+
+describe("a very big tree", () => {
+  // 1 + 3 + 9 + … : 3 280 people in 8 generations, every one with three children.
+  const rows: [string, string, string | null, string | null, number][] = [["p0", "M", null, null, 1000]];
+  const queue = ["p0"];
+  let n = 1;
+  while (n < 3280) {
+    const parent = queue.shift()!;
+    for (let k = 0; k < 3; k++) {
+      const id = `p${n++}`;
+      rows.push([id, "M", parent, null, 1000 + n]);
+      queue.push(id);
+    }
+  }
+  const graph = graphOf(rows, "p0");
+
+  it("finishes the scene with every link end named, and the same cards as ever", () => {
+    const scene = layoutDescendants(graph, "p0", { depth: 8 });
+    expect(scene.cards).toHaveLength(3280);
+    const ends = scene.links.flatMap((l) => l.ends);
+    expect(ends.length).toBeGreaterThan(6000);
+    // Every child's line ends on the child's own card.
+    for (const l of scene.links.filter((l) => /^d-p\d+-p\d+$/.test(l.key))) expect(l.ends[1].card, l.key).toBe(l.key.split("-").pop());
+  });
+});

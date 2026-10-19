@@ -72,6 +72,9 @@ export interface ScenePill {
   /** The person to go to (refocus) when clicked, or to unfold below (`unfold`, Potomkowie and Rodzina). */
   target: string;
   direction: "down" | "up" | "left";
+  /** Where the pill hangs on its card, for the zoom levels below the full card (the icon's direction says nothing
+   *  about it: „Zwiń” sits at the bottom with an up arrow). Without: beside the card or already clear of it. */
+  at?: "top" | "bottom";
   unfold?: boolean;
   /** Rodzina: the pill of a branch that is unfolded, which folds it again. */
   fold?: boolean;
@@ -130,23 +133,45 @@ export function pathEnds(d: string): [{ x: number; y: number }, { x: number; y: 
 
 const EDGE = 0.5;
 
-/** The card whose box edge the point lies on (the sides, the top or the bottom), if any. */
-function cardAt(cards: SceneCard[], pt: { x: number; y: number }): string | undefined {
+const CELL = 256;
+
+/** Finds the card whose box edge a point lies on (the sides, the top or the bottom), if any. The cards go into a grid
+ *  once per scene, so a lookup only looks at the few cards near the point (a big unfold has thousands of links). The
+ *  first card in the list wins, as ever. */
+function edgeIndex(cards: SceneCard[]): (pt: { x: number; y: number }) => string | undefined {
   const near = (a: number, b: number) => Math.abs(a - b) <= EDGE;
   const within = (v: number, lo: number, hi: number) => v >= lo - EDGE && v <= hi + EDGE;
-  return cards.find((c) => {
+  const key = (cx: number, cy: number) => `${cx},${cy}`;
+  const grid = new Map<string, number[]>();
+  cards.forEach((c, i) => {
     const w = c.w ?? CARD_W;
-    const onSide = (near(pt.x, c.x) || near(pt.x, c.x + w)) && within(pt.y, c.y, c.y + CARD_H);
-    const onTopBottom = (near(pt.y, c.y) || near(pt.y, c.y + CARD_H)) && within(pt.x, c.x, c.x + w);
-    return onSide || onTopBottom;
-  })?.id;
+    for (let cx = Math.floor((c.x - EDGE) / CELL); cx <= Math.floor((c.x + w + EDGE) / CELL); cx++) {
+      for (let cy = Math.floor((c.y - EDGE) / CELL); cy <= Math.floor((c.y + CARD_H + EDGE) / CELL); cy++) {
+        const k = key(cx, cy);
+        const list = grid.get(k);
+        if (list) list.push(i);
+        else grid.set(k, [i]);
+      }
+    }
+  });
+  return (pt) => {
+    for (const i of grid.get(key(Math.floor(pt.x / CELL), Math.floor(pt.y / CELL))) ?? []) {
+      const c = cards[i];
+      const w = c.w ?? CARD_W;
+      const onSide = (near(pt.x, c.x) || near(pt.x, c.x + w)) && within(pt.y, c.y, c.y + CARD_H);
+      const onTopBottom = (near(pt.y, c.y) || near(pt.y, c.y + CARD_H)) && within(pt.x, c.x, c.x + w);
+      if (onSide || onTopBottom) return c.id;
+    }
+    return undefined;
+  };
 }
 
 /** Completes a scene: the links' end points and the bounds. */
 function finish(scene: Omit<Scene, "bounds" | "links"> & { links: LinkDraft[] }): Scene {
+  const cardAt = edgeIndex(scene.cards);
   const links = scene.links.map((l): SceneLink => {
     const [a, b] = pathEnds(l.d);
-    return { ...l, ends: [{ ...a, card: cardAt(scene.cards, a) }, { ...b, card: cardAt(scene.cards, b) }] };
+    return { ...l, ends: [{ ...a, card: cardAt(a) }, { ...b, card: cardAt(b) }] };
   });
   return { ...scene, links, bounds: bounds(scene) };
 }
@@ -328,7 +353,7 @@ export function layoutFamily(graph: Graph, focusId: string, options: { editing: 
   if (ownCouple) {
     for (const c of ownCouple.cards) {
       const p = graph.people[c.id];
-      if (p && p.ancestors > 0) pills.push({ key: `up-${c.id}`, x: c.x + CARD_W - 60, y: c.y - 11, label: `+${p.ancestors}`, target: c.id, direction: "up" });
+      if (p && p.ancestors > 0) pills.push({ key: `up-${c.id}`, x: c.x + CARD_W - 60, y: c.y - 11, label: `+${p.ancestors}`, target: c.id, direction: "up", at: "top" });
     }
   } else if (options.editing) {
     boxes.push({ key: `add-${focusId}`, x: (CARD_W - 150) / 2, y: -FAMILY_PITCH + (CARD_H - 52) / 2, w: 150, h: 52, label: "Dodaj rodziców", action: "add-parents", of: focusId });
@@ -563,8 +588,8 @@ type DescendantSink = Pick<Scene, "cards" | "unions" | "pills"> & { links: LinkD
  *  them again (FocusCanvas calls `onPill` with `unfold`, and `fold` for the second). */
 function branchPill(id: string, card: { x: number; y: number }, count: number, open: boolean): ScenePill {
   const at = { x: card.x + CARD_W - 64, y: card.y + CARD_H - 11 };
-  if (open) return { key: `down-${id}`, ...at, label: "Zwiń", target: id, direction: "up", unfold: true, fold: true, title: "Zwiń potomków tej osoby" };
-  return { key: `down-${id}`, ...at, label: `+${count}`, target: id, direction: "down", unfold: true, title: "Rozwiń potomków tej osoby" };
+  if (open) return { key: `down-${id}`, ...at, label: "Zwiń", target: id, direction: "up", at: "bottom", unfold: true, fold: true, title: "Zwiń potomków tej osoby" };
+  return { key: `down-${id}`, ...at, label: `+${count}`, target: id, direction: "down", at: "bottom", unfold: true, title: "Rozwiń potomków tej osoby" };
 }
 
 /** A person's descendants, tidy and top-down, as a block that is measured first and then drawn wherever it goes.
@@ -577,7 +602,9 @@ function descendantBlock(
   o: { given: number; rounded: boolean; partners: boolean; bump: ReadonlyMap<string, number>; claimed: Set<string>; rootDrawn?: boolean },
 ) {
   const { given, rounded, partners, bump, claimed, rootDrawn = false } = o;
-  const unionsOf = (id: string) => graph.unions.filter((u) => u.partners.includes(id));
+  const unionsBy = new Map<string, Graph["unions"]>();
+  for (const u of graph.unions) for (const x of new Set(u.partners)) unionsBy.set(x, [...(unionsBy.get(x) ?? []), u]);
+  const unionsOf = (id: string) => unionsBy.get(id) ?? [];
   // How many generations below each person are shown: as tree.rs walks it, the most any path gives.
   const budget = new Map<string, number>();
   const queue: [string, number][] = [[rootId, given]];
@@ -589,7 +616,7 @@ function descendantBlock(
     if (b > 0) for (const u of unionsOf(id)) for (const k of childrenOf(graph, u)) queue.push([k, b - 1]);
   }
   type Group = { partner: string | null; kids: Node[] };
-  type Node = { id: string; level: number; left: string[]; right: string[]; groups: Group[]; rowW: number; kidsW: number; width: number };
+  type Node = { id: string; level: number; more: boolean; left: string[]; right: string[]; groups: Group[]; rowW: number; kidsW: number; width: number };
   // Everyone is drawn once: a child of two descendants under the first, a partner who descends too only in their own
   // place, a partner of two descendants beside the first.
   const build = (id: string, level: number): Node => {
@@ -597,8 +624,12 @@ function descendantBlock(
     const p = graph.people[id];
     const beside = partners ? p.partners.filter((x) => graph.people[x] && !budget.has(x) && !claimed.has(x)) : [];
     for (const x of beside) claimed.add(x);
-    const node: Node = { id, level, left: beside.filter((_, i) => i % 2 === 1), right: beside.filter((_, i) => i % 2 === 0), groups: [], rowW: 0, kidsW: 0, width: 0 };
-    if (!budget.get(id)) return node;
+    const node: Node = { id, level, more: false, left: beside.filter((_, i) => i % 2 === 1), right: beside.filter((_, i) => i % 2 === 0), groups: [], rowW: 0, kidsW: 0, width: 0 };
+    if (!budget.get(id)) {
+      // Folded here: a „+N” is worth showing only if an unfold would draw someone new.
+      node.more = unionsOf(id).some((u) => childrenOf(graph, u).some((k) => !claimed.has(k)));
+      return node;
+    }
     const byPartner = new Map<string | null, string[]>();
     for (const u of unionsOf(id)) {
       const kids = childrenOf(graph, u).filter((k) => !claimed.has(k));
@@ -656,7 +687,7 @@ function descendantBlock(
         if (!rootDrawn) {
           const count = p.descendants;
           if (budget.get(n.id) === 0) pills.push({ key: `more-${n.id}`, x: px + 70, y: y + CARD_H + 12, label: `+${count} ${count === 1 ? "potomek" : "potomków"}`, target: n.id, direction: "down", unfold: true });
-        } else if (n.groups.length ? bump.has(n.id) : true) pills.push(branchPill(n.id, { x: px, y }, p.descendants, n.groups.length > 0));
+        } else if (n.groups.length ? bump.has(n.id) : n.more) pills.push(branchPill(n.id, { x: px, y }, p.descendants, n.groups.length > 0));
       }
       let cursor = left + (n.width - n.kidsW) / 2;
       const drawn = n.groups.map((g) => {

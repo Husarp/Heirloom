@@ -381,6 +381,15 @@
 .lod-1 .tree-pill {
   transform: none;
 }
+/* Below the full card the pill is bigger than the card's edge allows (it is scaled up by --inv): hang it outside
+   the card, the layout's top or bottom edge being its anchor (y sits 11 above the edge, so +11 puts the pill's own
+   top on the edge). */
+.tree-canvas:not(.lod-1) .tree-pill.at-bottom {
+  transform: translateY(11px) scale(var(--inv));
+}
+.tree-canvas:not(.lod-1) .tree-pill.at-top {
+  transform: translateY(11px) scale(var(--inv)) translateY(-100%);
+}
 .tree-pill:hover {
   color: var(--text);
   border-color: var(--text3);
@@ -398,6 +407,7 @@
   flex-direction: column;
   gap: 10px;
   pointer-events: none;
+  container-type: inline-size;
 }
 .tree-toolbar {
   display: flex;
@@ -433,6 +443,31 @@
   width: 210px;
   height: 38px;
   position: relative;
+}
+
+/* A narrow canvas (a small window with the side panel open): the two rows stay two. The tabs get tighter, the jump
+   box and the chips shrink to their icons, and the dropdowns lose their „Koloruj wg:” / „Karty:” prefix (all of them
+   keep a tooltip). */
+@container (max-width: 560px) {
+  .tree-toolbar.row1 {
+    gap: 8px;
+  }
+  .tree-toolbar .seg > button {
+    padding: 0 7px;
+  }
+  .jump-box {
+    width: 38px;
+    padding: 0;
+    justify-content: center;
+  }
+  .jump-box .jump-label,
+  .tree-toolbar .chip-label,
+  .tree-toolbar .dd-label {
+    display: none;
+  }
+  .tree-toolbar .chip {
+    padding: 0 9px;
+  }
 }
 
 /* The bottom row: the line legend on the left, the zoom on the right (as in Całe drzewo), all 34 px high. */

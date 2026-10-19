@@ -867,7 +867,9 @@ export function GallerySection({ data }: Props) {
   if (!editing && data.gallery.length === 0) return null;
   // While the section is open every photo is shown, so any can be dragged anywhere.
   const shown = all || sec.open ? list : list.slice(0, 8);
-  const profile = list.find((g) => g.profile);
+  // The profile photo's own, larger spot only when there is something else to show beside it: a gallery of one would
+  // show the same photo twice.
+  const profile = list.length >= 2 ? list.find((g) => g.profile) : undefined;
   const add = () =>
     runEdit(async () => {
       const paths = await pickFiles("Dodaj zdjęcia", [{ name: "Zdjęcia", extensions: ["jpg", "jpeg", "png", "webp", "tif", "tiff", "bmp", "gif"] }]);

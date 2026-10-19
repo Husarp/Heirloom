@@ -219,6 +219,24 @@
   height: 24px;
 }
 
+.pal-option:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* A row with a wide control (SettingRow `wide`): when the label and the control don't fit side by side, the
+   control goes below the label, on the full width, instead of squeezing the label to a few words a line. */
+.row.set-wide {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.row.set-wide > .col {
+  flex: 1 1 240px;
+}
+.row.set-wide > .pal-options {
+  flex: 1 1 300px;
+}
+
 .bc-list {
   display: flex;
   flex-direction: column;

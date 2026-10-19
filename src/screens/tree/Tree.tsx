@@ -546,9 +546,9 @@ export function Tree({ hidden }: { hidden: boolean }) {
             ]}
           />
           {view === "family" && (
-            <button className={`chip${lineOn ? " on" : ""}`} onClick={() => setLineOn((o) => !o)} title="Przygaś osoby spoza linii wybranej osoby">
+            <button className={`chip${lineOn ? " on" : ""}`} onClick={() => setLineOn((o) => !o)} title="Linia bezpośrednia: przygaś osoby spoza linii wybranej osoby">
               <GitCommitVertical size={14} />
-              Linia bezpośrednia
+              <span className="chip-label">Linia bezpośrednia</span>
             </button>
           )}
           {view === "descendants" && (
@@ -558,10 +558,10 @@ export function Tree({ hidden }: { hidden: boolean }) {
                 setPartners(!partners);
                 saveDisplay("treePartners", partners ? "off" : "on");
               }}
-              title="Pokaż małżonków i partnerów obok każdej osoby"
+              title="Partnerzy: pokaż małżonków i partnerów obok każdej osoby"
             >
               <Users size={14} />
-              Partnerzy
+              <span className="chip-label">Partnerzy</span>
             </button>
           )}
           {/* Całe drzewo has no photos on its cards yet, so there is nothing to switch there. */}
@@ -743,9 +743,9 @@ function Loading({ count, busy }: { count: number; busy: boolean }) {
 function JumpBox({ onPick }: { onPick: (id: string) => void }) {
   const setPalette = useStore((s) => s.setPalette);
   return (
-    <button className="search-box jump-box" style={{ height: 38, background: "var(--surface)" }} onClick={() => setPalette(true, { scope: "people", pick: onPick })}>
+    <button className="search-box jump-box" title="Skocz do osoby" style={{ height: 38, background: "var(--surface)" }} onClick={() => setPalette(true, { scope: "people", pick: onPick })}>
       <Crosshair size={15} />
-      <span className="grow" style={{ textAlign: "left" }}>
+      <span className="grow jump-label" style={{ textAlign: "left" }}>
         Skocz do osoby…
       </span>
     </button>

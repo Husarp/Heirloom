@@ -381,7 +381,7 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
           scene.pills.map((p) => (
             <button
               key={p.key}
-              className={`tree-pill ${p.direction}`}
+              className={`tree-pill ${p.direction}${p.at ? ` at-${p.at}` : ""}`}
               style={{ left: p.x, top: p.y }}
               onClick={() => onPill(p.target, !!p.unfold, !!p.fold)}
               title={p.title ?? (p.unfold ? "Rozwiń kolejne 3 pokolenia tej gałęzi" : p.direction === "down" ? "Potomkowie — pokaż od tej osoby" : "Dalsi przodkowie — pokaż od tej osoby")}

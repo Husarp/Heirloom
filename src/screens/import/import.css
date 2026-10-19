@@ -228,6 +228,18 @@
   gap: 12px;
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
+  /* No room: the buttons go below the title (which stays on one line) instead of squeezing it. */
+  flex-wrap: wrap;
+}
+.imp-recog-title {
+  flex: 1 1 180px;
+}
+.imp-recog-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-left: auto;
 }
 .imp-recog-row {
   display: grid;

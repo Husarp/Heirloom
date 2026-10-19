@@ -2,11 +2,18 @@ import { useEffect } from "react";
 
 const MARGIN = 8;
 
+// What React (or the component) set inline before this hook touched the element: put back on every fit.
+const own = new WeakMap<HTMLElement, { maxHeight: string; overflowY: string }>();
+
 /** Keeps every open `.popover` (menus, pickers) inside the window: on a short window it scrolls inside itself, or
- *  moves up, instead of running past the bottom edge; sideways it is moved back in. */
+ *  moves up, instead of running past the bottom edge; sideways it is moved back in. Popovers that place themselves
+ *  (`position: fixed`, they follow their button on scroll) or carry `data-no-fit` are left alone. */
 function fit(el: HTMLElement) {
-  el.style.maxHeight = "";
-  el.style.overflowY = "";
+  if (el.dataset.noFit !== undefined || getComputedStyle(el).position === "fixed") return;
+  if (!own.has(el)) own.set(el, { maxHeight: el.style.maxHeight, overflowY: el.style.overflowY });
+  const mine = own.get(el)!;
+  el.style.maxHeight = mine.maxHeight;
+  el.style.overflowY = mine.overflowY;
   el.style.translate = "";
   const r = el.getBoundingClientRect();
   if (r.width === 0 && r.height === 0) return;

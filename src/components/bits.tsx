@@ -390,12 +390,14 @@ export function Dropdown<T extends string>({
     <div ref={ref} style={{ position: "relative" }}>
       <button
         className="chip"
+        title={`${label} ${current?.label ?? ""}`}
         onClick={() => setOpen((o) => !o)}
         style={open ? { border: "1.5px solid var(--accent)", boxShadow: "var(--ring)", color: "var(--text)" } : { color: "var(--text)" }}
       >
         {icon}
         <span>
-          {label} <b style={{ fontWeight: 600 }}>{current?.label}</b>
+          <span className="dd-label">{label} </span>
+          <b style={{ fontWeight: 600 }}>{current?.label}</b>
         </span>
         <ChevronDown size={13} color="var(--text3)" style={{ transform: open ? "rotate(180deg)" : undefined }} />
       </button>
@@ -532,10 +534,10 @@ export function EmptyState({ icon, title, text, action }: { icon?: ReactNode; ti
 
 /** Label + optional description on the left, a control on the right (Settings rows). `soon`: not built yet — the
  *  row is greyed with a „wkrótce” badge and its control is shown but can't be used (one look for all such rows). */
-export function SettingRow({ label, note, children, last, soon }: { label: ReactNode; note?: ReactNode; children?: ReactNode; last?: boolean; soon?: boolean }) {
+export function SettingRow({ label, note, children, last, soon, wide }: { label: ReactNode; note?: ReactNode; children?: ReactNode; last?: boolean; soon?: boolean; wide?: boolean }) {
   return (
     <div
-      className={`row${soon ? " set-soon" : ""}`}
+      className={`row${soon ? " set-soon" : ""}${wide ? " set-wide" : ""}`}
       aria-disabled={soon || undefined}
       style={{ minHeight: 60, padding: "10px 18px", gap: 20, borderBottom: last ? undefined : "1px solid var(--border)" }}
     >
