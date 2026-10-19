@@ -512,12 +512,22 @@
   border-bottom: 1px solid var(--border);
 }
 .tree-panel-body {
+  flex: 1;
   padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 16px;
   overflow: auto;
   min-height: 0;
+}
+/* „Otwórz profil” stays pinned under the scrolling body. */
+.tree-panel-foot {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
 }
 .panel-photo {
   width: 100%;

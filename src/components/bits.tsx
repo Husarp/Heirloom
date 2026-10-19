@@ -255,7 +255,13 @@ export function Segmented<T extends string>({
           style={size ? { height: size } : undefined}
         >
           {o.icon}
-          {o.label}
+          {typeof o.label === "string" ? (
+            <span className="seg-label" data-label={o.label}>
+              {o.label}
+            </span>
+          ) : (
+            o.label
+          )}
         </button>
       ))}
     </div>

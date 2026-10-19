@@ -458,7 +458,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
           <Segmented
             value={view}
             onChange={setView}
-            style={{ padding: 3 }}
+            size={31}
             options={[
               { value: "family", label: "Rodzina" },
               { value: "ancestors", label: "Przodkowie" },

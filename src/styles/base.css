@@ -294,6 +294,8 @@ a:hover {
 
 .seg {
   display: inline-flex;
+  /* A stretched track (toolbar rows) keeps the buttons in its middle, not stuck to the top. */
+  align-items: center;
   gap: 2px;
   padding: 2px;
   border: 1.5px solid var(--line);
@@ -308,10 +310,26 @@ a:hover {
   padding: 0 10px;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 5px;
+  line-height: 1;
   border-radius: var(--r-ctl-2);
   color: var(--text2);
   font-weight: 500;
+}
+/* The label reserves its bold width, so choosing an option doesn't shift the neighbours. */
+.seg-label {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+.seg-label::after {
+  content: attr(data-label);
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  font-weight: 600;
+  pointer-events: none;
 }
 .seg > button:hover:not(.on) {
   color: var(--text);
