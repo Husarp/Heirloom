@@ -1,9 +1,9 @@
 // The tools for one relative in edit mode, the same on the tree's cards and in the profile's Rodzina: „Edytuj”, „Zmień
 // pokrewieństwo” (what they are to the other person, and for a parent and child: biological, adopted…), „Odłącz”
-// (only the link goes; the sentence in the question says exactly what changes) and „Usuń osobę z archiwum…”. Every
-// change is one undoable edit like any other.
+// (only the link goes; the sentence in the question says exactly what changes). Deleting a person is on their own
+// profile. Every change is one undoable edit like any other.
 
-import { ArrowRightLeft, ChevronDown, Pencil, Trash2, Unlink } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, Pencil, Unlink } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { call } from "../../api/transport";
@@ -190,30 +190,6 @@ export function RelativeTools({
       }),
     );
 
-  // Deleting takes the person out of every family (and texts only about them); photos and sources stay.
-  const remove = () =>
-    guard(() =>
-      useStore.getState().setAsk({
-        title: `Usunąć osobę ${relative.name} z archiwum?`,
-        text: `To nie jest odłączenie: ${relative.name} zniknie z drzewa i list, razem ze wszystkimi powiązaniami w rodzinach i tekstami, które opisują tylko tę osobę. Zdjęcia i źródła zostaną w archiwum. Zmiana czeka na zapis — do tego czasu można ją cofnąć.`,
-        icon: "warn",
-        buttons: [
-          { label: "Anuluj", kind: "ghost" },
-          {
-            label: "Usuń osobę",
-            kind: "danger",
-            run: () =>
-              runEdit(async () => {
-                await call("person.delete", { id: relative.id });
-                afterChange();
-                onGone?.(relative.id);
-                useStore.getState().notify(`Usunięto: ${relative.name}.`, { action: undoAction() });
-              }),
-          },
-        ],
-      }),
-    );
-
   const parentChild = (kind === "parent" || kind === "child") && !!family;
   const menuStyle: CSSProperties =
     variant === "strip" ? { position: "fixed", left: spot?.left ?? 0, top: spot?.top ?? 0, visibility: spot ? undefined : "hidden" } : { left: 0, top: 34 };
@@ -260,12 +236,16 @@ export function RelativeTools({
           <ArrowRightLeft size={14} />
         </button>
       )}
-      <button className="icon-btn" title={`Odłącz od: ${toWhom} (osoba zostaje w archiwum)`} aria-label={`Odłącz: ${relative.name}`} onClick={unlink}>
-        <Unlink size={14} />
-      </button>
-      <button className="icon-btn danger" title="Usuń osobę z archiwum…" aria-label={`Usuń z archiwum: ${relative.name}`} onClick={remove}>
-        <Trash2 size={14} />
-      </button>
+      {variant === "row" ? (
+        <button className="btn ghost xs" title={`Odłącz od: ${toWhom} (osoba zostaje w archiwum)`} aria-label={`Odłącz: ${relative.name}`} onClick={unlink}>
+          <Unlink size={13} />
+          Odłącz
+        </button>
+      ) : (
+        <button className="icon-btn" title={`Odłącz od: ${toWhom} (osoba zostaje w archiwum)`} aria-label={`Odłącz: ${relative.name}`} onClick={unlink}>
+          <Unlink size={14} />
+        </button>
+      )}
       {variant === "strip" ? menu && createPortal(menu, document.body) : menu}
     </div>
   );

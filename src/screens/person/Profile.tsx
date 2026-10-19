@@ -1,4 +1,4 @@
-import { History, ImagePlus, Image as ImageIcon, Network, Pencil } from "lucide-react";
+import { BookOpen, History, IdCard, ImagePlus, Image as ImageIcon, Images, Network, Pencil, Users, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { call } from "../../api/transport";
 import { useStore } from "../../app/store";
@@ -31,6 +31,9 @@ import {
 } from "./ProfileSections";
 import type { Profile as ProfileData } from "./types";
 import "./profile.css";
+
+/** Only the main sections get an icon. */
+const TOC_ICONS: Record<string, LucideIcon> = { "sec-personal": IdCard, "sec-family": Users, "sec-bio": BookOpen, "sec-gallery": Images };
 
 interface TocItem {
   id: string;
@@ -145,6 +148,10 @@ export function Profile({ id, section, open }: { id: string; section?: string; o
               className={`toc-item${item.sub ? " sub" : ""}${active === item.id ? " active" : ""}`}
               onClick={() => document.getElementById(item.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
             >
+              {(() => {
+                const Icon = TOC_ICONS[item.id];
+                return Icon ? <Icon size={14} className="toc-icon" aria-hidden /> : null;
+              })()}
               <span className="ellipsis">{item.label}</span>
             </button>
           ))}

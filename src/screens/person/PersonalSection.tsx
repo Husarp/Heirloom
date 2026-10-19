@@ -293,6 +293,59 @@ export function PersonalEditor({
     });
 
   if (!form) return <section className="hero editing" style={{ minHeight: 320 }} aria-busy="true" />;
+  // A new person: only the few things that make them (the rest is added on their profile).
+  if (!id) {
+    return (
+      <section
+        className="new-person"
+        aria-label="Nowa osoba"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.target as HTMLElement).tagName === "INPUT") {
+            e.preventDefault();
+            void done();
+          }
+        }}
+      >
+        <div className="row" style={{ gap: 10 }}>
+          <span className="section-kicker">{relation && relatedName ? `Nowa osoba · ${RELATION_WORD[relation.kind]}: ${relatedName}` : "Nowa osoba"}</span>
+        </div>
+        <Field label="Imiona">
+          <input className="input name-input" autoFocus value={form.given} onChange={(e) => set("given", e.target.value)} />
+        </Field>
+        <Field label="Nazwisko">
+          <input className="input name-input" value={form.surname} onChange={(e) => set("surname", e.target.value)} />
+        </Field>
+        <Field label="Płeć">
+          <Segmented
+            full
+            size={34}
+            value={form.sex === "M" || form.sex === "F" ? form.sex : "U"}
+            onChange={(v) => set("sex", v)}
+            options={[
+              { value: "M", label: "Mężczyzna" },
+              { value: "F", label: "Kobieta" },
+              { value: "U", label: "Nieznana" },
+            ]}
+          />
+        </Field>
+        <Field label="Żyje?">
+          <Segmented
+            full
+            size={34}
+            variant="neutral"
+            value={form.status}
+            onChange={(v) => set("status", v)}
+            options={[
+              { value: "living", label: "Żyje" },
+              { value: "deceased", label: "Nie żyje" },
+              { value: "unknown", label: "Nie wiadomo" },
+            ]}
+          />
+        </Field>
+        <SectionFoot onCancel={cancel} onDone={() => void done()} busy={busy} doneLabel="Utwórz osobę" />
+      </section>
+    );
+  }
   const living = form.status === "living";
   const photo = profile?.portrait?.path;
 

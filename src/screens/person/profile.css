@@ -74,7 +74,7 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text3);
-  padding: 0 0 10px 12px;
+  padding: 0 0 10px 36px;
 }
 .toc-item {
   height: 32px;
@@ -84,8 +84,21 @@
   font-size: 14px;
   color: var(--text2);
   box-shadow: inset 1px 0 0 var(--border);
+  /* The icons of the main sections sit in a gutter left of the progress line. */
+  margin-left: 24px;
+  position: relative;
   text-align: left;
   min-width: 0;
+}
+.toc-icon {
+  position: absolute;
+  left: -22px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text3);
+}
+.toc-item.active .toc-icon {
+  color: var(--accent);
 }
 .toc-item.sub {
   padding-left: 26px;
@@ -554,6 +567,28 @@
   min-width: 0;
   max-width: 760px;
 }
+/* A new person: one narrow column instead of the wide hero. */
+.new-person {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 32px 0 8px;
+  box-sizing: border-box;
+}
+.new-person-info {
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 0 0 56px;
+  box-sizing: border-box;
+}
+.new-person-page {
+  padding: 0 24px;
+}
+
 .pf-grid2 {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
