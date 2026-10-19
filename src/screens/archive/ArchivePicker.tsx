@@ -1,6 +1,6 @@
 import { AppWindow, FileText, FileWarning, FolderOpen, FolderPlus, FolderX, Layers, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { call } from "../../api/transport";
+import { call, type ApiError } from "../../api/transport";
 import type { RecentArchive } from "../../api/types";
 import { isSetPath, useStore } from "../../app/store";
 import { BrandMark, Dropdown, rowButton } from "../../components/bits";
@@ -25,6 +25,7 @@ export function ArchivePicker() {
   const [together, setTogether] = useState(false);
   const [errorShown, setErrorShown] = useState(false);
   const setAsk = useStore((s) => s.setAsk);
+  const notify = useStore((s) => s.notify);
   const sort: RecentSort = app?.recentSort ?? "opened";
   const recent = sortRecent(app?.recent ?? [], sort);
 
@@ -55,8 +56,12 @@ export function ArchivePicker() {
       ],
     });
   const changeSort = async (value: RecentSort) => {
-    await call("recent.setSort", { sort: value });
-    await refreshApp();
+    try {
+      await call("recent.setSort", { sort: value });
+      await refreshApp();
+    } catch (e) {
+      notify((e as ApiError).message, { kind: "err" });
+    }
   };
 
   return (

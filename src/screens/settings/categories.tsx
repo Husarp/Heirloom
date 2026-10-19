@@ -17,7 +17,7 @@ import { runEdit } from "../media/shared";
 import { Section } from "./parts";
 
 /** What files of a removed category stay as: „jako zdjęcie” / „jako zdjęcia”. */
-const STAYS_AS: Record<Base, [string, string]> = { photo: ["zdjęcie", "zdjęcia"], document: ["dokument", "dokumenty"], other: ["inny", "inne"] };
+const STAYS_AS: Record<Base, [string, string]> = { photo: ["zdjęcie", "zdjęcia"], document: ["dokument", "dokumenty"], other: ["zwykły plik", "zwykłe pliki"] };
 
 export function CategoriesSection({ archive }: { archive: ArchiveStatus }) {
   const categories = useCategories();

@@ -8,6 +8,7 @@
 import { Check, Star } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { profileChange } from "./profileDiff";
 import { clickRow } from "./tickRange";
 import "./ProfileStar.css";
 
@@ -33,8 +34,10 @@ export function ProfileTag({ name, profile, compact }: { name: string; profile: 
 /** `people`: everyone on the photo. `profileOf`: the ids of those whose profile photo it is. `current`: the person the
  *  screen is about (the star is filled when it is their profile photo, and they are ticked first); without it the star is
  *  filled when it is anybody's. `editable` false: only a filled star shows, and it does nothing.
- *  - Outlined star: one person on the photo → `onSet` at once; more → a list to tick („Dalej”, „Wszystkim”).
- *  - Filled star: one person has it → `onUnset` at once; more → a list to tick whose it stops being. */
+ *  - With `current`: outlined star: one person on the photo → `onSet` at once; more → a list to tick („Dalej”,
+ *    „Wszystkim”). Filled star: one person has it → `onUnset` at once; more → a list to tick whose it stops being.
+ *  - Without `current` and with several people on the photo: either star opens one list of everyone, ticked = those
+ *    who have it; „Dalej” applies the difference (`onSet` for the newly ticked, `onUnset` for the unticked). */
 export function ProfileStar({
   people,
   profileOf,
@@ -50,7 +53,7 @@ export function ProfileStar({
   onSet: (ids: string[]) => void;
   onUnset: (ids: string[]) => void;
 }) {
-  const [pop, setPop] = useState<"set" | "unset" | null>(null);
+  const [pop, setPop] = useState<"set" | "unset" | "diff" | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   const filled = current ? profileOf.includes(current) : profileOf.length > 0;
   if (!filled && !editable) return null;
@@ -64,7 +67,8 @@ export function ProfileStar({
 
   const click = () => {
     if (pop) return setPop(null);
-    if (filled) {
+    if (!current && people.length > 1) setPop("diff");
+    else if (filled) {
       if (profileOf.length <= 1) onUnset(profileOf);
       else setPop("unset");
     } else if (people.length <= 1) {
@@ -104,6 +108,20 @@ export function ProfileStar({
           onClose={() => setPop(null)}
         />
       )}
+      {pop === "diff" && (
+        <PeoplePopover
+          anchor={button.current}
+          title="Zdjęcie profilowe dla:"
+          people={people}
+          marked={[]}
+          initial={profileOf}
+          actions={[
+            { label: "Dalej", run: () => {}, diff: { profileOf, onSet, onUnset } },
+            { label: "Wszystkim", run: onSet, all: true },
+          ]}
+          onClose={() => setPop(null)}
+        />
+      )}
       {pop === "unset" && (
         <PeoplePopover
           anchor={button.current}
@@ -126,6 +144,8 @@ interface PopAction {
   ticked?: boolean;
   /** …or with everyone. */
   all?: boolean;
+  /** …or applies the difference between those who have it (`profileOf`) and the ticked ones. */
+  diff?: { profileOf: string[]; onSet: (ids: string[]) => void; onUnset: (ids: string[]) => void };
 }
 
 const POP_W = 270;
@@ -193,7 +213,16 @@ function PeoplePopover({
   }, [anchor, onClose]);
   useEffect(() => box.current?.querySelector<HTMLElement>("[role=checkbox]")?.focus(), []);
 
+  const change = (a: PopAction) => (a.diff ? profileChange(a.diff.profileOf, ticked) : null);
   const run = (a: PopAction) => {
+    const diff = change(a);
+    if (a.diff && diff) {
+      if (!diff.set.length && !diff.unset.length) return;
+      onClose();
+      if (diff.unset.length) a.diff.onUnset(diff.unset);
+      if (diff.set.length) a.diff.onSet(diff.set);
+      return;
+    }
     const who = a.all ? ids : ticked;
     if (!who.length) return;
     onClose();
@@ -226,7 +255,7 @@ function PeoplePopover({
       </div>
       <div className="ps-actions">
         {actions.map((a, n) => (
-          <button key={a.label} type="button" className={`btn sm ${n === 0 ? "primary" : "secondary"}`} disabled={!a.all && ticked.length === 0} onClick={() => run(a)}>
+          <button key={a.label} type="button" className={`btn sm ${n === 0 ? "primary" : "secondary"}`} disabled={a.diff ? !change(a)!.set.length && !change(a)!.unset.length : !a.all && ticked.length === 0} onClick={() => run(a)}>
             {a.label}
           </button>
         ))}

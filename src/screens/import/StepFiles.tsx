@@ -205,6 +205,12 @@ function FileCard({
   const setKind = (kind: Base, category: string | null) => act("import.file", { file: f.file, kind, ...(category ? { category } : {}) });
   const kinds: Category[] = f.category && !categories.some((c) => c.name === f.category) ? [...categories, { name: f.category, base: (f.kind as Base) ?? "other", count: 0, saved: false }] : categories;
 
+  // The star list may unset some people and set others in one go: the two calls run one after the other.
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const inOrder = (run: () => Promise<unknown>) => {
+    queue.current = queue.current.then(run);
+  };
+
   const attach = async () => {
     const [path] = await pickFiles(`Wskaż plik ${f.file}`, undefined, false);
     if (path) await act("import.attach", { file: f.file, path });
@@ -239,8 +245,8 @@ function FileCard({
             people={starPeople}
             profileOf={profileOf}
             editable={!skipped}
-            onSet={(ids) => act("import.profile", { persons: ids, file: f.file })}
-            onUnset={(ids) => act("import.profile", { persons: ids, file: null })}
+            onSet={(ids) => inOrder(() => act("import.profile", { persons: ids, file: f.file }))}
+            onUnset={(ids) => inOrder(() => act("import.profile", { persons: ids, file: null }))}
           />
         ))}
       </div>
@@ -444,13 +450,27 @@ function AssignList({ anchor, people, onPick, onClose }: { anchor: HTMLElement |
   const list = useRef<HTMLDivElement>(null);
   const shown = useMemo(() => matchPeople(people, query), [people, query]);
 
+  const [listMax, setListMax] = useState(ASSIGN_LIST_MAX);
+
+  // Below the link whenever the whole popover fits there; else above if it fits; else on the side with more room, with
+  // a shorter list (it scrolls). The height is the real one: the chrome around the list plus the list as tall as it
+  // wants to be (up to the maximum) — not what the last placement left of it.
   useLayoutEffect(() => {
     const rect = anchor?.getBoundingClientRect();
-    const height = box.current?.offsetHeight ?? 0;
-    if (!rect) return;
+    const el = box.current;
+    const listEl = list.current;
+    if (!rect || !el || !listEl) return;
+    const chrome = el.offsetHeight - listEl.offsetHeight;
+    const wanted = Math.min(ASSIGN_LIST_MAX, listEl.scrollHeight);
+    const spaceBelow = window.innerHeight - 8 - (rect.bottom + 6);
+    const spaceAbove = rect.top - 6 - 8;
+    const full = chrome + wanted;
+    const below = full <= spaceBelow || (full > spaceAbove && spaceBelow >= spaceAbove);
+    const space = below ? spaceBelow : spaceAbove;
+    const fitted = full <= space ? wanted : Math.max(96, Math.min(ASSIGN_LIST_MAX, space - chrome));
     const left = Math.max(8, Math.min(rect.right - ASSIGN_W, window.innerWidth - ASSIGN_W - 8));
-    const below = rect.bottom + 6;
-    const top = below + height > window.innerHeight - 8 ? Math.max(8, rect.top - 6 - height) : below;
+    const top = below ? rect.bottom + 6 : Math.max(8, rect.top - 6 - (chrome + fitted));
+    setListMax(fitted === wanted ? ASSIGN_LIST_MAX : fitted);
     setAt((p) => (p.left === left && p.top === top ? p : { left, top }));
   }, [anchor, shown.length]);
   useEffect(() => {
@@ -503,7 +523,7 @@ function AssignList({ anchor, people, onPick, onClose }: { anchor: HTMLElement |
           }
         }}
       />
-      <div ref={list} className="imp-assign-list scroll" style={{ maxHeight: ASSIGN_LIST_MAX }} role="listbox">
+      <div ref={list} className="imp-assign-list scroll" style={{ maxHeight: listMax }} role="listbox">
         {shown.length === 0 && <div className="imp-assign-none">Nikogo takiego w paczce.</div>}
         {shown.map((p, i) => (
           <button key={p.id} type="button" role="option" aria-selected={i === active} className={`menu-item${i === active ? " active" : ""}`} onMouseMove={() => i !== active && setActive(i)} onClick={() => onPick(p.id)}>

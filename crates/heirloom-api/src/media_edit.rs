@@ -149,7 +149,8 @@ pub fn object_node(xref: &str, relative: &str, kind: Option<&str>, title: Option
         _ => is_image(relative) && document_type.is_none(),
     };
     let mut medi = Node::with_value("MEDI", if photo { "PHOTO" } else if kind == Some("other") { "OTHER" } else { "MANUSCRIPT" });
-    if let Some(doc_type) = document_type.map(str::trim).filter(|t| !t.is_empty()) {
+    // „inne” (OTHER) never carries a PHRASE: with one, the reader treats it as a type from another program.
+    if let Some(doc_type) = document_type.map(str::trim).filter(|t| !t.is_empty() && kind != Some("other")) {
         medi.children.push(Node::with_value("PHRASE", doc_type));
     }
     let mut file = Node::with_value("FILE", &file_uri(relative)).with_child(Node::with_value("FORM", media_type(relative)).with_child(medi));
@@ -333,7 +334,8 @@ fn update(s: &mut Session, args: &Value) -> ApiResult {
         };
         form.children.retain(|c| c.tag != "MEDI" && c.tag != "TYPE");
         let mut medi = Node::with_value("MEDI", &value);
-        if let Some(t) = doc_type.map(str::trim).filter(|t| !t.is_empty()) {
+        // No PHRASE under OTHER (see `object_node`).
+        if let Some(t) = doc_type.map(str::trim).filter(|t| !t.is_empty() && value != "OTHER") {
             medi.children.push(Node::with_value("PHRASE", t));
         }
         form.children.push(medi);
@@ -1023,6 +1025,23 @@ mod tests {
         assert_eq!(s.archive.undo_depth(), depth);
         assert!(crate::edit::call(&mut s, "media.reorder", &json!({ "person": "@I2@", "order": ["@O1@"] })).is_err());
         assert!(crate::edit::call(&mut s, "media.reorder", &json!({ "person": "@I1@", "order": ["@D1@"] })).is_err());
+    }
+
+    #[test]
+    fn a_category_with_base_other_stays_other_after_save_and_reload_and_has_no_phrase() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = category_session(dir.path());
+        // p3.jpg is a picture, but its category behaves like „inne”; a document type sent along is not written.
+        crate::edit::call(&mut s, "media.update", &json!({ "id": "@O3@", "kind": "other", "documentType": "pamiątka", "category": "Pamiątki" })).unwrap();
+        let medi = s.archive.doc.record("@O3@").unwrap().child("FILE").unwrap().child("FORM").unwrap().child("MEDI").unwrap().clone();
+        assert_eq!((medi.value.as_deref(), medi.child("PHRASE").is_none()), (Some("OTHER"), true));
+        s.archive.save(&heirloom_core::SaveOptions { author: "test", batch: None, note: None, allow_foreign: false, kind: None }).unwrap();
+        let mut again = Session::new(Archive::open(&dir.path().join("a")).unwrap());
+        let object = again.derived().view.media.get("@O3@").unwrap().clone();
+        assert_eq!((object.kind, object.category.as_deref()), (MediaKind::Other, Some("Pamiątki")));
+        // A new object for a picture filed as „inne” carries no PHRASE either.
+        let node = object_node("@O9@", "media/x.jpg", Some("other"), None, Some("coś"));
+        assert!(node.child("FILE").unwrap().child("FORM").unwrap().child("MEDI").unwrap().child("PHRASE").is_none());
     }
 
     #[test]

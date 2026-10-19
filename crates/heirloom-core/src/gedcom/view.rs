@@ -627,7 +627,7 @@ fn percent_decode(text: &str) -> String {
 pub fn media_kind_for(format: Option<&str>, medi: Option<&str>, file: Option<&str>) -> MediaKind {
     match medi.map(|m| m.trim().to_ascii_uppercase()).as_deref() {
         Some("PHOTO" | "TOMBSTONE" | "CARD") => return MediaKind::Photo,
-        // What Heirloom writes for „inne”, whatever the file looks like.
+        // What Heirloom writes for „inne” (no PHRASE, see `media_object`), whatever the file looks like.
         Some("OTHER") => return MediaKind::Other,
         Some("MANUSCRIPT" | "BOOK" | "NEWSPAPER" | "MAGAZINE" | "FICHE" | "FILM" | "ELECTRONIC" | "DOCUMENT") => {
             return MediaKind::Document;
@@ -646,14 +646,35 @@ pub fn media_kind_for(format: Option<&str>, medi: Option<&str>, file: Option<&st
     }
 }
 
-fn media_object(node: &Node, id: &str, version: Version) -> MediaObject {
+/// The kind of an `OBJE` record: its `MEDI`, else its file extension.
+pub fn object_kind(node: &Node, version: Version) -> MediaKind {
+    media_parts(node, version).kind
+}
+
+struct MediaParts<'a> {
+    file: Option<String>,
+    format: Option<String>,
+    medi: Option<&'a Node>,
+    kind: MediaKind,
+}
+
+fn media_parts(node: &Node, version: Version) -> MediaParts<'_> {
     let file_node = node.child("FILE");
     let file = file_node.and_then(|f| f.value.as_deref()).map(|v| file_path(v, version)).filter(|f| !f.is_empty());
     // 7.0: FILE.FORM.MEDI; 5.5.1: FILE.FORM.TYPE; 5.5: FORM at the object level.
     let form = file_node.and_then(|f| f.child("FORM")).or_else(|| node.child("FORM"));
     let medi = form.and_then(|f| f.child("MEDI").or_else(|| f.child("TYPE")));
     let format = form.and_then(|f| f.value.as_deref()).map(|v| v.trim().to_string());
-    let kind = media_kind_for(format.as_deref(), medi.and_then(|m| m.value.as_deref()), file.as_deref());
+    // `MEDI OTHER` with a PHRASE is what the 5.5.1 upgrade makes of a type it doesn't know (`Foto`, `jpg`): that says
+    // nothing about the file, so the extension decides. Heirloom's own „inne” is OTHER without a PHRASE.
+    let medi_value = medi.filter(|m| !(m.value.as_deref().is_some_and(|v| v.trim().eq_ignore_ascii_case("OTHER")) && m.child("PHRASE").is_some())).and_then(|m| m.value.as_deref());
+    let kind = media_kind_for(format.as_deref(), medi_value, file.as_deref());
+    MediaParts { file, format, medi, kind }
+}
+
+fn media_object(node: &Node, id: &str, version: Version) -> MediaObject {
+    let file_node = node.child("FILE");
+    let MediaParts { file, format, medi, kind } = media_parts(node, version);
     let title = file_node.and_then(|f| text_of(f, "TITL", version)).or_else(|| text_of(node, "TITL", version));
     MediaObject {
         id: id.to_string(),
@@ -816,5 +837,20 @@ mod tests {
         assert_eq!((v.media["@O1@"].category.as_deref(), v.media["@O1@"].kind), (Some("Pocztówki"), MediaKind::Photo));
         assert_eq!(v.media["@O2@"].category, None, "an empty name is no category");
         assert_eq!(v.media["@O3@"].kind, MediaKind::Other, "MEDI OTHER is „inne”, though the file is a picture");
+    }
+
+    #[test]
+    fn other_with_a_phrase_from_the_upgrade_does_not_hide_a_photo() {
+        // 5.5.1 `TYPE Foto` on a .jpg: after the upgrade it is OTHER + PHRASE „Foto”, and still a photo.
+        let old = "0 HEAD\n1 GEDC\n2 VERS 5.5.1\n2 FORM LINEAGE-LINKED\n1 CHAR UTF-8\n0 @O1@ OBJE\n1 FILE media/a.jpg\n2 FORM jpg\n3 TYPE Foto\n0 TRLR\n";
+        let (mut doc, _) = Document::from_bytes(old.as_bytes());
+        assert_eq!(build(&doc).media["@O1@"].kind, MediaKind::Photo);
+        assert!(doc.upgrade_to_v7());
+        let medi = doc.record("@O1@").unwrap().child("FILE").unwrap().child("FORM").unwrap().child("MEDI").unwrap();
+        assert_eq!((medi.value.as_deref(), medi.child_value("PHRASE")), (Some("OTHER"), Some("Foto")));
+        assert_eq!(build(&doc).media["@O1@"].kind, MediaKind::Photo);
+        // Heirloom's own „inne” (OTHER, no PHRASE) stays Other, though the file is a picture.
+        let own = "0 HEAD\n1 GEDC\n2 VERS 7.0\n0 @O1@ OBJE\n1 FILE media/a.jpg\n2 FORM image/jpeg\n3 MEDI OTHER\n0 TRLR\n";
+        assert_eq!(build(&Document::from_bytes(own.as_bytes()).0).media["@O1@"].kind, MediaKind::Other);
     }
 }

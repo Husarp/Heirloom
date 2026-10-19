@@ -56,7 +56,7 @@ export function CategoryDialog({ base = "photo", onClose, onAdded }: { base?: Ba
         </label>
         <div className="field">
           <span className="field-label">Traktuj jak</span>
-          <Segmented variant="neutral" full value={like} onChange={setLike} options={BASES.map((b) => ({ value: b, label: BASE_LABEL[b] }))} />
+          <Segmented full value={like} onChange={setLike} options={BASES.map((b) => ({ value: b, label: BASE_LABEL[b] }))} />
           <span style={{ fontSize: 12, color: "var(--text3)" }}>
             {like === "photo" && "Pliki z tej kategorii pokażą się w Galerii i mogą być zdjęciem profilowym."}
             {like === "document" && "Pliki z tej kategorii pokażą się w Dokumentach osoby."}
