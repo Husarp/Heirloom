@@ -810,6 +810,23 @@ mod tests {
     }
 
     #[test]
+    fn a_dropped_folder_is_read_with_its_subfolders() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("Ciechanki").join("zdjecia");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(dir.path().join("Ciechanki").join("czesc-1.json"), example_json()).unwrap();
+        std::fs::write(sub.join("M001 akt.jpg"), b"photo").unwrap();
+        std::fs::write(sub.join("Thumbs.db"), b"x").unwrap();
+        std::fs::write(dir.path().join("desktop.ini"), b"x").unwrap();
+        let inputs = read_inputs_with(&[], &[dir.path().to_path_buf()], &[]);
+        assert_eq!(inputs.answers.len(), 1);
+        assert_eq!(inputs.answers[0].origin, "czesc-1.json");
+        let names: Vec<(&str, Option<u32>)> = inputs.files.iter().map(|f| (f.name.as_str(), f.m)).collect();
+        assert_eq!(names, [("M001 akt.jpg", Some(1))]);
+        assert!(inputs.missing.is_empty());
+    }
+
+    #[test]
     fn m_numbers() {
         assert_eq!(m_number("M001 akt urodzenia.jpg"), Some(1));
         assert_eq!(m_number("m12.pdf"), Some(12));

@@ -106,9 +106,26 @@ fn no_draft() -> ApiError {
     ApiError::new("no_import", "Nie ma rozpoczętego importu.")
 }
 
+/// The AI instructions as a file: `.txt` with Windows line ends and a UTF-8 BOM (Notepad then shows the Polish
+/// letters), anything else (`.md`) as is.
+fn instructions_file(path: &std::path::Path) -> Vec<u8> {
+    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("txt")) {
+        let mut out = vec![0xEF, 0xBB, 0xBF];
+        out.extend(AI_INSTRUCTIONS.replace("\r\n", "\n").replace('\n', "\r\n").into_bytes());
+        out
+    } else {
+        AI_INSTRUCTIONS.as_bytes().to_vec()
+    }
+}
+
 pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Value) -> ApiResult {
     match method {
         "import.instructions" => Ok(json!({ "text": AI_INSTRUCTIONS, "version": FORMAT_VERSION })),
+        "import.saveInstructions" => {
+            let path = PathBuf::from(req(args, "path")?);
+            std::fs::write(&path, instructions_file(&path)).map_err(|e| ApiError::new("write_failed", format!("Nie udało się zapisać instrukcji: {e}")))?;
+            Ok(json!({ "path": path.to_string_lossy() }))
+        }
         "import.load" => {
             let texts: Vec<String> = args.get("texts").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
             let paths: Vec<PathBuf> = args.get("paths").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(PathBuf::from).collect()).unwrap_or_default();
@@ -1042,4 +1059,28 @@ fn history(s: &Session) -> Value {
             })
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use heirloom_core::Archive;
+
+    #[test]
+    fn instructions_are_saved_as_txt_with_bom_and_crlf_and_as_md_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let mut draft = None;
+        let txt = dir.path().join("Instrukcja.txt");
+        call(&mut session, &mut draft, "import.saveInstructions", &json!({ "path": txt.to_string_lossy() })).unwrap();
+        let bytes = std::fs::read(&txt).unwrap();
+        assert_eq!(&bytes[..3], [0xEF, 0xBB, 0xBF]);
+        let body = String::from_utf8(bytes[3..].to_vec()).unwrap();
+        assert!(body.contains("\r\n") && !body.replace("\r\n", "").contains('\n'));
+        assert_eq!(body.replace("\r\n", "\n"), AI_INSTRUCTIONS.replace("\r\n", "\n"));
+
+        let md = dir.path().join("Instrukcja.md");
+        call(&mut session, &mut draft, "import.saveInstructions", &json!({ "path": md.to_string_lossy() })).unwrap();
+        assert_eq!(std::fs::read(&md).unwrap(), AI_INSTRUCTIONS.as_bytes());
+    }
 }

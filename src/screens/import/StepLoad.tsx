@@ -10,6 +10,7 @@ import {
   CircleX,
   ClipboardPaste,
   Copy,
+  Download,
   FileJson,
   FileQuestion,
   Files,
@@ -27,7 +28,7 @@ import { useStore } from "../../app/store";
 import { useApi } from "../../app/useApi";
 import { Spinner, useDismiss } from "../../components/bits";
 import { bytes, clock, count, people, shortWhen } from "../../lib/format";
-import { copyText, onFileDrop, pickFiles, pickFolder } from "../../lib/native";
+import { copyText, onFileDrop, pickFiles, pickFolders, pickSavePath, revealPath } from "../../lib/native";
 import { GUIDE_STEPS, guideOpenByDefault } from "./aiGuide";
 import { useWizard, type Act, type ImportInput, type ImportState, type PastImport } from "./types";
 
@@ -160,6 +161,12 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Another pasted answer goes after the ones already there. */
+  const appendText = (pasted: string) => {
+    const current = useWizard.getState().text;
+    set({ text: current.trim() ? `${current}\n\n${pasted}` : pasted });
+  };
+
   // With the list shown, the answer's text can still be pasted anywhere on the step (Ctrl V).
   const listed = paths.length > 0;
   useEffect(() => {
@@ -170,8 +177,7 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
       const pasted = e.clipboardData?.getData("text") ?? "";
       if (!pasted.trim()) return;
       e.preventDefault();
-      const current = useWizard.getState().text;
-      set({ text: current.trim() ? `${current}\n\n${pasted}` : pasted });
+      appendText(pasted);
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
@@ -188,6 +194,18 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
   };
 
   const pickMany = () => pickFiles("Wybierz pliki").then(addPaths);
+
+  /** „Pobierz .txt / .md”: the AI instructions as a file to keep or send on. */
+  const saveInstructions = async (ext: "txt" | "md") => {
+    try {
+      const path = await pickSavePath(`Instrukcja dla AI (Heirloom).${ext}`, [ext === "txt" ? { name: "Tekst", extensions: ["txt"] } : { name: "Markdown", extensions: ["md"] }]);
+      if (!path) return;
+      await call("import.saveInstructions", { path });
+      notify("Zapisano instrukcję dla AI.", { action: { label: "Pokaż w folderze", run: () => void revealPath(path).catch(() => {}) } });
+    } catch (e) {
+      notify((e as { message?: string }).message ?? "Nie udało się zapisać instrukcji.", { kind: "err" });
+    }
+  };
 
   /** Takes a line off the list: the pasted text, a dropped file or folder, or a file from inside a folder. */
   const remove = (input: ImportInput) => {
@@ -249,6 +267,10 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
             <button className="btn ghost" onClick={clearAll}>
               Wyczyść listę
             </button>
+            <button className="btn secondary" onClick={() => pickFolders("Dodaj foldery").then(addPaths)}>
+              <Plus size={14} />
+              Dodaj folder
+            </button>
             <button className="btn secondary" onClick={() => pickFiles("Dodaj pliki").then(addPaths)}>
               <Plus size={14} />
               Dodaj pliki
@@ -271,11 +293,24 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
               <InputRow key={`${input.path ?? input.name}-${k}`} input={input} act={act} onRemove={() => remove(input)} />
             ))}
           </div>
+          {/* Stays after the list appears, so it's clear that more answers can still be pasted. The textarea is
+              invisible and covers the box: it only takes the paste, which goes into the text and is not kept here. */}
+          <label className="imp-paste-mini">
+            <ClipboardPaste size={18} />
+            <span>Wklej tutaj kolejną odpowiedź AI (Ctrl V)</span>
+            <textarea
+              aria-label="Wklej tutaj kolejną odpowiedź AI"
+              value=""
+              spellCheck={false}
+              onChange={() => {}}
+              onPaste={(e) => {
+                e.preventDefault();
+                const pasted = e.clipboardData.getData("text");
+                if (pasted.trim()) appendText(pasted);
+              }}
+            />
+          </label>
           <div className="imp-recog-foot">
-            <span className="row" style={{ gap: 6, color: "var(--text2)" }}>
-              <ClipboardPaste size={15} />
-              Tekst odpowiedzi możesz też wkleić tutaj: Ctrl V
-            </span>
             <span className="grow" />
             {busy ? (
               <span className="row" style={{ gap: 7, color: "var(--text3)" }}>
@@ -370,15 +405,15 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
               className="link"
               onClick={(e) => {
                 e.stopPropagation();
-                pickFolder("Wybierz folder").then((p) => p && addPaths([p]));
+                pickFolders("Wybierz foldery").then(addPaths);
               }}
             >
-              lub folder…
+              lub foldery…
             </button>
           </span>
         </div>
 
-        <AiGuide open={guideOpen} onToggle={() => setGuide(!guideOpen)} onCopy={copyInstructions} />
+        <AiGuide open={guideOpen} onToggle={() => setGuide(!guideOpen)} onCopy={copyInstructions} onSave={saveInstructions} />
 
         <div className="card">
           <div className="imp-list-label">Poprzednie importy</div>
@@ -406,7 +441,7 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
 
 /** „Jak przygotować paczkę z pomocą AI”: the steps from the researcher's material to this screen, with the button
  *  that copies the instructions. Folds away once imports are routine. */
-function AiGuide({ open, onToggle, onCopy }: { open: boolean; onToggle: () => void; onCopy: () => void }) {
+function AiGuide({ open, onToggle, onCopy, onSave }: { open: boolean; onToggle: () => void; onCopy: () => void; onSave: (ext: "txt" | "md") => void }) {
   return (
     <div className="imp-info">
       <button className="imp-guide-head" aria-expanded={open} onClick={onToggle}>
@@ -421,10 +456,9 @@ function AiGuide({ open, onToggle, onCopy }: { open: boolean; onToggle: () => vo
                 <b>{step.title}</b> {step.text}
               </span>
               {step.copy && (
-                <button className="btn secondary" style={{ height: 34, alignSelf: "flex-start", marginTop: 6 }} onClick={onCopy}>
-                  <Copy size={14} />
-                  Kopiuj instrukcję dla AI
-                </button>
+                <span className="row" style={{ gap: 8, alignSelf: "flex-start", marginTop: 6 }}>
+                  <CopyButtons onCopy={onCopy} onSave={onSave} />
+                </span>
               )}
             </li>
           ))}
@@ -432,13 +466,31 @@ function AiGuide({ open, onToggle, onCopy }: { open: boolean; onToggle: () => vo
       ) : (
         <>
           <span style={{ color: "var(--text2)" }}>Instrukcja mówi AI, w jakim formacie przygotować osoby, fakty i źródła.</span>
-          <button className="btn secondary" style={{ height: 34, alignSelf: "flex-start", marginTop: 2 }} onClick={onCopy}>
-            <Copy size={14} />
-            Kopiuj instrukcję dla AI
-          </button>
+          <span className="row" style={{ gap: 8, alignSelf: "flex-start", marginTop: 2 }}>
+            <CopyButtons onCopy={onCopy} onSave={onSave} />
+          </span>
         </>
       )}
     </div>
+  );
+}
+
+function CopyButtons({ onCopy, onSave }: { onCopy: () => void; onSave: (ext: "txt" | "md") => void }) {
+  return (
+    <>
+      <button className="btn secondary" style={{ height: 34 }} onClick={onCopy}>
+        <Copy size={14} />
+        Kopiuj instrukcję dla AI
+      </button>
+      <button className="btn secondary" style={{ height: 34 }} onClick={() => onSave("txt")} title="Zapisz instrukcję jako plik tekstowy (Notatnik)">
+        <Download size={14} />
+        Pobierz .txt
+      </button>
+      <button className="btn secondary" style={{ height: 34 }} onClick={() => onSave("md")} title="Zapisz instrukcję jako plik Markdown">
+        <Download size={14} />
+        Pobierz .md
+      </button>
+    </>
   );
 }
 

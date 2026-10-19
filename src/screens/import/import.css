@@ -298,6 +298,40 @@
 .imp-recog-status.error {
   color: var(--err);
 }
+.imp-paste-mini {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 64px;
+  margin: 14px 20px 0;
+  border: 1.5px dashed var(--line);
+  border-radius: var(--r-ctl);
+  background: var(--surface);
+  color: var(--text2);
+  font-size: 13px;
+  cursor: text;
+  transition: border-color 0.12s, background-color 0.12s;
+}
+.imp-paste-mini:hover {
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--line));
+  background: color-mix(in oklab, var(--accent-soft) 45%, var(--surface));
+}
+.imp-paste-mini:focus-within {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: var(--ring);
+}
+.imp-paste-mini textarea {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  resize: none;
+  cursor: text;
+}
 .imp-recog-foot {
   display: flex;
   align-items: center;
