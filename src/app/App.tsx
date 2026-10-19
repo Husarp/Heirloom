@@ -15,6 +15,7 @@ import { useShortcuts } from "./useShortcuts";
 import { useCloseGuard } from "./useCloseGuard";
 import { useUpdateChecks } from "./updates";
 import { useSetRefresh } from "./useSetRefresh";
+import { useFitPopovers } from "./useFitPopovers";
 import { Screen } from "./Screen";
 import { ArchivePicker } from "../screens/archive/ArchivePicker";
 import { LoadingArchive } from "../screens/archive/LoadingArchive";
@@ -39,6 +40,7 @@ export function App() {
   useCloseGuard();
   useUpdateChecks();
   useSetRefresh();
+  useFitPopovers();
 
   useEffect(() => {
     boot().catch(() => useStore.setState({ phase: "picker" }));

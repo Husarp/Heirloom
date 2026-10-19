@@ -1,11 +1,12 @@
 import { AppWindow, FileText, FileWarning, FolderOpen, FolderPlus, FolderX, Layers, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { call } from "../../api/transport";
+import { call, type ApiError } from "../../api/transport";
 import type { RecentArchive } from "../../api/types";
 import { isSetPath, useStore } from "../../app/store";
-import { BrandMark, rowButton } from "../../components/bits";
+import { BrandMark, Dropdown, rowButton } from "../../components/bits";
 import { Dialog } from "../../components/Dialog";
 import { count, people as peopleCount, shortWhen } from "../../lib/format";
+import { sortRecent, type RecentSort } from "../../lib/recentSort";
 import { pickFolder, pickGedcom } from "../../lib/native";
 import { UpdateBanner } from "../../shell/UpdateBanner";
 import { OpenTogether } from "./OpenTogether";
@@ -23,7 +24,10 @@ export function ArchivePicker() {
   const [creating, setCreating] = useState(false);
   const [together, setTogether] = useState(false);
   const [errorShown, setErrorShown] = useState(false);
-  const recent = app?.recent ?? [];
+  const setAsk = useStore((s) => s.setAsk);
+  const notify = useStore((s) => s.notify);
+  const sort: RecentSort = app?.recentSort ?? "opened";
+  const recent = sortRecent(app?.recent ?? [], sort);
 
   useEffect(() => setErrorShown(openError != null), [openError]);
 
@@ -35,9 +39,29 @@ export function ArchivePicker() {
     const file = await pickGedcom();
     if (file) await openArchive(file);
   };
-  const forget = async (path: string) => {
-    await call("recent.forget", { path });
-    await refreshApp();
+  const forget = (path: string) =>
+    setAsk({
+      title: "Zamknąć to archiwum?",
+      text: "Nic nie zostanie usunięte — zniknie tylko z tej listy.",
+      buttons: [
+        { label: "Anuluj", kind: "ghost" },
+        {
+          label: "Zamknij",
+          kind: "primary",
+          run: async () => {
+            await call("recent.forget", { path });
+            await refreshApp();
+          },
+        },
+      ],
+    });
+  const changeSort = async (value: RecentSort) => {
+    try {
+      await call("recent.setSort", { sort: value });
+      await refreshApp();
+    } catch (e) {
+      notify((e as ApiError).message, { kind: "err" });
+    }
   };
 
   return (
@@ -56,13 +80,26 @@ export function ArchivePicker() {
           </h1>
           {recent.length > 0 ? (
             <div className="card">
-              <div className="label-caps" style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>
-                Ostatnio otwierane
+              <div className="row" style={{ padding: "8px 16px", borderBottom: "1px solid var(--border)", justifyContent: "space-between", minHeight: 44 }}>
+                <span className="label-caps">Twoje archiwa</span>
+                <Dropdown<RecentSort>
+                  label="Sortuj:"
+                  value={sort}
+                  align="right"
+                  width={220}
+                  options={[
+                    { value: "opened", label: "Ostatnio otwierane" },
+                    { value: "edited", label: "Ostatnio edytowane" },
+                    { value: "name", label: "A–Z" },
+                  ]}
+                  onChange={changeSort}
+                />
               </div>
               {recent.map((r) => (
                 <RecentRow
                   key={r.path}
                   entry={r}
+                  sort={sort}
                   current={archive?.root === r.path || archive?.dataPath === r.path}
                   onOpen={() => openArchive(r.path)}
                   onWindow={() => openElsewhere(r.path)}
@@ -95,7 +132,7 @@ export function ArchivePicker() {
   );
 }
 
-function RecentRow({ entry, current, onOpen, onWindow, onForget }: { entry: RecentArchive; current: boolean; onOpen: () => void; onWindow: () => void; onForget: () => void }) {
+function RecentRow({ entry, sort, current, onOpen, onWindow, onForget }: { entry: RecentArchive; sort: RecentSort; current: boolean; onOpen: () => void; onWindow: () => void; onForget: () => void }) {
   const isFile = entry.path.toLowerCase().endsWith(".ged");
   const isSet = entry.kind === "set" || isSetPath(entry.path);
   return (
@@ -116,7 +153,7 @@ function RecentRow({ entry, current, onOpen, onWindow, onForget }: { entry: Rece
       </span>
       <span className="col" style={{ alignItems: "flex-end", fontSize: 12, color: "var(--text2)" }}>
         <span>{entry.people ? peopleCount(entry.people) : "—"}</span>
-        <span style={{ color: "var(--text3)" }}>otwarte {shortWhen(entry.openedAt)}</span>
+        <span style={{ color: "var(--text3)" }}>{sort === "edited" ? (entry.editedAt ? `edytowane ${shortWhen(entry.editedAt)}` : "nie edytowane w Heirloom") : `otwarte ${shortWhen(entry.openedAt)}`}</span>
       </span>
       <button
         className="icon-btn forget"
@@ -131,7 +168,8 @@ function RecentRow({ entry, current, onOpen, onWindow, onForget }: { entry: Rece
       </button>
       <button
         className="icon-btn forget"
-        title="Usuń z listy (archiwum zostaje na dysku)"
+        title="Zamknij — usuń z listy (archiwum zostaje na dysku)"
+        aria-label="Zamknij — usuń z listy"
         onClick={(e) => {
           e.stopPropagation();
           onForget();

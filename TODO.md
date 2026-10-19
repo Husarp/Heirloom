@@ -379,7 +379,7 @@ This is the roadmap, with a checkbox per task.
       stays, under its own name (e.g. „Karty: ze zdjęciem / inicjały”), and the „Filtry” button, then empty, goes.
       It also stays in Ustawienia › Drzewo › „Styl karty”. (It does nothing in Całe drzewo, whose cards have no
       photos yet)
-- [ ] **Branch colours: a few ready palettes** (2026-09-29): the present twelve colours are rather dark and muted;
+- [x] **Branch colours: a few ready palettes** (done 2026-10-19) (2026-09-29): the present twelve colours are rather dark and muted;
       add e.g. a lighter and a brighter set to choose from, next to choosing each branch's colour („Kolory gałęzi”,
       above). Each palette checked in the light and the dark theme, so names on the coloured stripes stay readable
 - [x] **Tree: „Koloruj wg” doesn't work** (2026-09-29; done 2026-10-03): in Całe drzewo „Nazwisko” and „Strona ojca–matki” aren't
@@ -527,6 +527,101 @@ This is the roadmap, with a checkbox per task.
       (into the archive, after a backup copy of the data file) and „Nie ruszaj oryginału” (into the user's own folder,
       moved into the archive with „Przenieś zmiany do archiwum…” when the user decides). A file from another program:
       the first save into it still asks („Zapisz jako nowe archiwum” is offered)
+
+## From your second test (2026-10-16; round 1 done 2026-10-19 — the items still open are for the next round)
+### Small screens
+- [x] **Laptops and smaller screens: nothing hidden under the window's edge** (done 2026-10-19 in a browser at 7 sizes, 1000×540 to 1920×1000; not yet tried on Windows) — some buttons and panels end up
+      cut off past the screen's edge; every screen gets checked at several sizes (e.g. 1280×720, 1366×768,
+      1440×900, 1920×1080, also with Windows scaling 125% and 150%), and whatever doesn't fit wraps, scrolls or
+      folds instead of disappearing
+- [x] **Tree: the selected person's side panel cuts off its button** (done 2026-10-19) — with a lot of data the panel can't be
+      scrolled and the button that opens the full profile is pushed out of sight (a person with little data shows
+      it fine); the panel scrolls, and the open-profile button stays always visible at the bottom
+
+### Profile and editing
+- [x] **Rodzina in edit mode: „Odłącz” instead of the delete button** (done 2026-10-19) — removing a relative there means unlinking
+      them, so a bin icon is too drastic; the person stays in the archive
+- [x] **Adding a person (e.g. „Dodaj rodzica”): a short form first** (done 2026-10-19) — imię, nazwisko, płeć, „Żyje?” and „Utwórz
+      osobę”, which opens the new person's profile, where everything else (urodzenie, chrzest, zgon, pochówek,
+      photos…) is added; today the first screen asks for far too much
+- [x] **Gallery: drag photos into your own order** (done 2026-10-19) (the order they show everywhere)
+- [x] **Gallery: the profile photo also on top** (done 2026-10-19) — its own spot at the top of the gallery (or first, marked
+      „Profilowe”), while it still shows among the normal photos
+- [x] **Profile contents (the side list): icons for the main sections** (done 2026-10-19) — on the other side of the progress line,
+      only for the important ones (Dane osobowe, Rodzina, Życiorys, Galeria), so the list doesn't get crowded
+- [ ] **Simple photo editing** (to decide; your ImageMagick question): recommended without ImageMagick — it's a big
+      separate program with a long list of security fixes, and Heirloom already has the `image` library, which can
+      rotate, crop and straighten. So: „Obróć”, „Przytnij”, „Wyprostuj” in the photo view, saved as a new version,
+      the original kept
+
+### Tree
+- [x] **View switch is misaligned** (done 2026-10-19) (screenshot 2026-10-16, „Rodzina · Przodkowie · Potomkowie · Całe drzewo”): it
+      looks drawn crooked — the selected button sits out of line with the others and the labels aren't evenly
+      aligned (same baseline, centred in their buttons, even gaps); check the other segmented buttons in the app too
+- [x] **Rodzina: the descendants arrow unfolds in place** (done 2026-10-19) — clicking it under a child keeps the same person in the
+      centre and draws the descendants below (now it switches the centre to that child)
+  - more than 2 generations below: a short question „Rozwinąć wszystkich potomków (N osób) · Kolejne 2 pokolenia
+    (N osób)”, with „Zapamiętaj mój wybór”;
+  - the remembered choice can be changed in Ustawienia › Drzewo
+- [x] **Choosing a branch's colour** (done 2026-10-19) (your question: it isn't there yet — Ustawienia › Drzewo › „Kolory gałęzi” is
+      still „wkrótce”): build it, and put the colour on top of the surname's edit in Nazwiska too, next to the branch
+      name; together with the brighter ready palettes (above, „Branch colours: a few ready palettes”)
+- [ ] **More colour and look choices** — prettier palettes for the whole app, not only the present dark, muted
+      ones (Wygląd › „Kolor akcentu” is still „wkrótce”); each checked in the light and the dark theme
+- [x] **Zooming out: shapes only later** (done 2026-10-19) — keep the normal cards (smaller text) down to about 30%, and switch to
+      shapes only below that
+- [x] **Zoomed-out tree: lines must touch the shapes** (done 2026-10-19) — at e.g. 14% the line to a child stops short of the parents
+      and of the child (screenshot 2026-10-16)
+- [ ] **Zoomed-out tree: four looks to choose from** (mockups `design/pomniejszone-drzewo-makiety.html`, 2026-10-19:
+      Adam likes all four) — a setting in Ustawienia › Drzewo, e.g. „Wygląd przy oddaleniu”:
+  - **A „Kształty”**: filled shapes as today (with the lines touching them);
+  - **B „Obwódka”** (the default): a thick border in the branch colour, empty centre, rounded corners, shapes kept;
+  - **C „Kafelki”**: rounded squares with a soft fill and a thin border in the branch colour;
+  - **D „Mini-karty”**: small flat cards with the branch-colour stripe on top;
+  - each checked in the light and the dark theme; the selected person keeps the accent ring in all four
+
+### Import
+- [x] **Choose a whole folder** (done 2026-10-19) (with its subfolders) or several files, both in the file picker and by dropping —
+      possible in Tauri
+- [x] **Step 1: the paste box stays visible** (done 2026-10-19) — after the first file is added, the „wklej tutaj” hint disappears
+      and few people know they can paste anywhere; keep a small, good-looking paste box under the list
+- [x] **Step 3: the „no person” alert says what to do** (done 2026-10-19) — either the file can be assigned right there, or the alert
+      says „Osobę przypiszesz w kroku 4”
+- [x] **Step 4: „Przypisz” list is cut off** (done 2026-10-19) inside the photo's box — it must open over everything, with a search
+      field on top („zacznij pisać…”), for archives with many people
+- [x] **Step 4: clearer words** (done 2026-10-19) — „Brak zdjęcia” / „Brak dokumentu” instead of „Brak pliku”, „Zdjęcie nieopisane” /
+      „Dokument nieopisany” instead of „Plik nieopisany”, by the file's category
+- [x] **Profile photo star** (done 2026-10-19) (step 4, and the same in the gallery): a star in each photo's top-right corner
+  - clicking it makes the photo the profile photo; with more than one person on the photo a small list with
+    checkboxes (Ctrl and Shift work) and two buttons, „Dalej” (the ticked ones) and „Wszystkim”;
+  - clicking it again asks whose profile photo it stops being (the ticked people), the others keep it;
+  - one profile photo per person: choosing a new one takes it off the old one;
+  - in the people tags under the photo, those whose profile photo it is get a green border (the star's colour)
+    and a star before the name; hovering says „Zdjęcie profilowe tej osoby”
+- [x] **Own categories** (done 2026-10-19) — „+ Dodaj kategorię” at the end of Zdjęcie · Dokument · Inne; a new category shows
+      everywhere, and Ustawienia gets a place to rename and remove them
+- [x] **„Kto edytuje?” at the end of the import** (done 2026-10-19) offers the names already used on this computer
+- [ ] **Relatives the import mentions but who have no profile** (to decide in detail): created as unfinished
+      people, shown in Rodzina and in the people list; on the tree only where the relationship is known. The note
+      „Do uzupełnienia” shows only on their own profile, never as a banner on every screen
+- [ ] **New tab „Do uzupełnienia”** — unfinished people and undescribed photos and documents in one place, each
+      can be ignored, and anyone can be added by hand („Do dokończenia”); undescribed photos still show in the
+      gallery, marked „nieopisane”
+
+### Archives
+- [x] **Closing an archive with ✕ asks first** (done 2026-10-19): „Zamknąć to archiwum? Nic nie zostanie usunięte — zniknie tylko z
+      tej listy.”
+- [x] **Archive list: sort** (done 2026-10-19) by last opened, last edited or A–Z
+
+### Instructions for the AI
+- [x] **Download the instructions as .txt or .md** (done 2026-10-19) (besides copying)
+- [x] **Review the instructions for a conversation, not one shot** (done 2026-10-19) — paste them into any chat once, then drop texts
+      and files for one or many people („pliki do Tadeusza…”, then the next person…), with no extra explaining:
+  - the AI asks when it isn't sure: which person a story belongs to, missing or doubtful dates, two people with
+    one name;
+  - before writing the answer it lists who it understood and what goes to whom, and waits for „tak”;
+  - big amounts are split into several answers by itself;
+  - later: the „Roster export for the AI” (under „Later”), so it knows who is already in the archive
 
 ## Manual checks on Windows (0.7.0 was built and tested on Linux; none of these has been run on Windows yet)
 - [ ] **Check 0.7.0 on Windows** (needs a Windows PC; run on copies of real archives):

@@ -2,9 +2,13 @@ import { ExternalLink, FileSearch, FileText, FileX, FolderOpen, Image as ImageIc
 import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
 import { call } from "../../api/transport";
 import type { PersonSummary } from "../../api/types";
+import { useCategories } from "../../app/categories";
 import { afterChange, useStore } from "../../app/store";
 import { Avatar, Lifespan, Segmented, useDismiss } from "../../components/bits";
+import { CategoryDialog } from "../../components/CategoryDialog";
 import { Dialog } from "../../components/Dialog";
+import { PROFILE_TAG_TITLE } from "../../components/ProfileStar";
+import { BASE_LIKE, choiceOf, choiceValue, withCurrent } from "../../lib/categories";
 import { count } from "../../lib/format";
 import { pickFiles } from "../../lib/native";
 import {
@@ -22,6 +26,8 @@ import {
   type MediaItem,
   type MediaPerson,
 } from "./shared";
+
+const ADD_CATEGORY = "__add";
 
 /** Offered while typing a document type (DESIGNER_ANSWERS §4 „rodzaj”), together with the types already in use. */
 const DOCUMENT_TYPES = ["akt urodzenia", "akt małżeństwa", "akt zgonu", "dokument osobisty", "list", "zrzut ekranu indeksu"];
@@ -164,7 +170,7 @@ export function MediaDetail({
 }
 
 function EditFields({ item, documentTypes }: { item: MediaItem; documentTypes: string[] }) {
-  const saved = { title: item.title ?? "", date: item.date ?? "", place: item.place ?? "", kind: item.kind, documentType: item.documentType ?? "" };
+  const saved = { title: item.title ?? "", date: item.date ?? "", place: item.place ?? "", kind: item.kind, category: item.category ?? "", documentType: item.documentType ?? "" };
   const savedKey = JSON.stringify(saved);
   const [form, setForm] = useState(saved);
   const [base, setBase] = useState(savedKey);
@@ -174,20 +180,24 @@ function EditFields({ item, documentTypes }: { item: MediaItem; documentTypes: s
     setForm(saved);
   }
   const [busy, setBusy] = useState(false);
+  const categories = useCategories();
+  const [adding, setAdding] = useState(false);
   const dirty = JSON.stringify(form) !== savedKey;
   const set = (patch: Partial<typeof saved>) => setForm((f) => ({ ...f, ...patch }));
 
   const save = () => {
     if (!dirty || busy) return;
     runEdit(async () => {
-      const args: Record<string, string> = { id: item.id };
+      const args: Record<string, string | null> = { id: item.id };
       if (form.title !== saved.title) args.title = form.title;
       if (form.date !== saved.date) args.date = form.date;
       if (form.place !== saved.place) args.place = form.place;
-      // The API rewrites the kind and the document type together, so both are always sent.
-      if (form.kind !== saved.kind || form.documentType !== saved.documentType) {
+      // The API rewrites the kind and the document type together, so both are always sent (and the own category with
+      // them: it names the kind).
+      if (form.kind !== saved.kind || form.documentType !== saved.documentType || form.category !== saved.category) {
         args.kind = form.kind;
         args.documentType = form.kind === "document" ? form.documentType : "";
+        args.category = form.category || null;
       }
       setBusy(true);
       try {
@@ -206,6 +216,8 @@ function EditFields({ item, documentTypes }: { item: MediaItem; documentTypes: s
     }
   };
   const suggestions = [...new Set([...DOCUMENT_TYPES, ...documentTypes])];
+  // The list may not have a category added a moment ago yet.
+  const own = withCurrent(categories, form);
 
   return (
     <div className="col" style={{ gap: 10 }}>
@@ -223,17 +235,50 @@ function EditFields({ item, documentTypes }: { item: MediaItem; documentTypes: s
       </label>
       <div className="field">
         <span className="field-label">Rodzaj</span>
-        <Segmented
-          variant="neutral"
-          full
-          value={form.kind}
-          onChange={(kind) => set({ kind })}
-          options={[
-            { value: "photo", label: "Zdjęcie" },
-            { value: "document", label: "Dokument" },
-            { value: "other", label: "Inny" },
-          ]}
-        />
+        {categories.length === 0 && !form.category ? (
+          <>
+            <Segmented
+              variant="neutral"
+              full
+              value={form.kind}
+              onChange={(kind) => set({ kind })}
+              options={[
+                { value: "photo", label: "Zdjęcie" },
+                { value: "document", label: "Dokument" },
+                { value: "other", label: "Inne" },
+              ]}
+            />
+            <button className="link" style={{ alignSelf: "flex-start", fontSize: 13 }} onClick={() => setAdding(true)}>
+              + Dodaj kategorię…
+            </button>
+          </>
+        ) : (
+          <select
+            className="input sm"
+            value={choiceValue(form)}
+            aria-label="Rodzaj"
+            onChange={(e) => {
+              if (e.target.value === ADD_CATEGORY) {
+                setAdding(true);
+                return;
+              }
+              const choice = choiceOf(e.target.value, own);
+              if (choice) set({ kind: choice.kind, category: choice.category ?? "" });
+            }}
+          >
+            <option value="photo">Zdjęcie</option>
+            <option value="document">Dokument</option>
+            <option value="other">Inne</option>
+            <optgroup label="Własne kategorie">
+              {own.map((c) => (
+                <option key={c.name} value={`cat:${c.name}`}>
+                  {c.name} ({BASE_LIKE[c.base]})
+                </option>
+              ))}
+            </optgroup>
+            <option value={ADD_CATEGORY}>+ Dodaj kategorię…</option>
+          </select>
+        )}
       </div>
       {form.kind === "document" && (
         <label className="field">
@@ -263,6 +308,7 @@ function EditFields({ item, documentTypes }: { item: MediaItem; documentTypes: s
           </button>
         </div>
       )}
+      {adding && <CategoryDialog base={form.kind} onClose={() => setAdding(false)} onAdded={(name, base) => set({ kind: base, category: name })} />}
     </div>
   );
 }
@@ -295,24 +341,24 @@ function PersonChip({ item, person, editing, canBeProfile }: { item: MediaItem; 
       ],
     });
   return (
-    <span className={`media-person${editing ? " editing" : ""}`}>
+    <span className={`media-person${profile ? " profile-on" : ""}${editing ? " editing" : ""}`} title={profile ? PROFILE_TAG_TITLE : undefined}>
       {editing && canBeProfile ? (
         <button
           className="tool"
           onClick={setProfile}
           disabled={profile}
-          title={profile ? `Zdjęcie profilowe: ${person.name}` : `Ustaw jako zdjęcie profilowe: ${person.name}`}
+          title={profile ? PROFILE_TAG_TITLE : `Ustaw jako zdjęcie profilowe: ${person.name}`}
         >
           <Star size={13} fill={profile ? "currentColor" : "none"} />
         </button>
       ) : (
         profile && (
-          <span title="Zdjęcie profilowe" style={{ display: "inline-flex", marginRight: 2 }}>
+          <span style={{ display: "inline-flex", marginRight: 2 }}>
             <Star size={12} fill="currentColor" />
           </span>
         )
       )}
-      <button className="name" onClick={() => go({ name: "person", id: person.id })} title="Otwórz profil">
+      <button className="name" onClick={() => go({ name: "person", id: person.id })} title={profile ? `${PROFILE_TAG_TITLE} · otwórz profil` : "Otwórz profil"}>
         {person.name}
       </button>
       {editing && (

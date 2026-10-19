@@ -12,6 +12,18 @@ export async function pickFolder(title: string): Promise<string | null> {
   return window.prompt(`${title}\n(ścieżka folderu)`)?.trim() || null;
 }
 
+/** Several folders at once (each with its subfolders). */
+export async function pickFolders(title: string): Promise<string[]> {
+  if (inTauri) {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const result = await open({ directory: true, multiple: true, title });
+    if (!result) return [];
+    return Array.isArray(result) ? result : [result];
+  }
+  const typed = window.prompt(`${title}\n(ścieżki folderów, rozdzielone średnikiem)`);
+  return typed ? typed.split(";").map((s) => s.trim()).filter(Boolean) : [];
+}
+
 export async function pickFiles(title: string, filters?: { name: string; extensions: string[] }[], multiple = true): Promise<string[]> {
   if (inTauri) {
     const { open } = await import("@tauri-apps/plugin-dialog");

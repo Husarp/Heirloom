@@ -9,6 +9,7 @@ use crate::gedwrite::{file_uri, has_pointer, media_type, name_value, new_uid, st
 use crate::media_edit::copy_new_into_archive;
 use crate::{ApiError, Session};
 use heirloom_core::archive::MEDIA_DIR;
+use heirloom_core::gedcom::view::{MediaKind, object_kind};
 use heirloom_core::gedcom::Node;
 use heirloom_core::SaveOptions;
 use serde_json::{Value, json};
@@ -325,8 +326,11 @@ fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, St
             None => media_type(relative).starts_with("image/"),
         };
         let xref = changes.new_xref("O");
-        let mut medi = Node::with_value("MEDI", if photo { "PHOTO" } else { "MANUSCRIPT" });
-        if let Some(t) = described.and_then(|m| m.document_type.clone()) {
+        // An own category whose kind is „inne” is the one case of a kind written as OTHER; the others are photos or documents.
+        let other = choice.category.is_some() && kind.as_deref() == Some("other");
+        let mut medi = Node::with_value("MEDI", if photo { "PHOTO" } else if other { "OTHER" } else { "MANUSCRIPT" });
+        // No PHRASE under OTHER: with one the reader treats it as a type from another program.
+        if let Some(t) = described.and_then(|m| m.document_type.clone()).filter(|_| !other) {
             medi.children.push(Node::with_value("PHRASE", &t));
         }
         let mut file = Node::with_value("FILE", &file_uri(relative)).with_child(Node::with_value("FORM", media_type(relative)).with_child(medi));
@@ -351,6 +355,9 @@ fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, St
             if let Some(n) = &m.note {
                 obje.children.push(text_node("NOTE", n));
             }
+        }
+        if let Some(category) = &choice.category {
+            obje.children.push(Node::with_value("_HLM_CATEGORY", category));
         }
         obje.children.push(stamp("CREA"));
         batch_mark(&mut obje, &ctx.name);
@@ -378,6 +385,7 @@ fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, St
             }
         }
     }
+    let mut new_links: Vec<(String, String)> = Vec::new();
     for (key, people) in file_people {
         let Some(object) = ctx.media.get(&key).cloned() else { continue };
         let mut seen = Vec::new();
@@ -392,6 +400,7 @@ fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, St
             if !has_pointer(indi, "OBJE", &object) {
                 let at = indi.children.iter().rposition(|c| c.tag == "OBJE").map_or(indi.children.len(), |i| i + 1);
                 indi.children.insert(at, Node::with_value("OBJE", &object));
+                new_links.push((xref.clone(), object.clone()));
             }
             if profile {
                 profile_links.push((xref, object.clone()));
@@ -401,9 +410,34 @@ fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, St
     for (xref, object) in profile_links {
         let indi = changes.get(&xref)?;
         for link in indi.children.iter_mut().filter(|c| c.tag == "OBJE") {
-            link.children.retain(|c| c.tag != "_HLM_PROFILE");
+            // As `add_link` does: an old `_PRIM Y` from another program must not win over the new star.
+            link.children.retain(|c| c.tag != "_HLM_PROFILE" && c.tag != "_PRIM");
             if link.value.as_deref() == Some(object.as_str()) {
                 link.children.push(Node::with_value("_HLM_PROFILE", "Y"));
+            }
+        }
+    }
+    // The star was taken off in step 4: if a file imported for the person would now stand in as their profile photo
+    // (no marker yet, and it is their first photo), it gets `N`. A person who already had photos keeps theirs: the new
+    // links come after them.
+    let unstarred: Vec<&str> = ctx.draft.profile.iter().filter(|(_, file)| file.is_none()).map(|(pid, _)| pid.as_str()).collect();
+    for pid in unstarred {
+        let Some(xref) = ctx.people.get(pid) else { continue };
+        let Some(indi) = changes.peek(xref) else { continue };
+        let marked = indi.children.iter().filter(|c| c.tag == "OBJE").any(|l| l.child("_HLM_PROFILE").is_some() || l.child_value("_PRIM").map(str::trim) == Some("Y"));
+        if marked {
+            continue;
+        }
+        let first = indi
+            .children
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.tag == "OBJE")
+            .filter_map(|(i, c)| Some((i, c.pointer()?.to_string())))
+            .find(|(_, object)| changes.peek(object).is_some_and(|r| object_kind(r, doc.version) == MediaKind::Photo));
+        if let Some((i, object)) = first {
+            if new_links.iter().any(|(x, o)| x == xref && *o == object) {
+                changes.get(xref)?.children[i].children.push(Node::with_value("_HLM_PROFILE", "N"));
             }
         }
     }
@@ -1122,6 +1156,126 @@ mod tests {
         assert!(detail["transcription"].as_str().unwrap().starts_with("Состоялось"));
         assert!(detail["translation"].as_str().unwrap().starts_with("Działo się"));
         assert_eq!(call(&mut s, &mut draft, "import.fileDetail", json!({ "file": "M099" })).unwrap_err().code, "bad_args");
+    }
+
+    #[test]
+    fn a_file_imported_with_an_own_category_keeps_its_name_and_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("a");
+        let mut s = Session::new(Archive::create(&root, "A").unwrap());
+        let (answer, photo) = example(dir.path());
+        let loose = dir.path().join("pocztowka.jpg");
+        std::fs::write(&loose, b"jpg").unwrap();
+        let mut draft = None;
+        let args = |extra: Value| {
+            let mut a = json!({ "texts": [answer], "paths": [photo.to_string_lossy(), loose.to_string_lossy()] });
+            a.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            a
+        };
+        let file = |state: &Value, key: &str| state["files"].as_array().unwrap().iter().find(|f| f["file"] == key).cloned().unwrap();
+        // Step 1's choices go with every load of the list (by path): the photo is a „Pocztówki” (like a photo), the loose
+        // file a „Pamiątki” (like „inne”).
+        let (photo_path, loose_path) = (photo.to_string_lossy().into_owned(), loose.to_string_lossy().into_owned());
+        let state = call(
+            &mut s,
+            &mut draft,
+            "import.load",
+            args(json!({ "kinds": { photo_path.clone(): "photo", loose_path.clone(): "other" }, "categories": { photo_path: "Pocztówki", loose_path: "Pamiątki" } })),
+        )
+        .unwrap();
+        assert_eq!((file(&state, "M002")["kind"].as_str(), file(&state, "M002")["category"].as_str()), (Some("photo"), Some("Pocztówki")));
+        assert_eq!(file(&state, "pocztowka.jpg")["category"], "Pamiątki");
+        // Step 4 changes them: a plain kind takes the category off; a built-in kind's name is refused.
+        let state = call(&mut s, &mut draft, "import.file", json!({ "file": "M002", "kind": "document" })).unwrap();
+        assert!(file(&state, "M002")["category"].is_null());
+        assert!(call(&mut s, &mut draft, "import.file", json!({ "file": "M002", "kind": "photo", "category": "Zdjęcie" })).is_err());
+        call(&mut s, &mut draft, "import.file", json!({ "file": "M002", "kind": "photo", "category": "  Pocztówki " })).unwrap();
+        let state = call(&mut s, &mut draft, "import.file", json!({ "file": "pocztowka.jpg", "people": ["P1"] })).unwrap();
+        let row = state["inputs"].as_array().unwrap().iter().find(|i| i["name"] == "pocztowka.jpg").cloned().unwrap();
+        assert_eq!((row["kind"].as_str(), row["category"].as_str(), row["status"].as_str()), (Some("other"), Some("Pamiątki"), Some("ok")), "an own category is a kind: nothing left to choose");
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+        let d = s.derived();
+        let mut found: Vec<_> = d.view.media.values().filter(|m| m.category.is_some()).map(|m| (m.category.clone().unwrap(), m.kind)).collect();
+        found.sort_by(|a, b| a.0.cmp(&b.0));
+        use heirloom_core::gedcom::view::MediaKind;
+        assert_eq!(found, [("Pamiątki".to_string(), MediaKind::Other), ("Pocztówki".to_string(), MediaKind::Photo)]);
+        let medi: Vec<_> = s.archive.doc.records.iter().filter(|r| r.tag == "OBJE" && r.child("_HLM_CATEGORY").is_some()).filter_map(|r| r.child("FILE")?.child("FORM")?.child_value("MEDI").map(str::to_string)).collect();
+        assert!(medi.contains(&"PHOTO".to_string()) && medi.contains(&"OTHER".to_string()), "{medi:?}");
+    }
+
+    /// An archive with Józef already in it, with the given photo links and objects (`media/ist.jpg` etc.).
+    fn archive_with_jozef(dir: &std::path::Path, links: &str) -> Session {
+        let root = dir.join("a");
+        std::fs::create_dir_all(root.join("media")).unwrap();
+        let text = format!(
+            "0 HEAD\n1 SOUR HEIRLOOM\n1 GEDC\n2 VERS 7.0\n0 @I1@ INDI\n1 NAME Józef /Kowalski/\n{links}\
+0 @O1@ OBJE\n1 FILE media/stare.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n0 @O2@ OBJE\n1 FILE media/starsze.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n0 TRLR\n"
+        );
+        std::fs::write(root.join("rodzina.ged"), text).unwrap();
+        Session::new(Archive::open(&root).unwrap())
+    }
+
+    fn merge_jozef_only(s: &mut Session, draft: &mut Option<Draft>, answer: &str, photo: &std::path::Path) {
+        load(s, draft, answer, photo);
+        for p in ["P2", "P3", "P4"] {
+            call(s, draft, "import.decide", json!({ "person": p, "kind": "skip" })).unwrap();
+        }
+        call(s, draft, "import.decide", json!({ "person": "P1", "kind": "merge", "target": "@I1@" })).unwrap();
+    }
+
+    fn marks(s: &Session, person: &str) -> Vec<(String, String)> {
+        s.archive.doc.record(person).unwrap().children_tagged("OBJE").map(|c| (c.pointer().unwrap_or("").to_string(), [c.child_value("_HLM_PROFILE").map(|v| format!("hlm {v}")), c.child_value("_PRIM").map(|v| format!("prim {v}"))].into_iter().flatten().collect::<Vec<_>>().join(", "))).collect()
+    }
+
+    #[test]
+    fn the_star_on_an_import_replaces_a_prim_from_another_program() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = archive_with_jozef(dir.path(), "1 OBJE @O1@\n2 _PRIM Y\n1 OBJE @O2@\n2 _PRIM N\n");
+        let (answer, photo) = example(dir.path());
+        let mut draft = None;
+        merge_jozef_only(&mut s, &mut draft, &answer, &photo);
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+        let links = marks(&s, "@I1@");
+        assert_eq!(links.len(), 3);
+        assert!(links[..2].iter().all(|(_, m)| !m.contains("prim")), "{links:?}");
+        assert_eq!(links[2].1, "hlm Y", "{links:?}");
+        let d = s.derived();
+        assert_eq!(d.info[0].photo.as_ref().map(|p| p.1.as_str()), Some("media/M002 slub.jpg"));
+    }
+
+    #[test]
+    fn a_star_taken_off_in_step_four_keeps_an_imported_photo_from_becoming_the_profile_photo() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let (answer, photo) = example(dir.path());
+        let mut draft = None;
+        load(&mut s, &mut draft, &answer, &photo);
+        call(&mut s, &mut draft, "import.profile", json!({ "person": "P1", "file": null })).unwrap();
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+        let jozef = xref_of(&mut s, "Józef");
+        assert_eq!(marks(&s, &jozef).iter().map(|(_, m)| m.as_str()).collect::<Vec<_>>(), ["hlm N"]);
+        let d = s.derived();
+        let i = (0..d.info.len()).find(|&i| d.info[i].given == "Józef").unwrap();
+        assert!(d.info[i].photo.is_none(), "no profile photo until the user picks one");
+        // Marianna did not get the star taken off: her only photo stands in as before.
+        let m = (0..d.info.len()).find(|&i| d.info[i].given == "Marianna").unwrap();
+        assert!(d.info[m].photo.is_some());
+    }
+
+    #[test]
+    fn an_existing_person_with_photos_keeps_their_profile_photo_when_the_star_is_taken_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = archive_with_jozef(dir.path(), "1 OBJE @O1@\n1 OBJE @O2@\n");
+        let (answer, photo) = example(dir.path());
+        let mut draft = None;
+        merge_jozef_only(&mut s, &mut draft, &answer, &photo);
+        call(&mut s, &mut draft, "import.profile", json!({ "person": "P1", "file": null })).unwrap();
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+        let links = marks(&s, "@I1@");
+        assert_eq!(links.len(), 3);
+        assert!(links.iter().all(|(_, m)| m.is_empty()), "no marker written: the first photo still stands in {links:?}");
+        let d = s.derived();
+        assert_eq!(d.info[0].photo.as_ref().map(|p| p.1.as_str()), Some("media/stare.jpg"));
     }
 
     #[test]

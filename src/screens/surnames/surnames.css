@@ -52,6 +52,7 @@
 
 .sn-title {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: 12px;
 }
@@ -68,6 +69,18 @@
   gap: 8px;
   font-size: 13px;
   color: var(--text2);
+}
+/* In edit mode the branch line is a button that opens the colour picker. */
+.sn-branch .chip {
+  height: 28px;
+  margin-left: -10px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text2);
+}
+.sn-branch .chip:hover:not(:disabled) {
+  background: var(--surface2);
+  border-color: var(--border);
 }
 
 .sn-stats {
@@ -184,4 +197,33 @@
   padding: 16px;
   font-size: 13px;
   color: var(--text3);
+}
+
+/* A small window: a narrower list, 2 × 2 numbers, and the people table without „Rodzice”. */
+@media (max-width: 1200px) {
+  .surnames {
+    grid-template-columns: 320px minmax(0, 1fr);
+  }
+  .sn-detail {
+    padding: 18px 20px 32px;
+  }
+  .sn-title h2 {
+    font-size: 34px;
+  }
+  .sn-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .sn-stats > div:nth-child(2n) {
+    border-right: none;
+  }
+  .sn-stats > div:nth-child(n + 3) {
+    border-top: 1px solid var(--border);
+  }
+  .sn-grid,
+  .sn-grid.no-parents {
+    grid-template-columns: minmax(0, 1fr) 120px 90px;
+  }
+  .sn-grid > :nth-child(4) {
+    display: none;
+  }
 }

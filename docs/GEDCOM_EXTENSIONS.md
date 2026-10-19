@@ -48,11 +48,12 @@ note, a photo is still a normal `OBJE`.
 | `_HLM_ORIG` | `PLAC` | The place exactly as written in the source. |
 | `_HLM_TAG` | `INDI` | A short label, e.g. `kolejarz` (one tag per line). |
 | `_HLM_LINK` | `INDI` | A web link. Substructures: `TITL` (the title) and `TYPE` (`wikipedia`, `geneteka`, `familysearch`, `grave`, `other`). |
-| `_HLM_PROFILE` | `INDI.OBJE` | `Y` on the person's profile photo. Without it, the first photo is used. |
+| `_HLM_PROFILE` | `INDI.OBJE` | `Y` on the person's profile photo; `N` when the photo was explicitly taken off as their profile photo. A person whose photo links carry no marker at all uses the first photo; once any link carries `Y` or `N`, only a `Y` photo is the profile photo (so a person whose profile photo was removed has none until another is chosen). The order of a person's photos is the order of their `OBJE` links. |
 | `_HLM_DATE` | `OBJE` | When a photo was taken or a document was made. |
 | `_HLM_PLAC` | `OBJE` | Where a photo was taken or a document was made. |
 | `_HLM_TRANSCRIPTION` | `OBJE` | A transcription of a document, as written. |
 | `_HLM_TRANSLATION` | `OBJE` | A Polish translation of a document. |
+| `_HLM_CATEGORY` | `OBJE` | The user's own category of a file („Pocztówki”). The file keeps the kind it behaves like in `FILE.FORM.MEDI` (`PHOTO` shows in the gallery and can be a profile photo, `MANUSCRIPT` is a document, `OTHER` anything else), so a program that does not know the tag still sees an ordinary photo or document. The list of categories (names and the kind each behaves like) is kept in `.heirloom/ustawienia.json`; a category used by a file but missing from that list is shown all the same (the file is the source of truth). |
 | `_HLM_KIND` | `SOUR` | The kind of source: `parish_record`, `civil_record`, `index`, `photo`, `letter`, `oral`, `note`, `book`, `website`, `other`. |
 | `_HLM_PARISH` | `SOUR` | The parish of a register. |
 | `_HLM_YEAR` | `SOUR` | The year of a register. |

@@ -57,15 +57,25 @@ export interface TextItem {
 export interface GalleryItem {
   id: string;
   path: string | null;
+  /** The file's own category („Pocztówki”), if it has one. */
+  category: string | null;
   caption: string | null;
   date: string | null;
   uncertain: boolean;
+  /** It is the profile photo of the person whose profile this is. */
   profile: boolean;
+  /** Everyone on the photo, the profile's person first. */
+  people: { id: string; name: string }[];
+  /** Whose profile photo it is. */
+  profileOf: string[];
 }
 
 export interface DocumentItem {
   id: string;
   path: string | null;
+  /** The file's own category, if it has one. */
+  category: string | null;
+  /** What is shown as its kind: the own category, else the document type. */
   kind: string;
   title: string;
   meta: string | null;

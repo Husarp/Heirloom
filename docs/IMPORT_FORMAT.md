@@ -46,7 +46,7 @@ choices is in [RESEARCH.md §8](RESEARCH.md#8-ai-assisted-import-external-ai-cha
 |---|---|---|
 | `format` | yes | Always `"heirloom-import"`. |
 | `version` | yes | `"1.0"` (the number `1.0` is accepted too). Any `1.x` is read; another major version is a blocking error. |
-| `prompt_rev` | yes | The revision of AI_INSTRUCTIONS.md used, e.g. `"2026-10-05"`. Not checked; kept for tracing.. |
+| `prompt_rev` | yes | The revision of AI_INSTRUCTIONS.md used, e.g. `"2026-10-19"`. Not checked; kept for tracing.. |
 | `batch` | yes | A unique name for the batch: a short label plus a date, e.g. `"Kowalscy-Leczna-2026-10-01"`. The same in every part (parts with different names are a blocking error). It names the import in the history and „Cofnij import”. |
 | `part` | yes | 1, 2, 3, … (`"2"` as text is accepted). |
 | `created` | no | The date the file was made, `YYYY-MM-DD`. |
@@ -266,7 +266,7 @@ without `about` is shown but not saved.
 {
   "format": "heirloom-import",
   "version": "1.0",
-  "prompt_rev": "2026-10-05",
+  "prompt_rev": "2026-10-19",
   "batch": "Kowalscy-Leczna-2026-10-01",
   "part": 1,
   "created": "2026-10-01",

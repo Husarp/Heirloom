@@ -32,6 +32,16 @@ export interface SceneCard {
   rel?: { of: string; kind: "parent" | "partner" | "child" | "sibling" };
   /** A partner beside a descendant (Potomkowie): greyed, their own line not followed. */
   partner?: boolean;
+  /** A descendant in a branch unfolded in Rodzina: edit mode's tools show under it only when it is chosen. */
+  deep?: boolean;
+}
+
+/** Where a line starts or stops; `card` when that point lies on the edge of that card's box (FocusCanvas continues
+ *  such a line to the card's shape when the card is drawn as a dot). */
+export interface LinkEnd {
+  x: number;
+  y: number;
+  card?: string;
 }
 
 export interface SceneLink {
@@ -40,7 +50,12 @@ export interface SceneLink {
   kind: LinkKind;
   /** The people a link joins; it is highlighted when all of them are on the highlighted line. */
   people: string[];
+  /** Its two end points: where `d` starts and where it stops. */
+  ends: [LinkEnd, LinkEnd];
 }
+
+/** What the layouts push; `finish` adds the ends. */
+type LinkDraft = Omit<SceneLink, "ends">;
 
 export interface SceneUnion {
   key: string;
@@ -54,10 +69,17 @@ export interface ScenePill {
   x: number;
   y: number;
   label: string;
-  /** The person to go to (refocus) when clicked, or to unfold below (`unfold`, Potomkowie). */
+  /** The person to go to (refocus) when clicked, or to unfold below (`unfold`, Potomkowie and Rodzina). */
   target: string;
   direction: "down" | "up" | "left";
+  /** Where the pill hangs on its card, for the zoom levels below the full card (the icon's direction says nothing
+   *  about it: „Zwiń” sits at the bottom with an up arrow). Without: beside the card or already clear of it. */
+  at?: "top" | "bottom";
   unfold?: boolean;
+  /** Rodzina: the pill of a branch that is unfolded, which folds it again. */
+  fold?: boolean;
+  /** Instead of the usual hint. */
+  title?: string;
 }
 
 export interface SceneBox {
@@ -91,7 +113,70 @@ export interface Scene {
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
-function bounds(scene: Omit<Scene, "bounds">): Scene["bounds"] {
+/** The first and last point of a path made of M, H, V, L and Q with absolute coordinates (all this file writes). */
+export function pathEnds(d: string): [{ x: number; y: number }, { x: number; y: number }] {
+  let x = 0;
+  let y = 0;
+  let first: { x: number; y: number } | null = null;
+  for (const [, cmd, args] of d.matchAll(/([MHVLQ])([^MHVLQ]*)/g)) {
+    const n = args.trim().split(/[\s,]+/).filter(Boolean).map(Number);
+    if (cmd === "H") x = n[n.length - 1];
+    else if (cmd === "V") y = n[n.length - 1];
+    else {
+      x = n[n.length - 2];
+      y = n[n.length - 1];
+    }
+    first ??= { x, y };
+  }
+  return [first ?? { x: 0, y: 0 }, { x, y }];
+}
+
+const EDGE = 0.5;
+
+const CELL = 256;
+
+/** Finds the card whose box edge a point lies on (the sides, the top or the bottom), if any. The cards go into a grid
+ *  once per scene, so a lookup only looks at the few cards near the point (a big unfold has thousands of links). The
+ *  first card in the list wins, as ever. */
+function edgeIndex(cards: SceneCard[]): (pt: { x: number; y: number }) => string | undefined {
+  const near = (a: number, b: number) => Math.abs(a - b) <= EDGE;
+  const within = (v: number, lo: number, hi: number) => v >= lo - EDGE && v <= hi + EDGE;
+  const key = (cx: number, cy: number) => `${cx},${cy}`;
+  const grid = new Map<string, number[]>();
+  cards.forEach((c, i) => {
+    const w = c.w ?? CARD_W;
+    for (let cx = Math.floor((c.x - EDGE) / CELL); cx <= Math.floor((c.x + w + EDGE) / CELL); cx++) {
+      for (let cy = Math.floor((c.y - EDGE) / CELL); cy <= Math.floor((c.y + CARD_H + EDGE) / CELL); cy++) {
+        const k = key(cx, cy);
+        const list = grid.get(k);
+        if (list) list.push(i);
+        else grid.set(k, [i]);
+      }
+    }
+  });
+  return (pt) => {
+    for (const i of grid.get(key(Math.floor(pt.x / CELL), Math.floor(pt.y / CELL))) ?? []) {
+      const c = cards[i];
+      const w = c.w ?? CARD_W;
+      const onSide = (near(pt.x, c.x) || near(pt.x, c.x + w)) && within(pt.y, c.y, c.y + CARD_H);
+      const onTopBottom = (near(pt.y, c.y) || near(pt.y, c.y + CARD_H)) && within(pt.x, c.x, c.x + w);
+      if (onSide || onTopBottom) return c.id;
+    }
+    return undefined;
+  };
+}
+
+/** Completes a scene: the links' end points and the bounds. */
+function finish(scene: Omit<Scene, "bounds" | "links"> & { links: LinkDraft[] }): Scene {
+  const cardAt = edgeIndex(scene.cards);
+  const links = scene.links.map((l): SceneLink => {
+    const [a, b] = pathEnds(l.d);
+    return { ...l, ends: [{ ...a, card: cardAt(a) }, { ...b, card: cardAt(b) }] };
+  });
+  return { ...scene, links, bounds: bounds(scene) };
+}
+
+function bounds(scene: Pick<Scene, "cards" | "boxes" | "labels">): Scene["bounds"] {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -150,7 +235,7 @@ function bend(x0: number, y0: number, y1: number, x1: number): string {
 }
 
 /** Parents above, a descent line to a sibling bar and down into each child (spec §3.9 routing). */
-function descent(links: SceneLink[], key: string, fromX: number, fromY: number, children: { id: string; x: number; y: number; w?: number; kind: LinkKind }[], barOffset: number, parents: string[], rounded = false) {
+function descent(links: LinkDraft[], key: string, fromX: number, fromY: number, children: { id: string; x: number; y: number; w?: number; kind: LinkKind }[], barOffset: number, parents: string[], rounded = false) {
   if (!children.length) return;
   const barY = children[0].y - barOffset;
   if (rounded) {
@@ -167,15 +252,17 @@ function descent(links: SceneLink[], key: string, fromX: number, fromY: number, 
   }
 }
 
-export function layoutFamily(graph: Graph, focusId: string, options: { editing: boolean; rounded?: boolean }): Scene {
+/** `unfolded`: the children whose „+N” was clicked, each with the generations below them to show (null: all); their
+ *  descendants hang below them (the centre and its rows stay where they are, the children spread to make room). */
+export function layoutFamily(graph: Graph, focusId: string, options: { editing: boolean; rounded?: boolean; unfolded?: ReadonlyMap<string, number | null> }): Scene {
   const cards: SceneCard[] = [];
-  const links: SceneLink[] = [];
+  const links: LinkDraft[] = [];
   const unions: SceneUnion[] = [];
   const pills: ScenePill[] = [];
   const boxes: SceneBox[] = [];
   const labels: SceneLabel[] = [];
   const focus = graph.people[focusId];
-  if (!focus) return { cards, links, unions, pills, boxes, labels, bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 } };
+  if (!focus) return { cards, links: [], unions, pills, boxes, labels, bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 } };
   const placed = new Map<string, SceneCard>();
   const place = (id: string, x: number, y: number, extra: Partial<SceneCard> = {}) => {
     const card = { id, x, y, sub: subLine(graph.people[id]), ...extra };
@@ -266,7 +353,7 @@ export function layoutFamily(graph: Graph, focusId: string, options: { editing: 
   if (ownCouple) {
     for (const c of ownCouple.cards) {
       const p = graph.people[c.id];
-      if (p && p.ancestors > 0) pills.push({ key: `up-${c.id}`, x: c.x + CARD_W - 60, y: c.y - 11, label: `+${p.ancestors}`, target: c.id, direction: "up" });
+      if (p && p.ancestors > 0) pills.push({ key: `up-${c.id}`, x: c.x + CARD_W - 60, y: c.y - 11, label: `+${p.ancestors}`, target: c.id, direction: "up", at: "top" });
     }
   } else if (options.editing) {
     boxes.push({ key: `add-${focusId}`, x: (CARD_W - 150) / 2, y: -FAMILY_PITCH + (CARD_H - 52) / 2, w: 150, h: 52, label: "Dodaj rodziców", action: "add-parents", of: focusId });
@@ -357,25 +444,34 @@ export function layoutFamily(graph: Graph, focusId: string, options: { editing: 
     groups.push({ key: u.id, fromX: marker?.x ?? CARD_W / 2, fromY: marker ? marker.y : CARD_H, parents: other ? [focusId, other] : [focusId], kids });
   }
   groups.sort((a, b) => a.fromX - b.fromX);
+  // An unfolded child is a block as wide as their descendants below; the next child starts after it. Everyone shown
+  // already, and every child of the row, is drawn once, wherever they come up.
+  const unfolded = options.unfolded ?? new Map<string, number | null>();
+  const bump = new Map([...unfolded].map(([id, depth]) => [id, depth ?? Infinity] as const));
+  const taken = new Set([...placed.keys(), ...groups.flatMap((g) => g.kids)]);
   let cursor = -Infinity;
   groups.forEach((g, k) => {
-    const width = g.kids.length * CARD_W + (g.kids.length - 1) * SIBLING_GAP;
+    const blocks = g.kids.map((id) => (unfolded.has(id) && (graph.people[id]?.descendants ?? 0) > 0 ? descendantBlock(graph, id, { given: 0, rounded: !!options.rounded, partners: false, bump, claimed: taken, rootDrawn: true }) : null));
+    const widths = blocks.map((b) => b?.width ?? CARD_W);
+    const width = widths.reduce((sum, w) => sum + w, 0) + (g.kids.length - 1) * SIBLING_GAP;
     // One union: its children centred under it. Several (remarriage): the first union's children end under its
     // marker and the others' start under theirs, so two families never share a stretch of line (spec §3.9).
     let left = groups.length === 1 ? g.fromX - width / 2 : k === 0 ? g.fromX + CARD_W / 2 - width : g.fromX - CARD_W / 2;
     if (left < cursor) left = cursor;
+    let at = left;
     const kids = g.kids.map((id, i) => {
-      const card = place(id, left + i * (CARD_W + SIBLING_GAP), FAMILY_PITCH, { rel: { of: focusId, kind: "child" } });
+      const card = place(id, at + (widths[i] - CARD_W) / 2, FAMILY_PITCH, { rel: { of: focusId, kind: "child" } });
       const p = graph.people[id];
-      if (p && p.descendants > 0) pills.push({ key: `down-${id}`, x: card.x + CARD_W - 64, y: card.y + CARD_H - 11, label: `+${p.descendants}`, target: id, direction: "down" });
+      blocks[i]?.draw(at, FAMILY_PITCH, { cards, links, unions, pills });
+      if (p && p.descendants > 0) pills.push(branchPill(id, card, p.descendants, !!blocks[i]?.opened));
+      at += widths[i] + SIBLING_GAP;
       return { id, x: card.x, y: card.y, kind: linkKind(pediOf(graph, id), false) };
     });
     descent(links, `kids-${g.key}`, g.fromX, g.fromY, kids, 50, g.parents, options.rounded);
     cursor = left + width + SIBLING_GAP * 2;
   });
 
-  const scene = { cards, links, unions, pills, boxes, labels };
-  return { ...scene, bounds: bounds(scene) };
+  return finish({ cards, links, unions, pills, boxes, labels });
 }
 
 /** Przodkowie: the person on the right and their whole line of ancestors to the left, as far back as it is known,
@@ -383,7 +479,7 @@ export function layoutFamily(graph: Graph, focusId: string, options: { editing: 
  *  that ends early leaves its room to the others. */
 export function layoutAncestors(graph: Graph, focusId: string, rounded = false): Scene {
   const cards: SceneCard[] = [];
-  const links: SceneLink[] = [];
+  const links: LinkDraft[] = [];
   const pills: ScenePill[] = [];
   const labels: SceneLabel[] = [];
   type Node = { id: string; gen: number; stub?: string; again?: string; parents: Node[]; offsets: number[] };
@@ -458,8 +554,7 @@ export function layoutAncestors(graph: Graph, focusId: string, rounded = false):
   const titles = ["Osoba", "Rodzice", "Dziadkowie", "Pradziadkowie"];
   const top = Math.min(...cards.map((c) => c.y));
   for (let g = 0; g <= Math.min(last, titles.length - 1); g++) labels.push({ key: `gen-${g}`, x: x(g), y: top - 24, text: titles[g], stick: "top" });
-  const scene = { cards, links, unions: [], pills, boxes: [], labels };
-  return { ...scene, bounds: bounds(scene) };
+  return finish({ cards, links, unions: [], pills, boxes: [], labels });
 }
 
 /** Potomkowie with partners: how high each marriage's bar goes (0 the lowest, just above the children), so that no
@@ -486,41 +581,55 @@ export function barLevels(groups: { from: number; kids: number[] }[], centre: nu
 /** Generations one click on „+N potomków” unfolds below that person (tree.rs `UNFOLD`). */
 export const UNFOLD = 3;
 
-/** Potomkowie: a tidy top-down tree (spec §4.3). With `partners`, each person's partners are greyed cards beside
- *  them (first right, second left), not followed further, and the children hang from their own marriage; without,
- *  the spouse is the card's sub-line. A person in `unfolded` (their „+N potomków” clicked) shows UNFOLD more
- *  generations below them, as tree.graph fetched them. */
-export function layoutDescendants(graph: Graph, focusId: string, options: { depth?: number; rounded?: boolean; partners?: boolean; unfolded?: Iterable<string> } = {}): Scene {
-  const { depth = 2, rounded = false, partners = false } = options;
-  const unfolded = new Set(options.unfolded ?? []);
-  const cards: SceneCard[] = [];
-  const links: SceneLink[] = [];
-  const unions: SceneUnion[] = [];
-  const pills: ScenePill[] = [];
-  const labels: SceneLabel[] = [];
-  const unionsOf = (id: string) => graph.unions.filter((u) => u.partners.includes(id));
+/** What a descendants tree is drawn into: the parts of a scene. */
+type DescendantSink = Pick<Scene, "cards" | "unions" | "pills"> & { links: LinkDraft[] };
+
+/** The pill under a child in Rodzina: „+N” unfolds that person's descendants in place; once unfolded, „Zwiń” folds
+ *  them again (FocusCanvas calls `onPill` with `unfold`, and `fold` for the second). */
+function branchPill(id: string, card: { x: number; y: number }, count: number, open: boolean): ScenePill {
+  const at = { x: card.x + CARD_W - 64, y: card.y + CARD_H - 11 };
+  if (open) return { key: `down-${id}`, ...at, label: "Zwiń", target: id, direction: "up", at: "bottom", unfold: true, fold: true, title: "Zwiń potomków tej osoby" };
+  return { key: `down-${id}`, ...at, label: `+${count}`, target: id, direction: "down", at: "bottom", unfold: true, title: "Rozwiń potomków tej osoby" };
+}
+
+/** A person's descendants, tidy and top-down, as a block that is measured first and then drawn wherever it goes.
+ *  `given` generations below `rootId` are shown, more below each person in `bump` (generations below that person, at
+ *  least). With `rootDrawn` the root's own card and pill belong to the caller (the child's card in Rodzina's row):
+ *  only the people below are drawn, and the pills there are Rodzina's. */
+function descendantBlock(
+  graph: Graph,
+  rootId: string,
+  o: { given: number; rounded: boolean; partners: boolean; bump: ReadonlyMap<string, number>; claimed: Set<string>; rootDrawn?: boolean },
+) {
+  const { given, rounded, partners, bump, claimed, rootDrawn = false } = o;
+  const unionsBy = new Map<string, Graph["unions"]>();
+  for (const u of graph.unions) for (const x of new Set(u.partners)) unionsBy.set(x, [...(unionsBy.get(x) ?? []), u]);
+  const unionsOf = (id: string) => unionsBy.get(id) ?? [];
   // How many generations below each person are shown: as tree.rs walks it, the most any path gives.
   const budget = new Map<string, number>();
-  const queue: [string, number][] = [[focusId, depth]];
+  const queue: [string, number][] = [[rootId, given]];
   while (queue.length) {
-    const [id, given] = queue.shift()!;
-    const b = unfolded.has(id) ? Math.max(given, UNFOLD) : given;
+    const [id, from] = queue.shift()!;
+    const b = Math.max(from, bump.get(id) ?? 0);
     if ((budget.get(id) ?? -1) >= b) continue;
     budget.set(id, b);
     if (b > 0) for (const u of unionsOf(id)) for (const k of childrenOf(graph, u)) queue.push([k, b - 1]);
   }
   type Group = { partner: string | null; kids: Node[] };
-  type Node = { id: string; level: number; left: string[]; right: string[]; groups: Group[]; rowW: number; kidsW: number; width: number };
+  type Node = { id: string; level: number; more: boolean; left: string[]; right: string[]; groups: Group[]; rowW: number; kidsW: number; width: number };
   // Everyone is drawn once: a child of two descendants under the first, a partner who descends too only in their own
   // place, a partner of two descendants beside the first.
-  const claimed = new Set<string>();
   const build = (id: string, level: number): Node => {
     claimed.add(id);
     const p = graph.people[id];
     const beside = partners ? p.partners.filter((x) => graph.people[x] && !budget.has(x) && !claimed.has(x)) : [];
     for (const x of beside) claimed.add(x);
-    const node: Node = { id, level, left: beside.filter((_, i) => i % 2 === 1), right: beside.filter((_, i) => i % 2 === 0), groups: [], rowW: 0, kidsW: 0, width: 0 };
-    if (!budget.get(id)) return node;
+    const node: Node = { id, level, more: false, left: beside.filter((_, i) => i % 2 === 1), right: beside.filter((_, i) => i % 2 === 0), groups: [], rowW: 0, kidsW: 0, width: 0 };
+    if (!budget.get(id)) {
+      // Folded here: a „+N” is worth showing only if an unfold would draw someone new.
+      node.more = unionsOf(id).some((u) => childrenOf(graph, u).some((k) => !claimed.has(k)));
+      return node;
+    }
     const byPartner = new Map<string | null, string[]>();
     for (const u of unionsOf(id)) {
       const kids = childrenOf(graph, u).filter((k) => !claimed.has(k));
@@ -536,7 +645,7 @@ export function layoutDescendants(graph: Graph, focusId: string, options: { dept
     }
     return node;
   };
-  const root = build(focusId, 0);
+  const root = build(rootId, 0);
   // Two marriages' children are a little further apart than siblings.
   const measure = (n: Node) => {
     const row = 1 + n.left.length + n.right.length;
@@ -547,56 +656,76 @@ export function layoutDescendants(graph: Graph, focusId: string, options: { dept
     n.width = Math.max(n.rowW, kids.length ? n.kidsW : 0);
   };
   measure(root);
-  /** Places a person's block from `left`; returns their card's x. */
-  const place = (n: Node, left: number, parent?: string): number => {
-    const y = n.level * DESCENDANT_PITCH;
-    const px = left + (n.width - n.rowW) / 2 + n.left.length * (CARD_W + PARTNER_GAP);
-    const p = graph.people[n.id];
-    cards.push({ id: n.id, x: px, y, sub: partners ? subLine(p) : spouseLine(graph, p), focus: n.level === 0, ...(parent ? { rel: { of: parent, kind: "child" as const } } : {}) });
-    // A partner's card, their line to the person and the marriage's marker in the gap next to the partner. The first
-    // partner on each side is joined straight across; one further out by a line over the top of the cards between
-    // (from the person's top edge into the partner's), with the marker on it, so it never reads as the two partners'.
-    const markers = new Map<string, { x: number; y: number }>();
-    const beside = (id: string, x: number, k: number, side: 1 | -1) => {
-      cards.push({ id, x, y, sub: subLine(graph.people[id]), partner: true, rel: { of: n.id, kind: "partner" } });
-      const marker = { x: side > 0 ? x - PARTNER_GAP / 2 : x + CARD_W + PARTNER_GAP / 2, y: y + CARD_H / 2 };
-      if (!k) links.push({ key: `dp-${n.id}-${id}`, d: side > 0 ? `M${px + CARD_W} ${marker.y} H${x}` : `M${x + CARD_W} ${marker.y} H${px}`, kind: "partner", people: [n.id, id] });
-      else {
-        marker.y = y - 12 * k;
-        links.push({ key: `dp-${n.id}-${id}`, d: `M${side > 0 ? px + CARD_W - 20 * k : px + 20 * k} ${y} V${marker.y} H${x + CARD_W / 2} V${y}`, kind: "partner", people: [n.id, id] });
+  /** Draws the block with its left edge at `left` and the root's row at `top`; returns the root's card x. */
+  const draw = (left: number, top: number, out: DescendantSink): number => {
+    const { cards, links, unions, pills } = out;
+    /** Places a person's block from `left`; returns their card's x. */
+    const place = (n: Node, left: number, parent?: string): number => {
+      const y = top + n.level * DESCENDANT_PITCH;
+      const px = left + (n.width - n.rowW) / 2 + n.left.length * (CARD_W + PARTNER_GAP);
+      const p = graph.people[n.id];
+      const mine = rootDrawn && n.level === 0;
+      if (!mine) cards.push({ id: n.id, x: px, y, sub: partners ? subLine(p) : spouseLine(graph, p), focus: n.level === 0, ...(rootDrawn ? { deep: true } : {}), ...(parent ? { rel: { of: parent, kind: "child" as const } } : {}) });
+      // A partner's card, their line to the person and the marriage's marker in the gap next to the partner. The first
+      // partner on each side is joined straight across; one further out by a line over the top of the cards between
+      // (from the person's top edge into the partner's), with the marker on it, so it never reads as the two partners'.
+      const markers = new Map<string, { x: number; y: number }>();
+      const beside = (id: string, x: number, k: number, side: 1 | -1) => {
+        cards.push({ id, x, y, sub: subLine(graph.people[id]), partner: true, rel: { of: n.id, kind: "partner" } });
+        const marker = { x: side > 0 ? x - PARTNER_GAP / 2 : x + CARD_W + PARTNER_GAP / 2, y: y + CARD_H / 2 };
+        if (!k) links.push({ key: `dp-${n.id}-${id}`, d: side > 0 ? `M${px + CARD_W} ${marker.y} H${x}` : `M${x + CARD_W} ${marker.y} H${px}`, kind: "partner", people: [n.id, id] });
+        else {
+          marker.y = y - 12 * k;
+          links.push({ key: `dp-${n.id}-${id}`, d: `M${side > 0 ? px + CARD_W - 20 * k : px + 20 * k} ${y} V${marker.y} H${x + CARD_W / 2} V${y}`, kind: "partner", people: [n.id, id] });
+        }
+        unions.push({ key: `du-${n.id}-${id}`, ...marker, people: [n.id, id] });
+        markers.set(id, marker);
+      };
+      n.right.forEach((id, k) => beside(id, px + (k + 1) * (CARD_W + PARTNER_GAP), k, 1));
+      n.left.forEach((id, k) => beside(id, px - (k + 1) * (CARD_W + PARTNER_GAP), k, -1));
+      if (!mine && p.descendants > 0) {
+        if (!rootDrawn) {
+          const count = p.descendants;
+          if (budget.get(n.id) === 0) pills.push({ key: `more-${n.id}`, x: px + 70, y: y + CARD_H + 12, label: `+${count} ${count === 1 ? "potomek" : "potomków"}`, target: n.id, direction: "down", unfold: true });
+        } else if (n.groups.length ? bump.has(n.id) : n.more) pills.push(branchPill(n.id, { x: px, y }, p.descendants, n.groups.length > 0));
       }
-      unions.push({ key: `du-${n.id}-${id}`, ...marker, people: [n.id, id] });
-      markers.set(id, marker);
-    };
-    n.right.forEach((id, k) => beside(id, px + (k + 1) * (CARD_W + PARTNER_GAP), k, 1));
-    n.left.forEach((id, k) => beside(id, px - (k + 1) * (CARD_W + PARTNER_GAP), k, -1));
-    if (budget.get(n.id) === 0 && p.descendants > 0) {
-      const count = p.descendants;
-      pills.push({ key: `more-${n.id}`, x: px + 70, y: y + CARD_H + 12, label: `+${count} ${count === 1 ? "potomek" : "potomków"}`, target: n.id, direction: "down", unfold: true });
-    }
-    let cursor = left + (n.width - n.kidsW) / 2;
-    const drawn = n.groups.map((g) => {
-      const kids = g.kids.map((k) => {
-        const x = place(k, cursor, n.id);
-        cursor += k.width + SIBLING_GAP;
-        return { id: k.id, x, y: y + DESCENDANT_PITCH, kind: linkKind(pediOf(graph, k.id), false) };
+      let cursor = left + (n.width - n.kidsW) / 2;
+      const drawn = n.groups.map((g) => {
+        const kids = g.kids.map((k) => {
+          const x = place(k, cursor, n.id);
+          cursor += k.width + SIBLING_GAP;
+          return { id: k.id, x, y: y + DESCENDANT_PITCH, kind: linkKind(pediOf(graph, k.id), false) };
+        });
+        cursor += SIBLING_GAP;
+        const from = g.partner ? { ...markers.get(g.partner)!, parents: [n.id, g.partner] } : { x: px + CARD_W / 2, y: y + CARD_H, parents: [n.id] };
+        return { kids, from };
       });
-      cursor += SIBLING_GAP;
-      const from = g.partner ? { ...markers.get(g.partner)!, parents: [n.id, g.partner] } : { x: px + CARD_W / 2, y: y + CARD_H, parents: [n.id] };
-      return { kids, from };
-    });
-    // Each marriage's children have their own bar, 12 apart, so two never share a stretch (barLevels).
-    const levels = barLevels(drawn.map((d) => ({ from: d.from.x, kids: d.kids.map((k) => k.x + CARD_W / 2) })), px + CARD_W / 2);
-    drawn.forEach((d, gi) => descent(links, gi ? `d-${n.id}-${gi}` : `d-${n.id}`, d.from.x, d.from.y, d.kids, 26 + 12 * levels[gi], d.from.parents, rounded));
-    return px;
+      // Each marriage's children have their own bar, 12 apart, so two never share a stretch (barLevels).
+      const levels = barLevels(drawn.map((d) => ({ from: d.from.x, kids: d.kids.map((k) => k.x + CARD_W / 2) })), px + CARD_W / 2);
+      drawn.forEach((d, gi) => descent(links, gi ? `d-${n.id}-${gi}` : `d-${n.id}`, d.from.x, d.from.y, d.kids, 26 + 12 * levels[gi], d.from.parents, rounded));
+      return px;
+    };
+    return place(root, left);
   };
-  place(root, 0);
+  return { width: root.width, opened: root.groups.length > 0, draw };
+}
+
+/** Potomkowie: a tidy top-down tree (spec §4.3). With `partners`, each person's partners are greyed cards beside
+ *  them (first right, second left), not followed further, and the children hang from their own marriage; without,
+ *  the spouse is the card's sub-line. A person in `unfolded` (their „+N potomków” clicked) shows UNFOLD more
+ *  generations below them, as tree.graph fetched them. */
+export function layoutDescendants(graph: Graph, focusId: string, options: { depth?: number; rounded?: boolean; partners?: boolean; unfolded?: Iterable<string> } = {}): Scene {
+  const { depth = 2, rounded = false, partners = false } = options;
+  const bump = new Map([...new Set(options.unfolded ?? [])].map((id) => [id, UNFOLD] as const));
+  const out: DescendantSink = { cards: [], links: [], unions: [], pills: [] };
+  descendantBlock(graph, focusId, { given: depth, rounded, partners, bump, claimed: new Set() }).draw(0, 0, out);
+  const { cards } = out;
+  const labels: SceneLabel[] = [];
   // The generations' names, in a column at the left edge of the screen (FocusCanvas).
   const titles = ["Osoba", "Dzieci", "Wnuki", "Prawnuki", "Praprawnuki"];
   const levels = new Set(cards.map((c) => c.y / DESCENDANT_PITCH));
   for (const level of [...levels].sort((a, b) => a - b)) labels.push({ key: `row-${level}`, x: 0, y: level * DESCENDANT_PITCH, text: titles[level] ?? `Pokolenie +${level}`, stick: "left" });
-  const scene = { cards, links, unions, pills, boxes: [], labels };
-  return { ...scene, bounds: bounds(scene) };
+  return finish({ ...out, boxes: [], labels });
 }
 
 /** Everyone on the line of `id`: its ancestors and descendants within the graph (for highlights and dimming). */

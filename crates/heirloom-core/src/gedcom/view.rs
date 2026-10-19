@@ -151,7 +151,11 @@ pub struct Crop {
 pub struct MediaLink {
     /// The media record, or `<person xref>#<n>` for a 5.5.1 object written inside the person.
     pub object: String,
+    /// The person's profile photo: `_HLM_PROFILE Y`, or `_PRIM Y` from another program.
     pub profile: bool,
+    /// `_HLM_PROFILE N`: this photo was explicitly taken off as the profile photo (the first photo then no longer
+    /// stands in for it). `_PRIM N` from other programs is not read.
+    pub profile_off: bool,
     pub crop: Option<Crop>,
     pub title: Option<String>,
 }
@@ -180,6 +184,8 @@ pub struct MediaObject {
     pub file: Option<String>,
     pub format: Option<String>,
     pub kind: MediaKind,
+    /// The user's own category („Pocztówki”) from `_HLM_CATEGORY`; `kind` is the kind it behaves like.
+    pub category: Option<String>,
     /// The document type ("akt urodzenia"), from `MEDI … PHRASE`.
     pub document_type: Option<String>,
     pub title: Option<String>,
@@ -486,10 +492,13 @@ fn person_details(record: &Node, version: Version, this_year: i32) -> PersonDeta
                     Some(p) => p.to_string(),
                     None => format!("{}#{n}", record.xref.as_deref().unwrap_or_default()),
                 };
+                let marker = child.child_value("_HLM_PROFILE").map(str::trim);
+                let profile_off = marker == Some("N");
                 details.media.push(MediaLink {
                     object,
-                    profile: child.child_value("_HLM_PROFILE").map(str::trim) == Some("Y")
-                        || child.child_value("_PRIM").map(str::trim) == Some("Y"),
+                    // An explicit `N` wins over a `_PRIM Y` another program left on the same link.
+                    profile: marker == Some("Y") || (!profile_off && child.child_value("_PRIM").map(str::trim) == Some("Y")),
+                    profile_off,
                     crop: child.child("CROP").map(|c| Crop {
                         top: c.child_value("TOP").and_then(|v| v.trim().parse().ok()).unwrap_or(0),
                         left: c.child_value("LEFT").and_then(|v| v.trim().parse().ok()).unwrap_or(0),
@@ -618,6 +627,8 @@ fn percent_decode(text: &str) -> String {
 pub fn media_kind_for(format: Option<&str>, medi: Option<&str>, file: Option<&str>) -> MediaKind {
     match medi.map(|m| m.trim().to_ascii_uppercase()).as_deref() {
         Some("PHOTO" | "TOMBSTONE" | "CARD") => return MediaKind::Photo,
+        // What Heirloom writes for „inne” (no PHRASE, see `media_object`), whatever the file looks like.
+        Some("OTHER") => return MediaKind::Other,
         Some("MANUSCRIPT" | "BOOK" | "NEWSPAPER" | "MAGAZINE" | "FICHE" | "FILM" | "ELECTRONIC" | "DOCUMENT") => {
             return MediaKind::Document;
         }
@@ -635,14 +646,35 @@ pub fn media_kind_for(format: Option<&str>, medi: Option<&str>, file: Option<&st
     }
 }
 
-fn media_object(node: &Node, id: &str, version: Version) -> MediaObject {
+/// The kind of an `OBJE` record: its `MEDI`, else its file extension.
+pub fn object_kind(node: &Node, version: Version) -> MediaKind {
+    media_parts(node, version).kind
+}
+
+struct MediaParts<'a> {
+    file: Option<String>,
+    format: Option<String>,
+    medi: Option<&'a Node>,
+    kind: MediaKind,
+}
+
+fn media_parts(node: &Node, version: Version) -> MediaParts<'_> {
     let file_node = node.child("FILE");
     let file = file_node.and_then(|f| f.value.as_deref()).map(|v| file_path(v, version)).filter(|f| !f.is_empty());
     // 7.0: FILE.FORM.MEDI; 5.5.1: FILE.FORM.TYPE; 5.5: FORM at the object level.
     let form = file_node.and_then(|f| f.child("FORM")).or_else(|| node.child("FORM"));
     let medi = form.and_then(|f| f.child("MEDI").or_else(|| f.child("TYPE")));
     let format = form.and_then(|f| f.value.as_deref()).map(|v| v.trim().to_string());
-    let kind = media_kind_for(format.as_deref(), medi.and_then(|m| m.value.as_deref()), file.as_deref());
+    // `MEDI OTHER` with a PHRASE is what the 5.5.1 upgrade makes of a type it doesn't know (`Foto`, `jpg`): that says
+    // nothing about the file, so the extension decides. Heirloom's own „inne” is OTHER without a PHRASE.
+    let medi_value = medi.filter(|m| !(m.value.as_deref().is_some_and(|v| v.trim().eq_ignore_ascii_case("OTHER")) && m.child("PHRASE").is_some())).and_then(|m| m.value.as_deref());
+    let kind = media_kind_for(format.as_deref(), medi_value, file.as_deref());
+    MediaParts { file, format, medi, kind }
+}
+
+fn media_object(node: &Node, id: &str, version: Version) -> MediaObject {
+    let file_node = node.child("FILE");
+    let MediaParts { file, format, medi, kind } = media_parts(node, version);
     let title = file_node.and_then(|f| text_of(f, "TITL", version)).or_else(|| text_of(node, "TITL", version));
     MediaObject {
         id: id.to_string(),
@@ -650,6 +682,7 @@ fn media_object(node: &Node, id: &str, version: Version) -> MediaObject {
         file,
         format,
         kind,
+        category: text_of(node, "_HLM_CATEGORY", version),
         title,
         date_text: text_of(node, "_HLM_DATE", version),
         place: text_of(node, "_HLM_PLAC", version),
@@ -782,5 +815,42 @@ mod tests {
         assert_eq!(d.media[0].object, "@I1@#0");
         let object = &v.media["@I1@#0"];
         assert_eq!((object.file.as_deref(), object.title.as_deref()), (Some("C:\\Zdjęcia\\jan.jpg"), Some("Jan")));
+    }
+
+    #[test]
+    fn profile_markers_on_photo_links() {
+        let file = "0 HEAD\n1 GEDC\n2 VERS 7.0\n0 @I1@ INDI\n1 NAME Jan /Nowak/\n1 OBJE @O1@\n2 _HLM_PROFILE N\n1 OBJE @O2@\n2 _PRIM N\n1 OBJE @O3@\n2 _PRIM Y\n2 _HLM_PROFILE N\n1 OBJE @O4@\n2 _PRIM Y\n0 TRLR\n";
+        let v = build(&Document::from_bytes(file.as_bytes()).0);
+        let (_, d) = v.person("@I1@").unwrap();
+        let flags: Vec<_> = d.media.iter().map(|m| (m.profile, m.profile_off)).collect();
+        // `N` is read from _HLM_PROFILE only, and beats a `_PRIM Y` left on the same link.
+        assert_eq!(flags, [(false, true), (false, false), (false, true), (true, false)]);
+    }
+
+    #[test]
+    fn an_own_category_is_read_from_the_object() {
+        let file = "0 HEAD\n1 GEDC\n2 VERS 7.0\n\
+0 @O1@ OBJE\n1 FILE media/a.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n1 _HLM_CATEGORY Pocztówki\n\
+0 @O2@ OBJE\n1 FILE media/b.pdf\n2 FORM application/pdf\n3 MEDI MANUSCRIPT\n1 _HLM_CATEGORY   \n\
+0 @O3@ OBJE\n1 FILE media/c.jpg\n2 FORM image/jpeg\n3 MEDI OTHER\n1 _HLM_CATEGORY Pamiątki\n0 TRLR\n";
+        let v = build(&Document::from_bytes(file.as_bytes()).0);
+        assert_eq!((v.media["@O1@"].category.as_deref(), v.media["@O1@"].kind), (Some("Pocztówki"), MediaKind::Photo));
+        assert_eq!(v.media["@O2@"].category, None, "an empty name is no category");
+        assert_eq!(v.media["@O3@"].kind, MediaKind::Other, "MEDI OTHER is „inne”, though the file is a picture");
+    }
+
+    #[test]
+    fn other_with_a_phrase_from_the_upgrade_does_not_hide_a_photo() {
+        // 5.5.1 `TYPE Foto` on a .jpg: after the upgrade it is OTHER + PHRASE „Foto”, and still a photo.
+        let old = "0 HEAD\n1 GEDC\n2 VERS 5.5.1\n2 FORM LINEAGE-LINKED\n1 CHAR UTF-8\n0 @O1@ OBJE\n1 FILE media/a.jpg\n2 FORM jpg\n3 TYPE Foto\n0 TRLR\n";
+        let (mut doc, _) = Document::from_bytes(old.as_bytes());
+        assert_eq!(build(&doc).media["@O1@"].kind, MediaKind::Photo);
+        assert!(doc.upgrade_to_v7());
+        let medi = doc.record("@O1@").unwrap().child("FILE").unwrap().child("FORM").unwrap().child("MEDI").unwrap();
+        assert_eq!((medi.value.as_deref(), medi.child_value("PHRASE")), (Some("OTHER"), Some("Foto")));
+        assert_eq!(build(&doc).media["@O1@"].kind, MediaKind::Photo);
+        // Heirloom's own „inne” (OTHER, no PHRASE) stays Other, though the file is a picture.
+        let own = "0 HEAD\n1 GEDC\n2 VERS 7.0\n0 @O1@ OBJE\n1 FILE media/a.jpg\n2 FORM image/jpeg\n3 MEDI OTHER\n0 TRLR\n";
+        assert_eq!(build(&Document::from_bytes(own.as_bytes()).0).media["@O1@"].kind, MediaKind::Other);
     }
 }

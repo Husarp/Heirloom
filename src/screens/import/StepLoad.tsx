@@ -10,6 +10,7 @@ import {
   CircleX,
   ClipboardPaste,
   Copy,
+  Download,
   FileJson,
   FileQuestion,
   Files,
@@ -24,10 +25,13 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { call } from "../../api/transport";
 import { useStore } from "../../app/store";
+import { useCategories } from "../../app/categories";
 import { useApi } from "../../app/useApi";
 import { Spinner, useDismiss } from "../../components/bits";
+import { CategoryDialog } from "../../components/CategoryDialog";
+import { BASE_LIKE, type Base, type Category } from "../../lib/categories";
 import { bytes, clock, count, people, shortWhen } from "../../lib/format";
-import { copyText, onFileDrop, pickFiles, pickFolder } from "../../lib/native";
+import { copyText, onFileDrop, pickFiles, pickFolders, pickSavePath, revealPath } from "../../lib/native";
 import { GUIDE_STEPS, guideOpenByDefault } from "./aiGuide";
 import { useWizard, type Act, type ImportInput, type ImportState, type PastImport } from "./types";
 
@@ -60,6 +64,9 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
   const [stale, setStale] = useState(false);
   const [over, setOver] = useState(false);
   const { data: history } = useApi<PastImport[]>("import.history");
+  const own = useCategories();
+  // „+ Dodaj kategorię…” in a file's kind menu: the file the new category is for.
+  const [adding, setAdding] = useState<ImportInput | null>(null);
   // The guide is open at first while the archive has had no import; a click decides from then on.
   const [guide, setGuide] = useState<boolean | null>(null);
   const guideOpen = guide ?? guideOpenByDefault(history);
@@ -67,7 +74,7 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
   // Reads what was pasted and dropped a moment after the last change. Coming back to this step with a batch already
   // loaded keeps it (and the decisions made in the later steps).
   const load = async () => {
-    const { text, paths, exclude, kinds } = useWizard.getState();
+    const { text, paths, exclude, kinds, categories } = useWizard.getState();
     if (!text.trim() && paths.length === 0) {
       if (state) {
         await call("import.cancel").catch(() => {});
@@ -76,7 +83,7 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
       return;
     }
     setBusy(true);
-    await act("import.load", { texts: [text], paths, exclude, kinds });
+    await act("import.load", { texts: [text], paths, exclude, kinds, categories });
     setBusy(false);
   };
   const first = useRef(true);
@@ -160,6 +167,12 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Another pasted answer goes after the ones already there. */
+  const appendText = (pasted: string) => {
+    const current = useWizard.getState().text;
+    set({ text: current.trim() ? `${current}\n\n${pasted}` : pasted });
+  };
+
   // With the list shown, the answer's text can still be pasted anywhere on the step (Ctrl V).
   const listed = paths.length > 0;
   useEffect(() => {
@@ -170,8 +183,7 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
       const pasted = e.clipboardData?.getData("text") ?? "";
       if (!pasted.trim()) return;
       e.preventDefault();
-      const current = useWizard.getState().text;
-      set({ text: current.trim() ? `${current}\n\n${pasted}` : pasted });
+      appendText(pasted);
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
@@ -189,6 +201,18 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
 
   const pickMany = () => pickFiles("Wybierz pliki").then(addPaths);
 
+  /** „Pobierz .txt / .md”: the AI instructions as a file to keep or send on. */
+  const saveInstructions = async (ext: "txt" | "md") => {
+    try {
+      const path = await pickSavePath(`Instrukcja dla AI (Heirloom).${ext}`, [ext === "txt" ? { name: "Tekst", extensions: ["txt"] } : { name: "Markdown", extensions: ["md"] }]);
+      if (!path) return;
+      await call("import.saveInstructions", { path });
+      notify("Zapisano instrukcję dla AI.", { action: { label: "Pokaż w folderze", run: () => void revealPath(path).catch(() => {}) } });
+    } catch (e) {
+      notify((e as { message?: string }).message ?? "Nie udało się zapisać instrukcji.", { kind: "err" });
+    }
+  };
+
   /** Takes a line off the list: the pasted text, a dropped file or folder, or a file from inside a folder. */
   const remove = (input: ImportInput) => {
     if (input.kind === "answer" && !input.path) {
@@ -199,6 +223,18 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
     const { paths: current, exclude: out } = useWizard.getState();
     if (current.includes(input.path)) set({ paths: current.filter((p) => p !== input.path) });
     else set({ exclude: [...out, input.path] });
+  };
+
+  /** Gives a file the kind (and own category) chosen in its menu. Step 1's choices go with every reload of the list. */
+  const chooseKind = (input: ImportInput, kind: Base | "note", category: string | null) => {
+    if (input.path) {
+      const { kinds, categories } = useWizard.getState();
+      const rest = { ...categories };
+      if (category) rest[input.path] = category;
+      else delete rest[input.path];
+      set({ kinds: { ...kinds, [input.path]: kind }, categories: rest });
+    }
+    void act("import.file", { file: input.file, kind, ...(category ? { category } : {}) });
   };
 
   const counts = state?.batch.counts;
@@ -238,21 +274,27 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
             <span className="icon-tile" style={{ width: 40, height: 40 }}>
               <Files size={20} />
             </span>
-            <span className="col grow" style={{ minWidth: 0 }}>
-              <span className="serif" style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.2 }}>
+            <span className="col grow imp-recog-title" style={{ minWidth: 0 }}>
+              <span className="serif" style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.2, whiteSpace: "nowrap" }}>
                 Rozpoznane pliki <span style={{ fontSize: 16, color: "var(--text2)", fontWeight: 400 }}>{inputs.length}</span>
               </span>
               <span style={{ fontSize: 13, color: "var(--text2)" }}>
                 {droppedAt ? `Upuszczone o ${clock(droppedAt)} · ` : ""}nic nie zostało jeszcze zapisane
               </span>
             </span>
-            <button className="btn ghost" onClick={clearAll}>
-              Wyczyść listę
-            </button>
-            <button className="btn secondary" onClick={() => pickFiles("Dodaj pliki").then(addPaths)}>
-              <Plus size={14} />
-              Dodaj pliki
-            </button>
+            <span className="imp-recog-actions">
+              <button className="btn ghost" onClick={clearAll}>
+                Wyczyść listę
+              </button>
+              <button className="btn secondary" onClick={() => pickFolders("Dodaj foldery").then(addPaths)}>
+                <Plus size={14} />
+                Dodaj folder
+              </button>
+              <button className="btn secondary" onClick={() => pickFiles("Dodaj pliki").then(addPaths)}>
+                <Plus size={14} />
+                Dodaj pliki
+              </button>
+            </span>
           </div>
           <div className="imp-recog-row head">
             <span>Plik</span>
@@ -268,14 +310,27 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
               </div>
             )}
             {inputs.map((input, k) => (
-              <InputRow key={`${input.path ?? input.name}-${k}`} input={input} act={act} onRemove={() => remove(input)} />
+              <InputRow key={`${input.path ?? input.name}-${k}`} input={input} categories={own} onChoose={chooseKind} onAddCategory={() => setAdding(input)} onRemove={() => remove(input)} />
             ))}
           </div>
+          {/* Stays after the list appears, so it's clear that more answers can still be pasted. The textarea is
+              invisible and covers the box: it only takes the paste, which goes into the text and is not kept here. */}
+          <label className="imp-paste-mini">
+            <ClipboardPaste size={18} />
+            <span>Wklej tutaj kolejną odpowiedź AI (Ctrl V)</span>
+            <textarea
+              aria-label="Wklej tutaj kolejną odpowiedź AI"
+              value=""
+              spellCheck={false}
+              onChange={() => {}}
+              onPaste={(e) => {
+                e.preventDefault();
+                const pasted = e.clipboardData.getData("text");
+                if (pasted.trim()) appendText(pasted);
+              }}
+            />
+          </label>
           <div className="imp-recog-foot">
-            <span className="row" style={{ gap: 6, color: "var(--text2)" }}>
-              <ClipboardPaste size={15} />
-              Tekst odpowiedzi możesz też wkleić tutaj: Ctrl V
-            </span>
             <span className="grow" />
             {busy ? (
               <span className="row" style={{ gap: 7, color: "var(--text3)" }}>
@@ -370,15 +425,15 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
               className="link"
               onClick={(e) => {
                 e.stopPropagation();
-                pickFolder("Wybierz folder").then((p) => p && addPaths([p]));
+                pickFolders("Wybierz foldery").then(addPaths);
               }}
             >
-              lub folder…
+              lub foldery…
             </button>
           </span>
         </div>
 
-        <AiGuide open={guideOpen} onToggle={() => setGuide(!guideOpen)} onCopy={copyInstructions} />
+        <AiGuide open={guideOpen} onToggle={() => setGuide(!guideOpen)} onCopy={copyInstructions} onSave={saveInstructions} />
 
         <div className="card">
           <div className="imp-list-label">Poprzednie importy</div>
@@ -400,13 +455,20 @@ export function StepLoad({ state, setState, act, next }: { state: ImportState | 
           )}
         </div>
       </div>
+      {adding && (
+        <CategoryDialog
+          base={adding.kind === "photo" || adding.kind === "document" ? adding.kind : "other"}
+          onClose={() => setAdding(null)}
+          onAdded={(name, base) => chooseKind(adding, base, name)}
+        />
+      )}
     </div>
   );
 }
 
 /** „Jak przygotować paczkę z pomocą AI”: the steps from the researcher's material to this screen, with the button
  *  that copies the instructions. Folds away once imports are routine. */
-function AiGuide({ open, onToggle, onCopy }: { open: boolean; onToggle: () => void; onCopy: () => void }) {
+function AiGuide({ open, onToggle, onCopy, onSave }: { open: boolean; onToggle: () => void; onCopy: () => void; onSave: (ext: "txt" | "md") => void }) {
   return (
     <div className="imp-info">
       <button className="imp-guide-head" aria-expanded={open} onClick={onToggle}>
@@ -421,10 +483,9 @@ function AiGuide({ open, onToggle, onCopy }: { open: boolean; onToggle: () => vo
                 <b>{step.title}</b> {step.text}
               </span>
               {step.copy && (
-                <button className="btn secondary" style={{ height: 34, alignSelf: "flex-start", marginTop: 6 }} onClick={onCopy}>
-                  <Copy size={14} />
-                  Kopiuj instrukcję dla AI
-                </button>
+                <span className="row" style={{ gap: 8, alignSelf: "flex-start", marginTop: 6, flexWrap: "wrap" }}>
+                  <CopyButtons onCopy={onCopy} onSave={onSave} />
+                </span>
               )}
             </li>
           ))}
@@ -432,13 +493,31 @@ function AiGuide({ open, onToggle, onCopy }: { open: boolean; onToggle: () => vo
       ) : (
         <>
           <span style={{ color: "var(--text2)" }}>Instrukcja mówi AI, w jakim formacie przygotować osoby, fakty i źródła.</span>
-          <button className="btn secondary" style={{ height: 34, alignSelf: "flex-start", marginTop: 2 }} onClick={onCopy}>
-            <Copy size={14} />
-            Kopiuj instrukcję dla AI
-          </button>
+          <span className="row" style={{ gap: 8, alignSelf: "flex-start", marginTop: 2, flexWrap: "wrap" }}>
+            <CopyButtons onCopy={onCopy} onSave={onSave} />
+          </span>
         </>
       )}
     </div>
+  );
+}
+
+function CopyButtons({ onCopy, onSave }: { onCopy: () => void; onSave: (ext: "txt" | "md") => void }) {
+  return (
+    <>
+      <button className="btn secondary" style={{ height: 34 }} onClick={onCopy}>
+        <Copy size={14} />
+        Kopiuj instrukcję dla AI
+      </button>
+      <button className="btn secondary" style={{ height: 34 }} onClick={() => onSave("txt")} title="Zapisz instrukcję jako plik tekstowy (Notatnik)">
+        <Download size={14} />
+        Pobierz .txt
+      </button>
+      <button className="btn secondary" style={{ height: 34 }} onClick={() => onSave("md")} title="Zapisz instrukcję jako plik Markdown">
+        <Download size={14} />
+        Pobierz .md
+      </button>
+    </>
   );
 }
 
@@ -458,13 +537,28 @@ const STATUS: Record<ImportInput["status"], { label: string; icon: React.ReactNo
 };
 
 /** One recognised file: its kind (a file's can be changed), what it holds or whom it shows, its state, „usuń”. */
-function InputRow({ input, act, onRemove }: { input: ImportInput; act: Act; onRemove: () => void }) {
-  const setKinds = useWizard((w) => w.set);
+function InputRow({
+  input,
+  categories,
+  onChoose,
+  onAddCategory,
+  onRemove,
+}: {
+  input: ImportInput;
+  categories: Category[];
+  onChoose: (input: ImportInput, kind: Base | "note", category: string | null) => void;
+  onAddCategory: () => void;
+  onRemove: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
   const status = STATUS[input.status];
   const changeable = input.kind !== "answer" && input.status !== "skipped" && !!input.file;
   const size = input.size != null ? bytes(input.size) : "";
+  const choose = (kind: Base | "note", category: string | null) => {
+    setOpen(false);
+    onChoose(input, kind, category);
+  };
   return (
     <div className={`imp-recog-row${input.status === "skipped" ? " skipped" : ""}`}>
       <span className="row" style={{ gap: 8, minWidth: 0 }}>
@@ -477,25 +571,37 @@ function InputRow({ input, act, onRemove }: { input: ImportInput; act: Act; onRe
         </span>
       </span>
       <div ref={ref} style={{ position: "relative", minWidth: 0 }}>
-        <button className={`imp-kind${input.kind === "other" ? " warn" : ""}`} disabled={!changeable} onClick={() => setOpen((o) => !o)} aria-haspopup={changeable ? "menu" : undefined}>
-          <span className="ellipsis">{KIND_LABEL[input.kind]}</span>
+        <button
+          className={`imp-kind${input.kind === "other" && !input.category ? " warn" : ""}`}
+          disabled={!changeable}
+          onClick={() => setOpen((o) => !o)}
+          aria-haspopup={changeable ? "menu" : undefined}
+        >
+          <span className="ellipsis">{input.category ?? KIND_LABEL[input.kind]}</span>
           {changeable && <ChevronDown size={13} />}
         </button>
         {open && (
-          <div className="popover" style={{ top: 36, left: 0, width: 190, padding: "4px 0" }}>
+          <div className="popover" style={{ top: 36, left: 0, width: 190, maxHeight: 300, overflow: "auto", padding: "4px 0" }}>
             {(["photo", "document", "note"] as const).map((k) => (
-              <button
-                key={k}
-                className={`menu-item${input.kind === k ? " on" : ""}`}
-                onClick={() => {
-                  setOpen(false);
-                  if (input.path) setKinds({ kinds: { ...useWizard.getState().kinds, [input.path]: k } });
-                  act("import.file", { file: input.file, kind: k });
-                }}
-              >
+              <button key={k} className={`menu-item${input.kind === k && !input.category ? " on" : ""}`} onClick={() => choose(k, null)}>
                 {KIND_LABEL[k]}
               </button>
             ))}
+            {categories.map((c) => (
+              <button key={c.name} className={`menu-item${input.category === c.name ? " on" : ""}`} title={`${c.name} (${BASE_LIKE[c.base]})`} onClick={() => choose(c.base, c.name)}>
+                <span className="ellipsis">{c.name}</span>
+              </button>
+            ))}
+            <button
+              className="menu-item"
+              onClick={() => {
+                setOpen(false);
+                onAddCategory();
+              }}
+            >
+              <Plus size={13} />
+              Dodaj kategorię…
+            </button>
           </div>
         )}
       </div>

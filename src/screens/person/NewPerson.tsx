@@ -28,7 +28,7 @@ export function NewPerson({ relation }: { relation?: { kind: RelationKind; of: s
   const surname = !related ? undefined : relation?.kind === "child" ? related.surname : relation?.kind === "sibling" ? (related.maiden ?? related.surname) : undefined;
 
   return (
-    <div className="page">
+    <div className="page new-person-page">
       <PersonalEditor
         id={null}
         profile={null}
@@ -42,11 +42,10 @@ export function NewPerson({ relation }: { relation?: { kind: RelationKind; of: s
         }}
         onCancel={() => (relation ? go({ name: "person", id: relation.of }) : goBack())}
       />
-      <div className="profile-body">
-        <span />
+      <div className="new-person-info">
         <div className="info-box row" style={{ gap: 10, alignItems: "flex-start" }}>
           <Info size={16} color="var(--accent-text)" style={{ flex: "none", marginTop: 2 }} />
-          <span>Po utworzeniu osoby na jej profilu dodasz rodzinę, życiorys, historie, zdjęcia i linki — każdą sekcję osobno, przyciskiem „Edytuj sekcję”.</span>
+          <span>Datę i miejsce urodzenia, chrztu, zgonu i pochówku, zdjęcia, rodzinę, życiorys i resztę dodasz na profilu nowej osoby — każdą sekcję osobno, przyciskiem „Edytuj sekcję”.</span>
         </div>
       </div>
     </div>

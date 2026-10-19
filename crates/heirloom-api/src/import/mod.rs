@@ -41,6 +41,8 @@ pub struct Decision {
 #[derive(Debug, Clone, Default)]
 pub struct FileChoice {
     pub kind: Option<String>,
+    /// An own category („Pocztówki”); `kind` then is the kind it behaves like (photo, document, other).
+    pub category: Option<String>,
     pub caption: Option<String>,
     /// People added by hand (record ids of batch persons: P1…).
     pub people: Vec<String>,
@@ -106,9 +108,26 @@ fn no_draft() -> ApiError {
     ApiError::new("no_import", "Nie ma rozpoczętego importu.")
 }
 
+/// The AI instructions as a file: `.txt` with Windows line ends and a UTF-8 BOM (Notepad then shows the Polish
+/// letters), anything else (`.md`) as is.
+fn instructions_file(path: &std::path::Path) -> Vec<u8> {
+    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("txt")) {
+        let mut out = vec![0xEF, 0xBB, 0xBF];
+        out.extend(AI_INSTRUCTIONS.replace("\r\n", "\n").replace('\n', "\r\n").into_bytes());
+        out
+    } else {
+        AI_INSTRUCTIONS.as_bytes().to_vec()
+    }
+}
+
 pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Value) -> ApiResult {
     match method {
         "import.instructions" => Ok(json!({ "text": AI_INSTRUCTIONS, "version": FORMAT_VERSION })),
+        "import.saveInstructions" => {
+            let path = PathBuf::from(req(args, "path")?);
+            std::fs::write(&path, instructions_file(&path)).map_err(|e| ApiError::new("write_failed", format!("Nie udało się zapisać instrukcji: {e}")))?;
+            Ok(json!({ "path": path.to_string_lossy() }))
+        }
         "import.load" => {
             let texts: Vec<String> = args.get("texts").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
             let paths: Vec<PathBuf> = args.get("paths").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(PathBuf::from).collect()).unwrap_or_default();
@@ -148,12 +167,17 @@ pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Val
                     let _ = fix_date(&mut new, &event, &value);
                 }
             }
-            // Kinds chosen by hand in step 1 (by path): a reload (a file taken off, another dropped) keeps them.
+            // Kinds chosen by hand in step 1 (by path): a reload (a file taken off, another dropped) keeps them. A kind
+            // chosen as an own category comes with its name (`categories`, by path).
             if let Some(kinds) = args.get("kinds").and_then(Value::as_object) {
+                let categories = args.get("categories").and_then(Value::as_object);
                 for f in &new.files {
-                    if let Some(kind) = kinds.get(&f.path.display().to_string()).and_then(Value::as_str) {
+                    let path = f.path.display().to_string();
+                    if let Some(kind) = kinds.get(&path).and_then(Value::as_str) {
                         let key = f.m.map(m_label).unwrap_or_else(|| f.name.clone());
-                        new.file_choices.entry(key).or_default().kind = Some(kind.to_string());
+                        let choice = new.file_choices.entry(key).or_default();
+                        choice.kind = Some(kind.to_string());
+                        choice.category = categories.and_then(|c| c.get(&path)).and_then(Value::as_str).and_then(|c| crate::media_edit::clean_category(c).ok());
                     }
                 }
             }
@@ -263,6 +287,13 @@ pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Val
                     let choice = d.file_choices.entry(m).or_default();
                     if let Some(kind) = args.get("kind").and_then(Value::as_str) {
                         choice.kind = Some(kind.to_string());
+                        // A kind chosen with no category is a plain one.
+                        choice.category = None;
+                    }
+                    match args.get("category") {
+                        Some(Value::String(name)) => choice.category = Some(crate::media_edit::clean_category(name)?),
+                        Some(Value::Null) => choice.category = None,
+                        _ => {}
                     }
                     if let Some(caption) = args.get("caption").and_then(Value::as_str) {
                         choice.caption = Some(caption.to_string());
@@ -292,9 +323,15 @@ pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Val
                     fix_date(d, &id, &value)?;
                 }
                 "import.profile" => {
-                    let person = req(args, "person")?;
+                    // One person (`person`) or several at once (`persons`: one state reload for the star's list).
+                    let mut who: Vec<String> = args.get("persons").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
+                    if who.is_empty() {
+                        who.push(req(args, "person")?);
+                    }
                     let file = args.get("file").and_then(Value::as_str).map(str::to_string);
-                    d.profile.insert(person, file);
+                    for person in who {
+                        d.profile.insert(person, file.clone());
+                    }
                 }
                 "import.commit" => {
                     let author = req(args, "author")?;
@@ -510,17 +547,18 @@ fn input_list(draft: &Draft, files: &[Value]) -> Vec<Value> {
         let who = [people, caption].into_iter().flatten().collect::<Vec<_>>().join(" · ");
         let (status, detail) = if choice.skip {
             ("skipped", "Pominięty — nie zostanie zapisany".to_string())
-        } else if kind == "other" {
+        } else if kind == "other" && choice.category.is_none() {
             ("assign", "Wybierz rodzaj pliku".to_string())
         } else if described || !names.is_empty() {
             let dup = if f["status"] == "dup" { " · już jest w archiwum" } else { "" };
             ("ok", format!("{}{dup}", if who.is_empty() { "Opisany w paczce".to_string() } else { who }))
         } else {
-            ("assign", "Nie ma go w paczce — wskaż osobę".to_string())
+            ("assign", "Nie ma go w paczce — osobę przypiszesz w kroku 4".to_string())
         };
         out.push(json!({
             "name": f["name"],
             "kind": kind,
+            "category": choice.category,
             "path": f["path"],
             "size": f["size"],
             "m": m_number(key).map(m_label),
@@ -919,6 +957,7 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
             "size": input.map(|f| f.size),
             "status": status,
             "kind": choice.kind.clone().or(m.kind.clone()).unwrap_or_else(|| "photo".into()),
+            "category": choice.category,
             "documentType": m.document_type,
             "caption": choice.caption.clone().or(m.caption.clone()),
             "people": people.iter().map(|id| json!({ "id": id, "name": batch.persons.iter().find(|x| x.id == *id).map(batch_name) })).collect::<Vec<_>>(),
@@ -945,6 +984,7 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
             "size": f.size,
             "status": if choice.skip { "skipped" } else if draft.duplicates.contains_key(&key) { "dup" } else if !choice.people.is_empty() { "ok" } else { "und" },
             "kind": choice.kind.clone().unwrap_or_else(|| if check::is_image(&f.path) { "photo".into() } else { "document".into() }),
+            "category": choice.category,
             "caption": choice.caption,
             "people": choice.people.iter().map(|id| json!({ "id": id, "name": batch.persons.iter().find(|x| x.id == *id).map(batch_name) })).collect::<Vec<_>>(),
             "transcription": false,
@@ -1042,4 +1082,49 @@ fn history(s: &Session) -> Value {
             })
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use heirloom_core::Archive;
+
+    #[test]
+    fn instructions_are_saved_as_txt_with_bom_and_crlf_and_as_md_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let mut draft = None;
+        let txt = dir.path().join("Instrukcja.txt");
+        call(&mut session, &mut draft, "import.saveInstructions", &json!({ "path": txt.to_string_lossy() })).unwrap();
+        let bytes = std::fs::read(&txt).unwrap();
+        assert_eq!(&bytes[..3], [0xEF, 0xBB, 0xBF]);
+        let body = String::from_utf8(bytes[3..].to_vec()).unwrap();
+        assert!(body.contains("\r\n") && !body.replace("\r\n", "").contains('\n'));
+        assert_eq!(body.replace("\r\n", "\n"), AI_INSTRUCTIONS.replace("\r\n", "\n"));
+
+        let md = dir.path().join("Instrukcja.md");
+        call(&mut session, &mut draft, "import.saveInstructions", &json!({ "path": md.to_string_lossy() })).unwrap();
+        assert_eq!(std::fs::read(&md).unwrap(), AI_INSTRUCTIONS.as_bytes());
+    }
+
+    #[test]
+    fn profile_photo_is_set_for_one_person_or_several_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let mut draft = None;
+        let text = format!("```json\n{}\n```", check::extract_blocks(include_str!("../../../../docs/IMPORT_FORMAT.md"), "doc").into_iter().next().unwrap().text);
+        let state = call(&mut session, &mut draft, "import.load", &json!({ "texts": [text], "paths": [] })).unwrap();
+        let ids: Vec<String> = state["persons"].as_array().unwrap().iter().take(2).map(|p| p["id"].as_str().unwrap().to_string()).collect();
+        assert_eq!(ids.len(), 2);
+        let profile_of = |state: &Value, id: &str| state["persons"].as_array().unwrap().iter().find(|p| p["id"] == id).unwrap()["profile"].clone();
+
+        let state = call(&mut session, &mut draft, "import.profile", &json!({ "persons": ids, "file": "M001" })).unwrap();
+        assert_eq!((profile_of(&state, &ids[0]), profile_of(&state, &ids[1])), (json!("M001"), json!("M001")));
+        // One person's still works, and clearing is `file: null`.
+        let state = call(&mut session, &mut draft, "import.profile", &json!({ "person": ids[0], "file": null })).unwrap();
+        assert_eq!((profile_of(&state, &ids[0]), profile_of(&state, &ids[1])), (Value::Null, json!("M001")));
+        // Another photo replaces the first: one profile photo per person.
+        let state = call(&mut session, &mut draft, "import.profile", &json!({ "persons": [ids[1]], "file": "M002" })).unwrap();
+        assert_eq!(profile_of(&state, &ids[1]), json!("M002"));
+    }
 }

@@ -117,7 +117,7 @@ export function ArchiveDot({ from, size = 12, style }: { from: string[] | undefi
       ? `var(--arch${((colours[0] - 1) % 6) + 1})`
       : `conic-gradient(${colours.map((c, i) => `var(--arch${((c - 1) % 6) + 1}) ${(i / colours.length) * 360}deg ${((i + 1) / colours.length) * 360}deg`).join(", ")})`;
   const letter = colours.length === 1 && size >= 15 ? (archives.get(from[0])?.name ?? "").charAt(0).toUpperCase() : "";
-  const ink = [4, 6, 9, 10].includes(archBranch(colours[0])) ? "var(--lod-ink-dk)" : "var(--lod-ink)";
+  const ink = `var(--b${archBranch(colours[0])}-ink)`;
   return (
     <span className="arch-dot" title={fromText(from, archives)} style={{ width: size, height: size, background, color: ink, fontSize: Math.round(size * 0.6), ...style }}>
       {letter}
@@ -255,7 +255,13 @@ export function Segmented<T extends string>({
           style={size ? { height: size } : undefined}
         >
           {o.icon}
-          {o.label}
+          {typeof o.label === "string" ? (
+            <span className="seg-label" data-label={o.label}>
+              {o.label}
+            </span>
+          ) : (
+            o.label
+          )}
         </button>
       ))}
     </div>
@@ -303,6 +309,7 @@ export function Tabs<T extends string>({
           style={{
             height: 40,
             padding: "0 10px",
+            whiteSpace: "nowrap",
             fontSize: 14,
             color: t.value === value ? "var(--text)" : "var(--text2)",
             fontWeight: t.value === value ? 600 : 400,
@@ -383,12 +390,14 @@ export function Dropdown<T extends string>({
     <div ref={ref} style={{ position: "relative" }}>
       <button
         className="chip"
+        title={`${label} ${current?.label ?? ""}`}
         onClick={() => setOpen((o) => !o)}
         style={open ? { border: "1.5px solid var(--accent)", boxShadow: "var(--ring)", color: "var(--text)" } : { color: "var(--text)" }}
       >
         {icon}
         <span>
-          {label} <b style={{ fontWeight: 600 }}>{current?.label}</b>
+          <span className="dd-label">{label} </span>
+          <b style={{ fontWeight: 600 }}>{current?.label}</b>
         </span>
         <ChevronDown size={13} color="var(--text3)" style={{ transform: open ? "rotate(180deg)" : undefined }} />
       </button>
@@ -428,6 +437,10 @@ export function AzRail({ active, has, onPick, width = 28 }: { active?: string | 
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "space-between",
+        // On a short window the letters scroll instead of running past the bottom edge.
+        overflowY: "auto",
+        minHeight: 0,
+        scrollbarWidth: "none",
         fontSize: 11,
         fontWeight: 600,
         color: "var(--text3)",
@@ -443,6 +456,7 @@ export function AzRail({ active, has, onPick, width = 28 }: { active?: string | 
             style={{
               width: 22,
               height: 18,
+              flex: "none",
               borderRadius: 4,
               background: l === active ? "var(--accent-soft)" : undefined,
               color: l === active ? "var(--accent-text)" : on ? "var(--text2)" : "var(--text3)",
@@ -520,10 +534,10 @@ export function EmptyState({ icon, title, text, action }: { icon?: ReactNode; ti
 
 /** Label + optional description on the left, a control on the right (Settings rows). `soon`: not built yet — the
  *  row is greyed with a „wkrótce” badge and its control is shown but can't be used (one look for all such rows). */
-export function SettingRow({ label, note, children, last, soon }: { label: ReactNode; note?: ReactNode; children?: ReactNode; last?: boolean; soon?: boolean }) {
+export function SettingRow({ label, note, children, last, soon, wide }: { label: ReactNode; note?: ReactNode; children?: ReactNode; last?: boolean; soon?: boolean; wide?: boolean }) {
   return (
     <div
-      className={`row${soon ? " set-soon" : ""}`}
+      className={`row${soon ? " set-soon" : ""}${wide ? " set-wide" : ""}`}
       aria-disabled={soon || undefined}
       style={{ minHeight: 60, padding: "10px 18px", gap: 20, borderBottom: last ? undefined : "1px solid var(--border)" }}
     >

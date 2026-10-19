@@ -431,9 +431,14 @@ button.media-preview:not(:disabled) {
   font-size: 13px;
   font-weight: 500;
   max-width: 100%;
+  border: 1.5px solid transparent;
 }
 .media-person.editing {
   padding: 0 2px 0 4px;
+}
+/* Whose profile photo it is: the green border of the profile star (ProfileTag in components/ProfileStar). */
+.media-person.profile-on {
+  border-color: var(--accent);
 }
 .media-person .name {
   min-width: 0;
@@ -823,4 +828,14 @@ button.missing-status:hover {
   max-width: calc(100vw - 80px);
   padding: 4px 0;
   cursor: default;
+}
+
+/* A small window: narrower side columns, so the pictures keep some room. */
+@media (max-width: 1150px) {
+  .media-screen {
+    grid-template-columns: 190px minmax(0, 1fr) 270px;
+  }
+  .media-toolbar {
+    padding: 16px 16px 0;
+  }
 }

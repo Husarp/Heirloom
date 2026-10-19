@@ -3,6 +3,55 @@
 Format: `X.Y.Z — YYYY-MM-DD HH:MM: description`. Newest on top.
 X = major change, Y = feature / bigger change, Z = small change.
 
+## 0.8.0 — 2026-10-19 14:20: Fixes from the second test — tree, profile, gallery, import, archive list, AI instructions
+- **Tree.**
+  - **Rodzina: the descendants arrow unfolds in place.** The „+N” under a child draws that child's descendants
+    below it and the person in the centre stays. With more than 2 generations below, a question offers „Wszystkich
+    potomków (N osób)” or „Kolejne 2 pokolenia (N osób)”, with „Zapamiętaj mój wybór”; the choice can be changed in
+    Ustawienia › Drzewo › „Rozwijanie potomków”. „Zwiń” folds the branch again.
+  - **Branch colours can be chosen.** Ustawienia › Drzewo › „Kolory gałęzi” (no longer „wkrótce”): three ready sets
+    („Stonowane”, „Jasne”, „Żywe”, each checked for readability in the light and the dark theme) and a colour for
+    each branch („Automatycznie” gives it back). The same choice sits at the top of a surname in Nazwiska (edit mode).
+  - **Zooming out:** cards with names and years stay down to about 30 % (the text gets smaller), shapes only below.
+    At the smallest zoom the lines reach the shapes.
+  - The selected person's side panel scrolls, with „Otwórz profil” always visible at the bottom.
+  - The view switch (Rodzina · Przodkowie · Potomkowie · Całe drzewo) and every other segmented control are aligned.
+- **Profile.**
+  - Rodzina in edit mode: „Odłącz” instead of the bin (the person stays in the archive; deleting a person is on their
+    own profile).
+  - Adding a person („Dodaj rodzica” and the others) starts with a short form — imię, nazwisko, płeć, „Żyje?” —
+    and „Utwórz osobę” opens the new profile, where the rest is added.
+  - The contents list has icons for Dane osobowe, Rodzina, Życiorys and Galeria.
+- **Gallery and profile photos.**
+  - Photos can be dragged into your own order (kept in the archive, used wherever the person's photos show).
+  - The profile photo has its own spot at the top of the gallery and still shows among the others. The spot is
+    always there, also with one photo or none yet (then it says how to choose one).
+  - A star in each photo's corner makes it the profile photo; on a photo of several people a short list asks for whom
+    („Dalej” / „Wszystkim”). Clicking it again asks whose profile photo it stops being. One profile photo per person.
+    People tags show whose profile photo it is (green border and a star). The same star is in Import step 4.
+- **Import.**
+  - Whole folders (with subfolders) or several files at once, in the picker („Dodaj folder”) and by dropping.
+  - Step 1 keeps a small paste box under the list.
+  - Step 4: „Przypisz” opens over everything, with a search field; „Brak zdjęcia” / „Brak dokumentu”, „Zdjęcie
+    nieopisane” / „Dokument nieopisany” by the file's kind; a file without a person says „osobę przypiszesz w kroku 4”.
+  - **Own file categories:** „+ Dodaj kategorię” next to Zdjęcie · Dokument · Inne (a name and what it behaves like);
+    a category shows in the import, in Media and on the profile, and Ustawienia › „Kategorie plików” renames or
+    removes them.
+  - „Kto importuje” and „Kto edytuje?” offer the names already used on this computer.
+- **Instructions for the AI** are rewritten for a conversation: paste them once, then drop materials person by person;
+  the AI asks when unsure, lists what it understood and waits for „tak” before writing the file, and splits big
+  packages itself. They can also be saved as .txt or .md („Pobierz .txt”, „Pobierz .md”).
+- **Archive list:** ✕ asks first („Nic nie zostanie usunięte — zniknie tylko z tej listy”); the list can be sorted by
+  last opened, last edited or A–Z.
+- **Smaller screens:** every screen was checked from 1000×540 to 1920×1000 (laptops, Windows scaling 125–150 %); what
+  didn't fit now wraps, scrolls or folds (top bar, sidebar, tree toolbar, Osoby, Nazwiska, Historie, Media, Import's
+  steps, dialogs, menus). The window can now be made as small as 1000×540.
+- **Smaller:** a file set to „Inne” now really counts as other (an image used to stay a photo); photos from other
+  programs keep showing as photos.
+- **Known limits:** undoing a category's rename or removal (Ctrl Z) puts the files back but not the list in
+  Ustawienia. Not yet tried on Windows: the folder picker with several folders, the window at its new minimum size,
+  Windows scaling.
+
 ## 0.7.0 — 2026-10-11 03:16: Two ways of working with an archive; automatic backups; photos in folders per person
 - **Two ways of working.** The first time you open an archive on a computer, Heirloom asks how you want to work with
   it (it can be changed later in Ustawienia › Archiwum › „Sposób pracy”):

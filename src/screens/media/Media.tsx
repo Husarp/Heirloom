@@ -17,7 +17,7 @@ type View = "grid" | "list";
 type Todo = "noTitle" | "noPeople" | "transcription";
 
 interface Filters {
-  /** "all", "photo", "document", "other", "pdf" or "type:<document type>". */
+  /** "all", "photo", "document", "other", "pdf", "type:<document type>" or "cat:<own category>". */
   kind: string;
   decade: number | "none" | null;
   todo: Todo | null;
@@ -48,6 +48,7 @@ let remembered: { filters: Filters; sort: Sort; view: View } = { filters: ALL, s
 
 const collator = new Intl.Collator("pl", { numeric: true, sensitivity: "base" });
 const typeKey = (type: string | null) => type?.trim().toLowerCase() ?? "";
+const catKey = typeKey;
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 const nameOf = (m: MediaItem) => m.title?.trim() || fileName(m.path);
 
@@ -59,6 +60,7 @@ function matchKind(m: MediaItem, kind: string): boolean {
   if (kind === "all") return true;
   if (kind === "pdf") return isPdf(m.path);
   if (kind.startsWith("type:")) return typeKey(m.documentType) === kind.slice(5);
+  if (kind.startsWith("cat:")) return catKey(m.category) === kind.slice(4);
   return m.kind === kind;
 }
 const matchDecade = (m: MediaItem, decade: Filters["decade"]) => decade == null || (decade === "none" ? m.decade == null : m.decade === decade);
@@ -91,12 +93,22 @@ function facets(items: MediaItem[], f: Filters) {
     if (known) known.total++;
     else types.set(key, { label: capitalize(m.documentType!.trim()), raw: m.documentType!.trim(), total: 1 });
   }
+  // Own categories in use: their name is the label, and a click shows just their files.
+  const categories = new Map<string, { label: string; total: number }>();
+  for (const m of items) {
+    const key = catKey(m.category);
+    if (!key) continue;
+    const known = categories.get(key);
+    if (known) known.total++;
+    else categories.set(key, { label: m.category!.trim(), total: 1 });
+  }
   const kinds = ["all", "photo", "document"];
   if (items.some((m) => m.kind === "other")) kinds.push("other");
+  for (const [key] of [...categories].sort((a, b) => b[1].total - a[1].total || collator.compare(a[1].label, b[1].label))) kinds.push(`cat:${key}`);
   for (const [key] of [...types].sort((a, b) => b[1].total - a[1].total || collator.compare(a[1].label, b[1].label))) kinds.push(`type:${key}`);
   if (items.some((m) => isPdf(m.path))) kinds.push("pdf");
   if (!kinds.includes(f.kind)) kinds.push(f.kind);
-  const kindLabel = (k: string) => KIND_LABELS[k] ?? types.get(k.slice(5))?.label ?? capitalize(k.slice(5));
+  const kindLabel = (k: string) => KIND_LABELS[k] ?? (k.startsWith("cat:") ? (categories.get(k.slice(4))?.label ?? k.slice(4)) : (types.get(k.slice(5))?.label ?? capitalize(k.slice(5))));
 
   const decades = new Set<number>();
   let undated = false;
@@ -117,8 +129,11 @@ function facets(items: MediaItem[], f: Filters) {
   };
 }
 
-/** „2 os.”, „akt”, „bez osób” in the tile's corner (spec §4.30). Documents show their type's first word. */
+/** „2 os.”, „akt”, „bez osób” in the tile's corner (spec §4.30). Documents show their type's first word; a file in
+ *  an own category shows its name. */
 function tileTag(m: MediaItem): string | null {
+  const category = m.category?.trim();
+  if (category) return category;
   const type = m.documentType?.trim();
   if (type) return type.split(/\s+/)[0].toLowerCase();
   if (m.kind === "document") return isPdf(m.path) ? "PDF" : "dokument";

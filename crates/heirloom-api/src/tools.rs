@@ -1011,6 +1011,25 @@ mod tests {
     }
 
     #[test]
+    fn a_chosen_branch_colour_reaches_the_lists_and_the_people() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut api, _) = open(dir.path(), 0);
+        let list = api.call("surnames.list", Value::Null).unwrap();
+        let group = list["groups"][1].clone();
+        let (key, was) = (group["key"].as_str().unwrap().to_string(), group["branch"].as_u64().unwrap());
+        let chosen = if was == 7 { 8 } else { 7 };
+        api.call("archive.setSettings", json!({ "display": { "branchColors": { key.clone(): chosen } } })).unwrap();
+        let after = api.call("surnames.list", Value::Null).unwrap();
+        let group = after["groups"].as_array().unwrap().iter().find(|g| g["key"] == key.as_str()).unwrap();
+        assert_eq!(group["branch"].as_u64(), Some(chosen));
+        assert_eq!(api.call("surname.get", json!({ "key": key })).unwrap()["branch"].as_u64(), Some(chosen));
+        // And back to automatic.
+        api.call("archive.setSettings", json!({ "display": { "branchColors": {} } })).unwrap();
+        let back = api.call("surnames.list", Value::Null).unwrap();
+        assert_eq!(back, list);
+    }
+
+    #[test]
     fn editors_come_with_their_changes() {
         let dir = tempfile::tempdir().unwrap();
         let (mut api, _) = open(dir.path(), 0);

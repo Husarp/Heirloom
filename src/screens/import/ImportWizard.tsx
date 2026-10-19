@@ -78,7 +78,7 @@ export function ImportWizard() {
           const kind = n < step ? "done" : n === step ? "current" : "future";
           return (
             <Fragment key={label}>
-              <button className={`imp-step ${kind}`} disabled={kind !== "done"} onClick={() => goStep(n)}>
+              <button className={`imp-step ${kind}`} title={label} disabled={kind !== "done"} onClick={() => goStep(n)}>
                 <span className="imp-step-dot">{kind === "done" ? <Check size={13} strokeWidth={3} /> : n}</span>
                 <span className="imp-step-label">{label}</span>
               </button>

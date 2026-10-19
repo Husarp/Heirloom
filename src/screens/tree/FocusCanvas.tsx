@@ -1,6 +1,7 @@
 // Draws a focus view (Rodzina, Przodkowie, Potomkowie) as DOM cards over an SVG of connectors, in world coordinates
-// with a CSS transform for the camera. Four levels of detail by zoom (spec §3.4–§3.8): full card ≥ 75 %, compact
-// 40–75 %, mini 15–40 %, dots below; text in the compact and mini levels keeps its screen size.
+// with a CSS transform for the camera. Four levels of detail by zoom (spec §3.4–§3.8, see lod.ts): full card ≥ 75 %,
+// compact 30–75 %, mini 15–30 %, dots below; text in the compact and mini levels keeps its screen size (the compact
+// text shrinks a little below 50 %).
 
 import { Camera, ChevronLeft, ChevronsDown, ChevronsUp, Plus } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
@@ -11,19 +12,8 @@ import { RelativeTools } from "../person/RelativeTools";
 import { cameraOf, unfoldView, viewOf, type Camera2D } from "./camera";
 import type { Graph, GraphPerson } from "./graph";
 import { CARD_H, CARD_W, type Scene, type SceneCard } from "./layout";
+import { compactTextScale, nextLod, type Lod } from "./lod";
 import { fitName, forgetNameWidths, nameWidth } from "./nameFit";
-
-export type Lod = 1 | 2 | 3 | 4;
-
-/** Hysteresis: switch down at 75 / 40 / 15 %, back up a few points higher (spec §3.8). */
-export function nextLod(current: Lod, zoom: number): Lod {
-  const down = [0.75, 0.4, 0.15];
-  const up = [0.8, 0.45, 0.2];
-  let lod = current;
-  while (lod < 4 && zoom < down[lod - 1]) lod = (lod + 1) as Lod;
-  while (lod > 1 && zoom >= up[lod - 2]) lod = (lod - 1) as Lod;
-  return lod;
-}
 
 export interface FocusCanvasHandle {
   fit: () => void;
@@ -63,15 +53,15 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
   onSelect: (id: string | null) => void;
   onOpen: (id: string) => void;
   onHover: (id: string | null) => void;
-  onPill: (target: string, unfold: boolean) => void;
+  onPill: (target: string, unfold: boolean, fold: boolean) => void;
   onBox: (action: string, of?: string) => void;
   onZoom: (zoom: number) => void;
   focusId: string;
   photos: boolean;
   /** Where the person starts on screen: the middle (Rodzina), the right (Przodkowie) or the top (Potomkowie). */
   anchor: "center" | "right" | "top";
-  /** In a new layout of the same centre, the card that keeps its place on screen (the one just unfolded); else the
-   *  centre person's. */
+  /** In a new layout of the same centre, the card that keeps its place on screen (the one just unfolded or folded);
+   *  else the centre person's. */
   pin?: string;
   /** A camera to come back to (Back, „Ostatnie miejsce”), used instead of the usual placement once the centre
    *  person's card is laid out; `onRestored` then says it was used. */
@@ -297,10 +287,12 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
   };
 
   const inv = 1 / camera.zoom;
+  const cardsById = useMemo(() => new Map(scene.cards.map((c) => [c.id, c])), [scene.cards]);
   const worldStyle: CSSProperties = {
     transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})`,
     transition: smooth ? "transform 280ms ease" : undefined,
     ["--inv" as string]: inv,
+    ["--ts" as string]: compactTextScale(camera.zoom),
   };
   const b = scene.bounds;
   const pad = 400;
@@ -331,6 +323,17 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
             const on = l.people.length > 0 && l.people.every((p) => style.highlighted.has(p));
             return <path key={l.key} d={l.d} className={`link ${l.kind}${on ? " on" : ""}`} />;
           })}
+          {/* A card drawn as a dot is a small mark in the middle of its box, while the lines end at the box's edges:
+              each such end goes on to the mark, under it, in the line's own style. */}
+          {lod === 4 &&
+            scene.links.flatMap((l) => {
+              const on = l.people.length > 0 && l.people.every((p) => style.highlighted.has(p));
+              return l.ends.flatMap((e, i) => {
+                const c = e.card ? cardsById.get(e.card) : undefined;
+                if (!c || c.stub || !graph.people[c.id]) return [];
+                return [<path key={`${l.key}-stem${i}`} d={`M${e.x} ${e.y} L${c.x + (c.w ?? CARD_W) / 2} ${c.y + CARD_H / 2}`} className={`link ${l.kind}${on ? " on" : ""}`} />];
+              });
+            })}
           {lod === 1 &&
             scene.unions.map((u) => {
               const own = selected != null && u.people.includes(selected);
@@ -378,10 +381,10 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
           scene.pills.map((p) => (
             <button
               key={p.key}
-              className={`tree-pill ${p.direction}`}
+              className={`tree-pill ${p.direction}${p.at ? ` at-${p.at}` : ""}`}
               style={{ left: p.x, top: p.y }}
-              onClick={() => onPill(p.target, !!p.unfold)}
-              title={p.unfold ? "Rozwiń kolejne 3 pokolenia tej gałęzi" : p.direction === "down" ? "Potomkowie — pokaż od tej osoby" : "Dalsi przodkowie — pokaż od tej osoby"}
+              onClick={() => onPill(p.target, !!p.unfold, !!p.fold)}
+              title={p.title ?? (p.unfold ? "Rozwiń kolejne 3 pokolenia tej gałęzi" : p.direction === "down" ? "Potomkowie — pokaż od tej osoby" : "Dalsi przodkowie — pokaż od tej osoby")}
             >
               {p.direction === "up" ? <ChevronsUp size={12} /> : p.direction === "left" ? <ChevronLeft size={12} /> : <ChevronsDown size={12} />}
               {p.label}
@@ -392,7 +395,7 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
           scene.cards.map((c) => {
             const p = graph.people[c.id];
             const of = c.rel && graph.people[c.rel.of];
-            if (!c.rel || !p || !of || c.stub || (tools === "selected" && selected !== c.id)) return null;
+            if (!c.rel || !p || !of || c.stub || ((tools === "selected" || c.deep) && selected !== c.id)) return null;
             const [parent, child] = c.rel.kind === "parent" ? [c.id, c.rel.of] : [c.rel.of, c.id];
             const union = c.rel.kind === "parent" || c.rel.kind === "child" ? graph.unions.find((u) => u.partners.includes(parent) && u.children.some((k) => k.id === child)) : undefined;
             // Under the card, or beside it at the top where the next card is too close below (Przodkowie's last column).
@@ -508,11 +511,11 @@ function Card({
     );
   }
   if (lod === 3) {
-    // Dark ink on the light branch colours 4, 6, 9 and 10 (D3); per theme through the tokens.
-    const ink = color && [4, 6, 9, 10].includes(color) ? "var(--lod-ink-dk)" : "var(--lod-ink)";
+    // The ink made for that branch colour (D3), per palette and theme through the tokens.
+    const ink = color ? `var(--b${color}-ink)` : "var(--lod-ink)";
     return (
       <div className={`tree-card mini${selected ? " selected" : ""}${card.partner ? " partner" : ""}`} style={{ ...base, background: branchColor }} {...events}>
-        <span className="mini-letter" style={{ color: color ? ink : "var(--lod-ink)" }}>
+        <span className="mini-letter" style={{ color: ink }}>
           {(p.given || p.name).charAt(0)}
         </span>
       </div>

@@ -7,6 +7,8 @@ export type GraphPerson = PersonSummary & {
   children: string[];
   partners: string[];
   descendants: number;
+  /** Of them, the ones within two generations (children and grandchildren): Rodzina asks before unfolding more. */
+  descendantsNear: number;
   ancestors: number;
   hasParents: boolean;
 };
@@ -28,6 +30,9 @@ export interface Graph {
   down: number;
   /** The people unfolded below (Potomkowie's „+N potomków”) it was fetched with. */
   expand?: string[];
+  /** The children (and people below them) unfolded in Rodzina it was fetched with: how many generations below each
+   *  (null: all). */
+  unfold?: { id: string; depth: number | null }[];
   people: Record<string, GraphPerson>;
   unions: GraphUnion[];
 }
@@ -67,4 +72,26 @@ export function parentsOrdered(graph: Graph, id: string): (string | null)[] {
   const mother = parents.find((x) => graph.people[x].sex === "F") ?? null;
   const rest = parents.filter((x) => x !== father && x !== mother);
   return [father ?? rest.shift() ?? null, mother ?? rest.shift() ?? null];
+}
+
+/** Ustawienia › Drzewo › „Rozwijanie potomków (widok Rodzina)”: what the „+N” under a child does when the line goes
+ *  on for more than two generations: ask first, unfold all of them, or the next two generations. */
+export type FamilyUnfold = "ask" | "all" | "two";
+
+/** How many generations „Kolejne 2 pokolenia” unfolds. */
+export const UNFOLD_NEAR = 2;
+
+/** Rodzina, the „+N” of `p` clicked: `depth` (generations below them, null for all) to unfold at once, or `ask` for
+ *  the question „wszystkich czy 2 pokolenia”, which is needed only when the line goes beyond two generations. */
+export function unfoldAnswer(p: GraphPerson, choice: FamilyUnfold): { ask: true } | { ask: false; depth: number | null } {
+  if (p.descendants <= p.descendantsNear || choice === "all") return { ask: false, depth: null };
+  return choice === "two" ? { ask: false, depth: UNFOLD_NEAR } : { ask: true };
+}
+
+/** The unfolded branches without `id` and without anyone below them (folding a branch folds what was unfolded in it). */
+export function foldBranch(unfolded: ReadonlyMap<string, number | null>, graph: Graph, id: string): Map<string, number | null> {
+  const below = new Set<string>([id]);
+  const stack = [id];
+  while (stack.length) for (const c of graph.people[stack.pop()!]?.children ?? []) if (!below.has(c)) (below.add(c), stack.push(c));
+  return new Map([...unfolded].filter(([k]) => !below.has(k)));
 }

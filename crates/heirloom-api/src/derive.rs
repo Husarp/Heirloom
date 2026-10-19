@@ -128,11 +128,13 @@ pub struct Display {
     pub julian: bool,
     /// A surname group key → the group it was joined to.
     pub joins: HashMap<String, String>,
+    /// A surname group key → the branch colour (1–12) the user chose for it (Ustawienia › Drzewo, Nazwiska).
+    pub branch_colors: HashMap<String, u8>,
 }
 
 impl Default for Display {
     fn default() -> Display {
-        Display { surname_first: false, numeric_dates: false, julian: true, joins: HashMap::new() }
+        Display { surname_first: false, numeric_dates: false, julian: true, joins: HashMap::new(), branch_colors: HashMap::new() }
     }
 }
 
@@ -146,6 +148,11 @@ impl Display {
                 .get("surnameJoins")
                 .and_then(Value::as_object)
                 .map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect())
+                .unwrap_or_default(),
+            branch_colors: display
+                .get("branchColors")
+                .and_then(Value::as_object)
+                .map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), u8::try_from(v.as_u64()?).ok().filter(|c| (1..=12).contains(c))?))).collect())
                 .unwrap_or_default(),
         }
     }
@@ -319,11 +326,23 @@ pub fn build_with(doc: &Document, display: &Display) -> Derived {
         group.plural = polish::family_plural(&group.name);
         group.forms = list;
     }
-    // Colours by size: the biggest family is b1.
+    // Colours by size: the biggest family is b1. Colours the user chose win; the automatic ones go to the least used
+    // colour (the lowest number first), so they skip a chosen colour while free ones remain.
     let mut order: Vec<usize> = (0..groups.len()).collect();
     order.sort_by(|&a, &b| groups[b].born.len().cmp(&groups[a].born.len()).then_with(|| groups[a].name.cmp(&groups[b].name)));
-    for (rank, &g) in order.iter().enumerate() {
-        groups[g].branch = (rank % 12) as u8 + 1;
+    let mut used = [0usize; 12];
+    for &g in &order {
+        if let Some(&colour) = display.branch_colors.get(&groups[g].key) {
+            groups[g].branch = colour;
+            used[colour as usize - 1] += 1;
+        }
+    }
+    for &g in &order {
+        if !display.branch_colors.contains_key(&groups[g].key) {
+            let least = (0..12).min_by_key(|&c| used[c]).unwrap_or(0);
+            groups[g].branch = least as u8 + 1;
+            used[least] += 1;
+        }
     }
 
     let generations = generations(n, &parents, &children, &partners, persons, &view);
@@ -340,7 +359,10 @@ pub fn build_with(doc: &Document, display: &Display) -> Derived {
             .iter()
             .filter(|l| view.media.get(&l.object).is_some_and(|m| m.kind == MediaKind::Photo))
             .collect();
-        let profile = photos.iter().find(|l| l.profile).or(photos.first());
+        // Without any marker the first photo is the profile photo; once a photo was explicitly taken off (`N`), the
+        // person has none until another is chosen.
+        let marked = photos.iter().any(|l| l.profile || l.profile_off);
+        let profile = photos.iter().find(|l| l.profile).or(if marked { None } else { photos.first() });
         let photo = profile.and_then(|l| Some((l.object.clone(), view.media.get(&l.object)?.file.clone()?)));
         let given_first = p.display_name();
         let name = if display.surname_first && !p.surname().is_empty() && !p.given().is_empty() { format!("{} {}", p.surname(), p.given()) } else { given_first.clone() };
@@ -473,6 +495,59 @@ mod tests {
         assert_eq!(d.info[marianna].surname_branch, 1, "Marianna Kowalska takes her husband's colour");
         assert_eq!(d.info[helena].surname_branch, 1);
         assert_eq!(d.summary(marianna)["surnameBranch"], 1);
+    }
+
+    fn with_colours(colours: Value) -> Derived {
+        let settings = json!({ "branchColors": colours });
+        build_with(&Document::from_bytes(FILE.as_bytes()).0, &Display::from_settings(settings.as_object().unwrap()))
+    }
+
+    #[test]
+    fn a_chosen_branch_colour_applies_to_born_and_married_in_people() {
+        let d = with_colours(json!({ polish::surname_key("Kowalski"): 7 }));
+        let kowalscy = d.group_index[&polish::surname_key("Kowalski")];
+        assert_eq!(d.groups[kowalscy].branch, 7);
+        let (helena, marianna) = (d.index("@I5@").unwrap(), d.index("@I4@").unwrap());
+        assert_eq!(d.info[helena].branch, 7, "born a Kowalska");
+        assert_eq!(d.info[marianna].surname_branch, 7, "took the name by marriage");
+        assert_ne!(d.info[marianna].branch, 7, "she keeps her own family's colour for „gałąź”");
+        assert_eq!(d.summary(helena)["branch"], 7);
+        assert_eq!(d.summary(marianna)["surnameBranch"], 7);
+    }
+
+    #[test]
+    fn automatic_colours_avoid_a_chosen_one() {
+        let (mazur, nowak) = (polish::surname_key("Mazur"), polish::surname_key("Nowak"));
+        // Without a choice: Kowalscy 1, Mazur 2, Nowak 3.
+        let d = derived();
+        assert_eq!((d.groups[mazur_of(&d)].branch, d.groups[d.group_index[&nowak]].branch), (2, 3));
+        // Mazur chose 1: the automatic Kowalscy and Nowak skip it.
+        let d = with_colours(json!({ mazur.clone(): 1 }));
+        let branch = |key: &str| d.groups[d.group_index[key]].branch;
+        assert_eq!((branch(&polish::surname_key("Kowalski")), branch(&mazur), branch(&nowak)), (2, 1, 3));
+        // Everything chosen: a colour may repeat, and a bad value (0, 13, text) is ignored.
+        let d = with_colours(json!({ polish::surname_key("Kowalski"): 0, mazur.clone(): 13, nowak.clone(): "red" }));
+        assert_eq!(d.groups[d.group_index[&polish::surname_key("Kowalski")]].branch, 1);
+        assert_eq!((d.groups[mazur_of(&d)].branch, d.groups[d.group_index[&nowak]].branch), (2, 3));
+    }
+
+    #[test]
+    fn automatic_colours_use_every_colour_before_repeating() {
+        let doc = (1..=14).fold(String::from("0 HEAD\n1 GEDC\n2 VERS 7.0\n"), |mut f, n| {
+            f.push_str(&format!("0 @I{n}@ INDI\n1 NAME A /Nazwisko{}/\n1 SEX M\n", "x".repeat(n)));
+            f
+        }) + "0 TRLR\n";
+        let key = polish::surname_key(&format!("Nazwisko{}", "x".repeat(3)));
+        let settings = json!({ "branchColors": { key.clone(): 12 } });
+        let d = build_with(&Document::from_bytes(doc.as_bytes()).0, &Display::from_settings(settings.as_object().unwrap()));
+        assert_eq!(d.groups[d.group_index[&key]].branch, 12);
+        // 13 automatic groups over the 11 free colours first, then the two left over start again at the lowest colours.
+        let mut counts = [0; 12];
+        for g in &d.groups {
+            counts[g.branch as usize - 1] += 1;
+        }
+        assert_eq!(counts[11], 1, "no automatic group took the chosen colour 12 while others had fewer: {counts:?}");
+        assert!(counts.iter().all(|&c| c >= 1), "{counts:?}");
     }
 
     #[test]

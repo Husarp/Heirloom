@@ -13,6 +13,8 @@ const RECENT_LIMIT: usize = 12;
 const PLACES_LIMIT: usize = 20;
 /// „Ostatnio oglądane” on Start.
 const VIEWED_LIMIT: usize = 8;
+/// Names kept for „Kto edytuje?” / „Kto importuje”.
+const EDITOR_NAMES_LIMIT: usize = 12;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -21,6 +23,8 @@ pub struct AppConfig {
     pub appearance: Appearance,
     /// The name last chosen in "Kto edytuje?", offered first next time.
     pub last_editor: Option<String>,
+    /// Every name used in „Kto edytuje?” on this computer, most recent first, unique, at most 12.
+    pub editor_names: Vec<String>,
     /// Where each archive was left, by archive id. Kept on this computer, never in the archive folder: on a shared
     /// server, one person's last screen must not move another's.
     pub places: BTreeMap<String, Place>,
@@ -32,6 +36,22 @@ pub struct AppConfig {
     pub changes_folder: Option<String>,
     /// Where the automatic backups (.zip) go; none: `<Dokumenty>\Heirloom\Kopie zapasowe`.
     pub backup_folder: Option<String>,
+    /// How the list of recent archives is sorted: `opened` (default), `edited` or `name`.
+    pub recent_sort: Option<String>,
+}
+
+impl AppConfig {
+    /// Sets [`last_editor`](Self::last_editor) and moves the name to the front of [`editor_names`](Self::editor_names).
+    pub fn set_editor(&mut self, name: String) {
+        let name = name.trim().to_string();
+        if !name.is_empty() {
+            let key = name.to_lowercase();
+            self.editor_names.retain(|n| n.trim().to_lowercase() != key);
+            self.editor_names.insert(0, name.clone());
+            self.editor_names.truncate(EDITOR_NAMES_LIMIT);
+        }
+        self.last_editor = Some(name);
+    }
 }
 
 pub const IN_PLACE: &str = "inPlace";
@@ -106,6 +126,9 @@ pub struct RecentArchive {
     /// How many archives a set joins („zestaw · 2 archiwa”).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archives: Option<usize>,
+    /// RFC 3339: when Heirloom last saved changes into this archive (or its „Moje zmiany” folder) on this computer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edited_at: Option<String>,
 }
 
 fn archive_kind() -> String {
@@ -180,9 +203,20 @@ impl AppConfig {
 
     /// Moves (or adds) an archive to the top of the recent list.
     pub fn remember(&mut self, entry: RecentArchive) {
+        let mut entry = entry;
+        if entry.edited_at.is_none() {
+            entry.edited_at = self.recent.iter().find(|r| same_path(&r.path, &entry.path)).and_then(|r| r.edited_at.clone());
+        }
         self.recent.retain(|r| !same_path(&r.path, &entry.path));
         self.recent.insert(0, entry);
         self.recent.truncate(RECENT_LIMIT);
+    }
+
+    /// Records that Heirloom saved changes into the archive opened from `path`.
+    pub fn touch_edited(&mut self, path: &str, at: String) {
+        if let Some(r) = self.recent.iter_mut().find(|r| same_path(&r.path, path)) {
+            r.edited_at = Some(at);
+        }
     }
 
     pub fn forget(&mut self, path: &str) {
@@ -225,9 +259,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn edited_at_is_set_kept_by_remember_and_old_files_load() {
+        let entry = |path: &str| RecentArchive { path: path.into(), name: "A".into(), opened_at: "t".into(), people: 1, kind: "archive".into(), archives: None, edited_at: None };
+        let mut config = AppConfig::default();
+        config.remember(entry("D:\\Rodzina"));
+        config.touch_edited("d:\\rodzina", "2026-10-19T10:00:00Z".into());
+        config.remember(entry("D:\\Inna"));
+        config.remember(entry("D:\\Rodzina"));
+        assert_eq!(config.recent[0].edited_at.as_deref(), Some("2026-10-19T10:00:00Z"));
+        assert_eq!(config.recent[1].edited_at, None);
+        let old: AppConfig = serde_json::from_str(r#"{"recent":[{"path":"x","name":"X","openedAt":"t","people":2}]}"#).unwrap();
+        assert_eq!(old.recent[0].edited_at, None);
+        assert_eq!(old.recent_sort, None);
+    }
+
+    #[test]
+    fn editor_names_are_recent_first_unique_and_limited() {
+        let mut config = AppConfig::default();
+        config.set_editor("Ewa".into());
+        config.set_editor(" Adam ".into());
+        config.set_editor("ewa".into());
+        assert_eq!(config.editor_names, ["ewa", "Adam"]);
+        assert_eq!(config.last_editor.as_deref(), Some("ewa"));
+        for i in 0..20 {
+            config.set_editor(format!("Osoba {i}"));
+        }
+        assert_eq!(config.editor_names.len(), 12);
+        assert_eq!(config.editor_names[0], "Osoba 19");
+        let old: AppConfig = serde_json::from_str(r#"{"lastEditor":"X"}"#).unwrap();
+        assert!(old.editor_names.is_empty());
+    }
+
+    #[test]
     fn recent_list_moves_reopened_archives_to_the_top() {
         let mut config = AppConfig::default();
-        let entry = |path: &str| RecentArchive { path: path.into(), name: path.into(), opened_at: String::new(), people: 0, kind: archive_kind(), archives: None };
+        let entry = |path: &str| RecentArchive { path: path.into(), name: path.into(), opened_at: String::new(), people: 0, kind: archive_kind(), archives: None, edited_at: None };
         config.remember(entry("D:\\A"));
         config.remember(entry("D:\\B"));
         config.remember(entry("d:\\a"));
@@ -262,7 +328,7 @@ mod tests {
     #[test]
     fn two_windows_keep_each_others_changes() {
         let dir = tempfile::tempdir().unwrap();
-        let entry = |path: &str| RecentArchive { path: path.into(), name: path.into(), opened_at: String::new(), people: 0, kind: archive_kind(), archives: None };
+        let entry = |path: &str| RecentArchive { path: path.into(), name: path.into(), opened_at: String::new(), people: 0, kind: archive_kind(), archives: None, edited_at: None };
         // Both windows read the file at start; each then changes only its own part.
         let first = AppConfig::update(dir.path(), &AppConfig::default(), |c| c.remember(entry("D:\\A")));
         let second = AppConfig::update(dir.path(), &first, |c| c.remember(entry("D:\\B")));

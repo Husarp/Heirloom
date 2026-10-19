@@ -57,7 +57,17 @@
   flex: none;
 }
 
+/* The items scroll when the window is too short for all of them (the head and the foot stay). */
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
 .nav-item {
+  flex: none;
   height: 36px;
   display: flex;
   align-items: center;
@@ -97,6 +107,7 @@
 }
 
 .sidebar-foot {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -128,7 +139,8 @@
 
 .crumbs {
   width: 260px;
-  flex: none;
+  flex: 0 1 260px;
+  min-width: 90px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -151,7 +163,7 @@
   flex: 1;
   display: flex;
   justify-content: center;
-  min-width: 0;
+  min-width: 150px;
 }
 .topbar-search > button {
   width: 440px;
@@ -168,11 +180,18 @@
   font-size: 13px;
   text-align: left;
 }
+.topbar-search > button > .grow {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .topbar-search > button:hover {
   border-color: var(--line);
 }
 
 .topbar-right {
+  flex: none;
   min-width: 260px;
   display: flex;
   align-items: center;
@@ -513,4 +532,18 @@
   height: 100%;
   background: var(--accent);
   transition: width 0.3s;
+}
+
+/* A short window: the sidebar gives back some height. */
+@media (max-height: 640px) {
+  .sidebar {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .sidebar-head {
+    padding-bottom: 8px;
+  }
+  .nav-item {
+    height: 32px;
+  }
 }

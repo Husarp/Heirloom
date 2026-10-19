@@ -367,6 +367,14 @@ impl Api {
                 self.update_config(|c| c.updates.check = check);
                 Ok(self.app_state())
             }
+            "recent.setSort" => {
+                let sort = str_arg(&args, "sort")?;
+                if !["opened", "edited", "name"].contains(&sort.as_str()) {
+                    return Err(ApiError::bad_args("sort"));
+                }
+                self.update_config(|c| c.recent_sort = Some(sort));
+                Ok(self.app_state())
+            }
             "recent.forget" => {
                 let path = str_arg(&args, "path")?;
                 self.update_config(|c| c.forget(&path));
@@ -423,7 +431,8 @@ impl Api {
                 let allow_foreign = args.get("allowForeign").and_then(Value::as_bool).unwrap_or(false);
                 let progress = self.progress.clone();
                 let result = overlay::writeback::write_back(self.session()?, &author, allow_foreign, &progress)?;
-                self.update_config(|c| c.last_editor = Some(author));
+                self.update_config(|c| c.set_editor(author));
+                self.touch_edited();
                 Ok(json!({ "result": result, "status": self.archive_status()? }))
             }
             "archive.undoWriteBack" => {
@@ -448,7 +457,7 @@ impl Api {
             "archive.setEditor" => {
                 // Remembered for "Kto edytuje?" next time; the name is added to the archive's list on the first save.
                 let name = str_arg(&args, "name")?;
-                self.update_config(|c| c.last_editor = Some(name));
+                self.update_config(|c| c.set_editor(name));
                 Ok(Value::Null)
             }
             "people.list" => Ok(people::list(self.view()?)),
@@ -509,6 +518,9 @@ impl Api {
             m if m.starts_with("import.") => {
                 let session = self.session.as_mut().ok_or_else(ApiError::no_archive)?;
                 let result = import::call(session, &mut self.import, m, &args);
+                if m == "import.commit" && result.is_ok() {
+                    self.touch_edited();
+                }
                 self.media.set_imports(self.import.as_ref().map(|d| d.files.iter().map(|f| f.path.clone()).collect()).unwrap_or_default());
                 result
             }
@@ -517,8 +529,14 @@ impl Api {
                 let up = args.get("up").and_then(Value::as_u64).unwrap_or(2) as usize;
                 let down = args.get("down").and_then(Value::as_u64).unwrap_or(2) as usize;
                 let expand: Vec<String> = args.get("expand").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(|x| self.canonical(x.to_string())).collect()).unwrap_or_default();
+                // Rodzina's „+N” pill: [{id, depth}] unfolds that person's descendants `depth` generations down (null: all).
+                let unfold: Vec<tree::Unfold> = args
+                    .get("unfold")
+                    .and_then(Value::as_array)
+                    .map(|a| a.iter().filter_map(|u| Some((self.canonical(u.get("id")?.as_str()?.to_string()), u.get("depth").and_then(Value::as_u64).map(|n| n as usize)))).collect())
+                    .unwrap_or_default();
                 // Przodkowie asks for the whole line (spec §4.2), so `up` may go further than `down`.
-                tree::graph(self.view()?, &id, up.min(64), down.min(12), &expand)
+                tree::graph(self.view()?, &id, up.min(64), down.min(12), &expand, &unfold)
             }
             "tree.overview" => {
                 let focus = opt_str(&args, "focus").map(|f| self.canonical(f));
@@ -554,6 +572,15 @@ impl Api {
             "story.get" => {
                 let id = str_arg(&args, "id")?;
                 lists::story(self.view()?, &id)
+            }
+            // Own file categories: the archive's list and the names found on files (archives opened together have only
+            // the latter).
+            "media.categories" => {
+                let saved = match &self.combined {
+                    Some(_) => Vec::new(),
+                    None => lists::saved_categories(&self.session()?.archive.settings().display),
+                };
+                Ok(lists::media_categories(self.view()?, &saved))
             }
             "media.list" | "media.get" | "media.missing" | "media.findMissing" => {
                 let roots = match &self.combined {
@@ -637,11 +664,12 @@ impl Api {
             let record = s.overlay.is_none().then(|| (data_key(&s.archive.data_path()), s.archive.fingerprint_hex()));
             result["report"] = layout::run_scan(s);
             self.update_config(|c| {
-                c.last_editor = Some(author);
+                c.set_editor(author);
                 if let Some((u, hash)) = record.and_then(|(key, hash)| c.archives.get_mut(&key).filter(|u| u.mode == IN_PLACE).map(|u| (u, hash))) {
                     u.hash = Some(hash);
                 }
             });
+            self.touch_edited();
             result["status"] = self.archive_status()?;
         }
         Ok(result)
@@ -715,8 +743,10 @@ impl Api {
         json!({
             "version": env!("CARGO_PKG_VERSION"),
             "recent": self.config.recent,
+            "recentSort": self.config.recent_sort,
             "appearance": self.config.appearance,
             "lastEditor": self.config.last_editor,
+            "editorNames": self.config.editor_names,
             "updates": self.config.updates,
             "archive": archive,
             // Where the open archive (or set) was left on this computer.
@@ -868,6 +898,7 @@ impl Api {
             people: archive.doc.records.iter().filter(|r| r.tag == "INDI").count(),
             kind: "archive".into(),
             archives: None,
+            edited_at: None,
         };
         self.update_config(|c| c.remember(entry));
         let mut session = Session::new(archive);
@@ -917,6 +948,7 @@ impl Api {
             people: archive.doc.records.iter().filter(|r| r.tag == "INDI").count(),
             kind: "archive".into(),
             archives: None,
+            edited_at: None,
         };
         self.update_config(|c| c.remember(entry));
         let mut session = Session::new(archive);
@@ -1217,6 +1249,7 @@ impl Api {
             people: set.people(),
             kind: "set".into(),
             archives: Some(set.parts.len()),
+            edited_at: None,
         };
         self.update_config(|c| c.remember(entry));
         self.session = None;
@@ -1247,11 +1280,12 @@ impl Api {
         // The data file's hash on this computer (A.2), for finding the archive again by its content.
         let record = s.overlay.is_none().then(|| (data_key(&s.archive.data_path()), s.archive.fingerprint_hex()));
         self.update_config(|c| {
-            c.last_editor = Some(author);
+            c.set_editor(author);
             if let Some(r) = record.and_then(|(key, hash)| c.archives.get_mut(&key).filter(|u| u.mode == IN_PLACE).map(|u| (u, hash))) {
                 r.0.hash = Some(r.1);
             }
         });
+        self.touch_edited();
         Ok(json!({
             "backup": report.backup.map(|p| p.display().to_string()),
             "changes": report.history_entries,
@@ -1296,6 +1330,13 @@ impl Api {
         }
         s.archive.save_settings()?;
         self.archive_status()
+    }
+
+    /// Marks the open archive (by the path it was opened from) as edited by Heirloom just now, for sorting the recent list.
+    fn touch_edited(&mut self) {
+        let Some(path) = self.session.as_ref().map(|s| s.opened.clone()).filter(|p| !p.is_empty()) else { return };
+        let now = heirloom_core::history::now();
+        self.update_config(|c| c.touch_edited(&path, now));
     }
 
     /// One change to `aplikacja.json`, made on the file as it is now: another window (another process) may have
@@ -1511,6 +1552,19 @@ mod tests {
     }
 
     /// A file held by another program isn't copied, and its link keeps pointing at the file where it is.
+    #[test]
+    fn saving_marks_the_archive_edited_and_the_sort_is_stored() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut api = Api::new(None, None);
+        api.call("archive.create", json!({ "folder": dir.path().join("a").to_str().unwrap(), "name": "A" })).unwrap();
+        assert!(api.call("app.state", Value::Null).unwrap()["recent"][0].get("editedAt").is_none());
+        api.call("person.create", json!({ "given": "Jan" })).unwrap();
+        api.call("archive.save", json!({ "author": "Ewa" })).unwrap();
+        assert!(api.call("app.state", Value::Null).unwrap()["recent"][0]["editedAt"].is_string());
+        assert!(api.call("recent.setSort", json!({ "sort": "bogus" })).is_err());
+        assert_eq!(api.call("recent.setSort", json!({ "sort": "name" })).unwrap()["recentSort"], "name");
+    }
+
     #[cfg(windows)]
     #[test]
     fn a_file_that_cannot_be_copied_keeps_its_link() {
@@ -1548,6 +1602,28 @@ mod tests {
         let _held = std::fs::OpenOptions::new().read(true).share_mode(0).open(folder.join(".heirloom").join("historia.jsonl")).unwrap();
         let saved = api.call("archive.save", json!({ "author": "Ewa" })).unwrap();
         assert!(saved["history"].is_null() && saved["historyError"].is_string(), "{saved}");
+    }
+
+    /// `tree.graph` takes `unfold: [{id, depth}]` (null depth: all) and says what it unfolded.
+    #[test]
+    fn tree_graph_unfolds_a_child_by_the_args() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut api = Api::new(None, None);
+        api.call("archive.create", json!({ "folder": dir.path().join("a").to_str().unwrap(), "name": "A" })).unwrap();
+        let a = api.call("person.create", json!({ "given": "A" })).unwrap()["id"].as_str().unwrap().to_string();
+        let mut line = vec![a.clone()];
+        for given in ["B", "C", "D"] {
+            let of = line.last().unwrap().clone();
+            line.push(api.call("person.create", json!({ "given": given, "relation": { "kind": "child", "of": of } })).unwrap()["id"].as_str().unwrap().to_string());
+        }
+        let (b, d) = (line[1].clone(), line[3].clone());
+        let plain = api.call("tree.graph", json!({ "id": a, "up": 1, "down": 1 })).unwrap();
+        assert_eq!(plain["unfold"], json!([]));
+        let unfolded = api.call("tree.graph", json!({ "id": a, "up": 1, "down": 1, "unfold": [{ "id": b, "depth": null }, { "id": 7 }] })).unwrap();
+        assert_eq!(unfolded["unfold"], json!([{ "id": b, "depth": null }]));
+        assert!(unfolded["people"].get(&d).is_some() && plain["people"].get(&d).is_none(), "the grandchild's child comes with the unfold");
+        let two = api.call("tree.graph", json!({ "id": a, "up": 1, "down": 1, "unfold": [{ "id": b, "depth": 1 }] })).unwrap();
+        assert!(two["people"].get(&line[2]).is_some() && two["people"].get(&d).is_none());
     }
 
     #[test]

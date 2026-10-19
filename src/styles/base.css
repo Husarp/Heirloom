@@ -294,6 +294,8 @@ a:hover {
 
 .seg {
   display: inline-flex;
+  /* A stretched track (toolbar rows) keeps the buttons in its middle, not stuck to the top. */
+  align-items: center;
   gap: 2px;
   padding: 2px;
   border: 1.5px solid var(--line);
@@ -308,10 +310,26 @@ a:hover {
   padding: 0 10px;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 5px;
+  line-height: 1;
   border-radius: var(--r-ctl-2);
   color: var(--text2);
   font-weight: 500;
+}
+/* The label reserves its bold width, so choosing an option doesn't shift the neighbours. */
+.seg-label {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+.seg-label::after {
+  content: attr(data-label);
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  font-weight: 600;
+  pointer-events: none;
 }
 .seg > button:hover:not(.on) {
   color: var(--text);
@@ -728,6 +746,44 @@ textarea.input {
   padding: 8px 12px 4px;
 }
 
+/* The branch colour picker (BranchColorPicker.tsx): a button, and under it the 12 colours and „Automatycznie”. */
+.bcp {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.bcp-pop {
+  top: calc(100% + 4px);
+  width: 216px;
+  padding: 6px;
+}
+.bcp-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.bcp-swatch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  border: 1.5px solid transparent;
+  border-radius: var(--r-ctl);
+}
+.bcp-swatch:hover {
+  background: var(--surface2);
+}
+.bcp-swatch.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.bcp-pop .menu-item {
+  border-radius: var(--r-ctl);
+}
+
 /* ---------- Toasts (design 17f): bottom right, 420 px, newest at the bottom, at most 3 ---------- */
 
 .toasts {
@@ -928,4 +984,16 @@ textarea.input {
     transition: none !important;
     animation-duration: 0s !important;
   }
+}
+
+/* A narrow window: a dialog never wider than the window, its footer stays whole. */
+.dialog {
+  max-width: calc(100vw - 32px);
+}
+.dialog-foot {
+  flex: none;
+}
+/* On a short window the body scrolls; its parts keep their size instead of being squeezed. */
+.dialog-body > * {
+  flex-shrink: 0;
 }

@@ -68,6 +68,8 @@ export interface ImportFile {
   size: number | null;
   status: "ok" | "dup" | "miss" | "und" | "skipped";
   kind: string;
+  /** An own category chosen for the file; `kind` then is the kind it behaves like. */
+  category?: string | null;
   documentType?: string | null;
   caption: string | null;
   people: { id: string; name: string | null }[];
@@ -100,6 +102,8 @@ export interface ImportRelationship {
 export interface ImportInput {
   name: string;
   kind: "answer" | "photo" | "document" | "note" | "other";
+  /** An own category chosen for the file; `kind` then is the kind it behaves like. */
+  category?: string | null;
   path: string | null;
   size: number | null;
   m: string | null;
@@ -174,6 +178,8 @@ interface Wizard {
   droppedAt: string | null;
   /** Kinds chosen by hand in step 1, by path: sent with every reload of the list, so they stay. */
   kinds: Record<string, string>;
+  /** The own category that goes with such a kind, by path. */
+  categories: Record<string, string>;
   person: string | null;
   file: string | null;
   done: CommitResult | null;
@@ -190,11 +196,12 @@ export const useWizard = create<Wizard>((set) => ({
   exclude: [],
   droppedAt: null,
   kinds: {},
+  categories: {},
   person: null,
   file: null,
   done: null,
   set: (patch) => set(patch),
-  reset: () => set({ step: 1, furthest: 1, text: "", paths: [], exclude: [], droppedAt: null, kinds: {}, person: null, file: null, done: null }),
+  reset: () => set({ step: 1, furthest: 1, text: "", paths: [], exclude: [], droppedAt: null, kinds: {}, categories: {}, person: null, file: null, done: null }),
 }));
 
 /** Changes the batch through one of the `import.*` commands; they all answer with the new state. */

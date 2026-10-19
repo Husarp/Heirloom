@@ -66,6 +66,7 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <Switcher />
+      <nav className="sidebar-nav">
       {NAV.filter((item) => !item.only || item.only === (combined ? "set" : "archive")).map((item) => {
         const key = navSection(item.route);
         const disabled = empty && !item.always && key !== active;
@@ -82,6 +83,7 @@ export function Sidebar() {
           </button>
         );
       })}
+      </nav>
       <div className="sidebar-foot" title={archive ? sidebarTip(archive) : undefined}>
         <Archive size={15} style={{ flex: "none" }} />
         <span className="ellipsis">{status}</span>

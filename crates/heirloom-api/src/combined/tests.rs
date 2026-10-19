@@ -116,6 +116,8 @@ fn two_archives_open_as_one_and_stay_untouched() {
     let stories = api.call("person.get", json!({ "id": "@b~I10@" })).unwrap();
     assert!(stories["brokenLinks"].as_array().unwrap().is_empty());
 
+    // Sorting the list of archives touches only this computer's settings, so it is allowed with a set open.
+    assert_eq!(api.call("recent.setSort", json!({ "sort": "name" })).unwrap()["recentSort"], "name");
     // Linking, unlinking and a refresh write only the set file.
     let pairs = api.call("set.pairs", Value::Null).unwrap();
     assert!(pairs["pairs"].as_array().unwrap().iter().any(|p| p["a"] == "@a~I1@" && p["b"] == "@b~I10@"), "{pairs}");
@@ -144,12 +146,13 @@ fn nothing_that_could_change_an_archive_runs_in_the_combined_view() {
         "archive.save", "archive.undo", "archive.redo", "archive.setSettings", "archive.saveAsCopy", "archive.saveAsNew", "archive.backup",
         "archive.exportGedzip", "archive.check", "archive.setEditor", "archive.firstOpen", "settings.import", "settings.export", "person.create",
         "person.update", "person.delete", "person.editData", "relation.add", "family.update", "text.save", "media.add", "media.findMissing",
+        "media.renameCategory", "media.removeCategory",
         "source.save", "citation.add", "place.rename", "import.load", "import.commit", "history.feed", "history.undo",
     ] {
         let error = api.call(method, json!({ "id": "@a~I1@", "author": "Ewa", "path": "/tmp/x" })).unwrap_err();
         assert_eq!(error.code, "combined_read_only", "{method}");
     }
-    for method in ["archive.status", "people.list", "surnames.list", "places.list", "stories.list", "sources.list", "media.missing", "app.state"] {
+    for method in ["archive.status", "people.list", "surnames.list", "places.list", "stories.list", "sources.list", "media.missing", "media.categories", "app.state"] {
         api.call(method, Value::Null).unwrap_or_else(|e| panic!("{method}: {e:?}"));
     }
     for method in ["person.panel", "person.relations", "person.hover", "tree.graph"] {

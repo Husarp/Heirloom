@@ -444,13 +444,13 @@ pub fn check(parsed: Parsed, files: &[InputFile]) -> (Batch, Vec<Issue>) {
     let unnumbered: Vec<&str> = files.iter().filter(|f| f.m.is_none()).map(|f| f.name.as_str()).collect();
     match unnumbered.as_slice() {
         [] => {}
-        [one] => issues.push(Issue::new("warning", format!("Plik „{one}” nie ma numeru M — pominąć czy przypisać ręcznie?"), format!("Plik {one}"))),
+        [one] => issues.push(Issue::new("warning", format!("Plik „{one}” nie ma numeru M — osobę przypiszesz w kroku 4 („Zdjęcia i pliki”) albo go tam pominiesz."), format!("Plik {one}"))),
         many => {
             let shown = many.iter().take(3).copied().collect::<Vec<_>>().join(", ");
             let more = if many.len() > 3 { format!(" i {}", crate::count_pl(many.len() - 3, "inny", "inne", "innych")) } else { String::new() };
             issues.push(Issue::new(
                 "warning",
-                format!("{} numeru M — pominąć czy przypisać ręcznie?", crate::count_pl(many.len(), "plik nie ma", "pliki nie mają", "plików nie ma")),
+                format!("{} numeru M — osobę przypiszesz w kroku 4 („Zdjęcia i pliki”) albo je tam pominiesz.", crate::count_pl(many.len(), "plik nie ma", "pliki nie mają", "plików nie ma")),
                 format!("Pliki {shown}{more}"),
             ));
         }
@@ -790,10 +790,10 @@ mod tests {
         let (_, issues) = check(parse_blocks(&extract_blocks(&example_json(), "x")), &files);
         let warnings: Vec<&Issue> = issues.iter().filter(|i| i.message.contains("numeru M")).collect();
         assert_eq!(warnings.len(), 1, "{warnings:?}");
-        assert_eq!(warnings[0].message, "5 plików nie ma numeru M — pominąć czy przypisać ręcznie?");
+        assert_eq!(warnings[0].message, "5 plików nie ma numeru M — osobę przypiszesz w kroku 4 („Zdjęcia i pliki”) albo je tam pominiesz.");
         assert_eq!(warnings[0].reference, "Pliki IMG_1.jpg, IMG_2.jpg, IMG_3.jpg i 2 inne");
         let (_, issues) = check(parse_blocks(&extract_blocks(&example_json(), "x")), &files[..1]);
-        assert!(issues.iter().any(|i| i.message == "Plik „IMG_1.jpg” nie ma numeru M — pominąć czy przypisać ręcznie?"));
+        assert!(issues.iter().any(|i| i.message == "Plik „IMG_1.jpg” nie ma numeru M — osobę przypiszesz w kroku 4 („Zdjęcia i pliki”) albo go tam pominiesz."));
     }
 
     #[test]
@@ -807,6 +807,23 @@ mod tests {
         let names: Vec<&str> = inputs.files.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, ["M001 akt.jpg"]);
         assert_eq!(inputs.missing, [gone]);
+    }
+
+    #[test]
+    fn a_dropped_folder_is_read_with_its_subfolders() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("Ciechanki").join("zdjecia");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(dir.path().join("Ciechanki").join("czesc-1.json"), example_json()).unwrap();
+        std::fs::write(sub.join("M001 akt.jpg"), b"photo").unwrap();
+        std::fs::write(sub.join("Thumbs.db"), b"x").unwrap();
+        std::fs::write(dir.path().join("desktop.ini"), b"x").unwrap();
+        let inputs = read_inputs_with(&[], &[dir.path().to_path_buf()], &[]);
+        assert_eq!(inputs.answers.len(), 1);
+        assert_eq!(inputs.answers[0].origin, "czesc-1.json");
+        let names: Vec<(&str, Option<u32>)> = inputs.files.iter().map(|f| (f.name.as_str(), f.m)).collect();
+        assert_eq!(names, [("M001 akt.jpg", Some(1))]);
+        assert!(inputs.missing.is_empty());
     }
 
     #[test]

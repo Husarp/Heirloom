@@ -23,10 +23,10 @@ use std::time::SystemTime;
 /// Commands that only read: the combined view answers them as an archive does. Everything else that isn't `set.*` or
 /// `app.*` is refused (see [`read_only`]), whatever the interface shows.
 const ALLOWED: &[&str] = &[
-    "recent.forget", "archive.open", "archive.create", "archive.close", "archive.status", "archive.reload", "date.parse",
+    "recent.forget", "recent.setSort", "archive.open", "archive.create", "archive.close", "archive.status", "archive.reload", "date.parse",
     "people.list", "people.search", "person.get", "person.panel", "person.relations", "person.hover", "tree.graph",
     "tree.overview", "start.data", "surnames.list", "surname.get", "places.list", "place.get", "stories.list",
-    "story.get", "sources.list", "source.get", "media.list", "media.get", "media.missing",
+    "story.get", "sources.list", "source.get", "media.list", "media.get", "media.missing", "media.categories",
 ];
 
 pub fn allowed(method: &str) -> bool {

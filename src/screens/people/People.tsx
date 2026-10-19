@@ -287,6 +287,8 @@ export function People() {
 
   const shown = columns.map((k) => COLUMNS.find((c) => c.key === k)!).filter(Boolean);
   const template = `28px minmax(0,1fr) ${shown.map((c) => c.width).join(" ")}`;
+  // The name keeps at least 220px: on a narrow window the table scrolls sideways instead of cutting columns off.
+  const tableMin = 28 + 220 + shown.reduce((n, c) => n + parseInt(c.width, 10), 0) + 12 * (shown.length + 2) + 32;
   const total = data?.people.length ?? 0;
   const matching = filtered.length;
 
@@ -401,6 +403,7 @@ export function People() {
       ) : (
         <div className="row people-body">
           <div className="people-table">
+            <div className="people-table-in" style={{ minWidth: tableMin }}>
             <div className="people-row header" style={{ gridTemplateColumns: template }}>
               <span />
               <SortHeader label="Imię i nazwisko" active={sort.key === "name"} dir={sort.dir} onClick={() => setSortKey("name")} />
@@ -469,6 +472,7 @@ export function People() {
                   );
                 })}
               </div>
+            </div>
             </div>
           </div>
           <AzRail has={letters} onPick={jump} />

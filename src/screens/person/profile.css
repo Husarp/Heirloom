@@ -74,7 +74,7 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text3);
-  padding: 0 0 10px 12px;
+  padding: 0 0 10px 36px;
 }
 .toc-item {
   height: 32px;
@@ -84,8 +84,21 @@
   font-size: 14px;
   color: var(--text2);
   box-shadow: inset 1px 0 0 var(--border);
+  /* The icons of the main sections sit in a gutter left of the progress line. */
+  margin-left: 24px;
+  position: relative;
   text-align: left;
   min-width: 0;
+}
+.toc-icon {
+  position: absolute;
+  left: -22px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text3);
+}
+.toc-item.active .toc-icon {
+  color: var(--accent);
 }
 .toc-item.sub {
   padding-left: 26px;
@@ -307,23 +320,102 @@
   gap: 14px;
 }
 .gallery-item {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
 }
-.star-badge {
+.gallery-thumb {
+  position: relative;
+}
+.gallery-open {
+  display: block;
+  width: 100%;
+}
+.gallery-hint {
+  margin-top: -6px;
+  font-size: 13px;
+  color: var(--text3);
+}
+/* The profile photo in its own, larger spot at the start (it still shows among the others too). */
+.gallery-spot {
+  grid-column: span 2;
+  grid-row: span 2;
+}
+.gallery-spot .gallery-thumb {
+  flex: 1 1 auto;
+  aspect-ratio: 4 / 3;
+}
+.gallery-spot .gallery-open {
   position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
+  inset: 0;
+  height: 100%;
+}
+.gallery-spot-label {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 1;
+  padding: 2px 8px;
+  border-radius: 4px;
   background: var(--accent);
   color: var(--accent-ink);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+}
+.gallery-people {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+.gallery-people .profile-tag {
+  flex: 0 1 auto;
+}
+/* Dragging a photo into a new place: the tile lifts, a bar shows where it lands. */
+.gallery-item.reorderable {
+  cursor: grab;
+  user-select: none;
+}
+.gallery-grid.dragging,
+.gallery-grid.dragging * {
+  cursor: grabbing;
+  user-select: none;
+}
+.gallery-item.lifted {
+  opacity: 0.4;
+}
+.gallery-item.drop-before::before,
+.gallery-item.drop-after::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  z-index: 3;
+}
+.gallery-item.drop-before::before {
+  left: -9px;
+}
+.gallery-item.drop-after::after {
+  right: -9px;
+}
+.gallery-ghost {
+  position: fixed;
+  z-index: 200;
+  width: 140px;
+  height: 105px;
+  margin: -52px 0 0 -70px;
+  opacity: 0.85;
+  border-radius: var(--r-ctl);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  pointer-events: none;
 }
 .gallery-add {
   aspect-ratio: 4 / 3;
@@ -554,6 +646,28 @@
   min-width: 0;
   max-width: 760px;
 }
+/* A new person: one narrow column instead of the wide hero. */
+.new-person {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 32px 0 8px;
+  box-sizing: border-box;
+}
+.new-person-info {
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 0 0 56px;
+  box-sizing: border-box;
+}
+.new-person-page {
+  padding: 0 24px;
+}
+
 .pf-grid2 {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -892,4 +1006,40 @@
 }
 .combined-diff tr + tr > * {
   border-top: 1px solid var(--border);
+}
+
+/* A short window: „Utwórz osobę” stays in view under the scrolling form. */
+.new-person .section-foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding-bottom: 10px;
+  background: var(--bg);
+}
+
+/* The narrowest windows (1000 px): the form gets the room the photo and the margins gave back. */
+@media (max-width: 1100px) {
+  .hero,
+  .hero.editing {
+    gap: 24px;
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+  .profile-body {
+    gap: 28px;
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+  .pf-events {
+    grid-template-columns: 70px 120px minmax(0, 1fr) 110px;
+  }
+  .personal-form .seg > button {
+    padding: 0 6px;
+    font-size: 12px;
+  }
+}
+/* No profile photo yet: the spot stays, so it's clear where the profile photo goes. */
+.gallery-spot-empty {
+  border: 2px dashed var(--border);
+  background: transparent;
 }

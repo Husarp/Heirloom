@@ -5,11 +5,12 @@ import type { ArchiveStatus } from "../../api/types";
 import { rememberPlace, useStore, type TreeCamera, type TreeRoute } from "../../app/store";
 import { useApi } from "../../app/useApi";
 import { useDark } from "../../app/useAppearance";
-import { ArchiveDot, archBranch, Dropdown, Segmented, Spinner, useArchives } from "../../components/bits";
+import { ArchiveDot, archBranch, Checkbox, Dropdown, Segmented, Spinner, useArchives } from "../../components/bits";
+import { Dialog } from "../../components/Dialog";
 import { people as peopleCount } from "../../lib/format";
 import { FocusCanvas, type FocusCanvasHandle } from "./FocusCanvas";
 import { SIDE, sideColors } from "./colors";
-import { parentsOrdered, type Graph, type GraphPerson } from "./graph";
+import { foldBranch, parentsOrdered, UNFOLD_NEAR, unfoldAnswer, type FamilyUnfold, type Graph, type GraphPerson } from "./graph";
 import { directLine, layoutAncestors, layoutDescendants, layoutFamily, pathBetween } from "./layout";
 import { OverviewCanvas, type OverviewData, type OverviewHandle } from "./OverviewCanvas";
 import { SidePanel } from "./SidePanel";
@@ -63,6 +64,9 @@ export function Tree({ hidden }: { hidden: boolean }) {
   useEffect(() => setColorMode((display.treeColor as ColorMode) ?? "branch"), [display.treeColor]);
   useEffect(() => setPhotos((display.cardStyle as string) !== "plain"), [display.cardStyle]);
   useEffect(() => setPartners((display.treePartners as string) !== "off"), [display.treePartners]);
+  // Rodzina: what the „+N” under a child does (Ustawienia › Drzewo); „Zapamiętaj mój wybór” in the question sets it.
+  const [familyChoice, setFamilyChoice] = useState<FamilyUnfold>(((display.familyUnfold as FamilyUnfold) ?? "ask"));
+  useEffect(() => setFamilyChoice((display.familyUnfold as FamilyUnfold) ?? "ask"), [display.familyUnfold]);
   const [zoom, setZoom] = useState(1);
   const canvas = useRef<FocusCanvasHandle>(null);
   const overview = useRef<OverviewHandle>(null);
@@ -116,12 +120,30 @@ export function Tree({ hidden }: { hidden: boolean }) {
   // Potomkowie: the people whose „+N potomków” was clicked, unfolded in place (the centre stays); the last one keeps
   // its place on screen. A new centre or view starts folded again.
   const [unfolded, setUnfolded] = useState<string[]>([]);
-  useEffect(() => setUnfolded([]), [focus, view]);
+  // Rodzina: the children (and, inside their branches, others) whose „+N” was unfolded in place, each with the
+  // generations below them to show (null: all); `familyPin` is the last one unfolded or folded, which keeps its
+  // place on screen, and `unfoldAsk` the person the question „wszystkich czy 2 pokolenia” is about. Folded again on a
+  // new centre or view.
+  const [familyUnfolded, setFamilyUnfolded] = useState<ReadonlyMap<string, number | null>>(new Map());
+  const [familyPin, setFamilyPin] = useState<string | undefined>();
+  const [unfoldAsk, setUnfoldAsk] = useState<string | null>(null);
+  useEffect(() => {
+    setUnfolded([]);
+    setFamilyUnfolded(new Map());
+    setFamilyPin(undefined);
+    setUnfoldAsk(null);
+  }, [focus, view]);
   const depth = view === "overview" ? null : DEPTH[view];
   // Paused while hidden: coming back fetches nothing (and redraws nothing) unless the archive changed meanwhile.
   const { data: graphData, loading, error: graphError } = useApi<Graph>(
     focus && depth ? "tree.graph" : null,
-    { id: focus, up: depth?.up, down: depth?.down, ...(view === "descendants" && unfolded.length ? { expand: unfolded } : {}) },
+    {
+      id: focus,
+      up: depth?.up,
+      down: depth?.down,
+      ...(view === "descendants" && unfolded.length ? { expand: unfolded } : {}),
+      ...(view === "family" && familyUnfolded.size ? { unfold: [...familyUnfolded].map(([id, generations]) => ({ id, depth: generations })) } : {}),
+    },
     !hidden,
   );
   // While another person loads, the previous graph stays on screen; a graph fetched for another view does not.
@@ -150,13 +172,19 @@ export function Tree({ hidden }: { hidden: boolean }) {
   }, [hidden, focus, graph, view, setCrumb]);
 
   const rounded = display.treeLines === "rounded";
+  // Rodzina: the branches unfolded as far as the graph in hand holds their people, so a pill doesn't vanish before
+  // its people come; a fold takes effect at once.
+  const familyShown = useMemo(() => {
+    const fetched = new Map((graph?.unfold ?? []).map((u) => [u.id, u.depth]));
+    return new Map([...familyUnfolded].filter(([id, generations]) => fetched.has(id) && fetched.get(id) === generations));
+  }, [graph, familyUnfolded]);
   const scene = useMemo(() => {
     if (!graph || !focus || !graph.people[focus]) return null;
     if (view === "ancestors") return layoutAncestors(graph, focus, rounded);
     // Unfolded as far as the graph in hand was fetched for, so a pill doesn't vanish before its people come.
     if (view === "descendants") return layoutDescendants(graph, focus, { depth: DEPTH.descendants.down, rounded, partners, unfolded: graph.expand });
-    return layoutFamily(graph, focus, { editing: mode === "edit", rounded });
-  }, [graph, focus, view, mode, rounded, partners]);
+    return layoutFamily(graph, focus, { editing: mode === "edit", rounded, unfolded: familyShown });
+  }, [graph, focus, view, mode, rounded, partners, familyShown]);
 
   // Colours by the chosen mode (spec §3.2 „Koloruj wg”); „strona” is relative to the person in the centre.
   const sides = useMemo(
@@ -352,6 +380,28 @@ export function Tree({ hidden }: { hidden: boolean }) {
       .catch(() => {});
   };
 
+  // A „+N” pill: Przodkowie's goes to that person; Potomkowie's unfolds three generations; Rodzina's unfolds that
+  // child's descendants below them (asking first when the line goes on for more than two generations), or, on an
+  // unfolded one, folds them.
+  const unfoldFamily = (id: string, generations: number | null) => {
+    setFamilyUnfolded((m) => new Map(m).set(id, generations));
+    setFamilyPin(id);
+  };
+  const onPill = (target: string, unfold: boolean, fold: boolean) => {
+    if (!unfold) return refocus(target);
+    if (view !== "family") return setUnfolded((list) => (list.includes(target) ? list : [...list, target]));
+    if (fold) {
+      if (graph) setFamilyUnfolded((m) => foldBranch(m, graph, target));
+      setFamilyPin(target);
+      return;
+    }
+    const p = graph?.people[target];
+    if (!p) return;
+    const answer = unfoldAnswer(p, familyChoice);
+    if (answer.ask) setUnfoldAsk(target);
+    else unfoldFamily(target, answer.depth);
+  };
+
   // Całe drzewo: „strona” is relative to the clicked person, else to the one the tree was opened at. The canvas
   // re-tints when this changes, without rebuilding.
   const sideCentre = view === "overview" && colorMode === "side" ? (selected ?? focus) : null;
@@ -437,8 +487,8 @@ export function Tree({ hidden }: { hidden: boolean }) {
             }}
             onOpen={refocus}
             onHover={setHovered}
-            onPill={(target, unfold) => (unfold ? setUnfolded((list) => (list.includes(target) ? list : [...list, target])) : refocus(target))}
-            pin={view === "descendants" ? unfolded[unfolded.length - 1] : undefined}
+            onPill={onPill}
+            pin={view === "descendants" ? unfolded[unfolded.length - 1] : view === "family" ? familyPin : undefined}
             onBox={(action, of) => {
               if (action === "add-parents" && of) requireEdit(() => go({ name: "edit", id: null, relation: { kind: "parent", of } }));
             }}
@@ -454,11 +504,12 @@ export function Tree({ hidden }: { hidden: boolean }) {
         ) : (
           firstLoad && <Loading count={archive?.people ?? 0} busy />
         )}
+        <div className="tree-toolbars">
         <div className="tree-toolbar row1">
           <Segmented
             value={view}
             onChange={setView}
-            style={{ padding: 3 }}
+            size={31}
             options={[
               { value: "family", label: "Rodzina" },
               { value: "ancestors", label: "Przodkowie" },
@@ -495,9 +546,9 @@ export function Tree({ hidden }: { hidden: boolean }) {
             ]}
           />
           {view === "family" && (
-            <button className={`chip${lineOn ? " on" : ""}`} onClick={() => setLineOn((o) => !o)} title="Przygaś osoby spoza linii wybranej osoby">
+            <button className={`chip${lineOn ? " on" : ""}`} onClick={() => setLineOn((o) => !o)} title="Linia bezpośrednia: przygaś osoby spoza linii wybranej osoby">
               <GitCommitVertical size={14} />
-              Linia bezpośrednia
+              <span className="chip-label">Linia bezpośrednia</span>
             </button>
           )}
           {view === "descendants" && (
@@ -507,10 +558,10 @@ export function Tree({ hidden }: { hidden: boolean }) {
                 setPartners(!partners);
                 saveDisplay("treePartners", partners ? "off" : "on");
               }}
-              title="Pokaż małżonków i partnerów obok każdej osoby"
+              title="Partnerzy: pokaż małżonków i partnerów obok każdej osoby"
             >
               <Users size={14} />
-              Partnerzy
+              <span className="chip-label">Partnerzy</span>
             </button>
           )}
           {/* Całe drzewo has no photos on its cards yet, so there is nothing to switch there. */}
@@ -530,6 +581,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
               ]}
             />
           )}
+        </div>
         </div>
         {view !== "overview" && scene && (
           <>
@@ -570,10 +622,54 @@ export function Tree({ hidden }: { hidden: boolean }) {
           relativeTitle={view === "overview" ? "Pokaż w drzewie" : undefined}
         />
       )}
+      {unfoldAsk && graph?.people[unfoldAsk] && (
+        <UnfoldDialog
+          person={graph.people[unfoldAsk]}
+          onClose={() => setUnfoldAsk(null)}
+          onChoose={(generations, remember) => {
+            setUnfoldAsk(null);
+            unfoldFamily(unfoldAsk, generations);
+            if (remember) {
+              const choice = generations === null ? "all" : "two";
+              setFamilyChoice(choice);
+              saveDisplay("familyUnfold", choice);
+            }
+          }}
+        />
+      )}
       <div className="sr-only" aria-live="polite">
         {announce}
       </div>
     </div>
+  );
+}
+
+/** Rodzina, a child's „+N” whose line goes on for more than two generations: all of it, or the next two. */
+function UnfoldDialog({ person, onChoose, onClose }: { person: GraphPerson; onChoose: (generations: number | null, remember: boolean) => void; onClose: () => void }) {
+  const [remember, setRemember] = useState(false);
+  return (
+    <Dialog width={600} onClose={onClose} labelledBy="unfold-title">
+      <div className="dialog-body">
+        <div className="dialog-title" id="unfold-title">
+          Rozwinąć potomków: {person.name}?
+        </div>
+        <label className="row" style={{ gap: 8, fontSize: 14 }}>
+          <Checkbox on={remember} onChange={setRemember} />
+          Zapamiętaj mój wybór
+        </label>
+      </div>
+      <div className="dialog-foot">
+        <button className="btn ghost" onClick={onClose}>
+          Anuluj
+        </button>
+        <button className="btn secondary" onClick={() => onChoose(UNFOLD_NEAR, remember)}>
+          Kolejne {UNFOLD_NEAR} pokolenia ({peopleCount(person.descendantsNear)})
+        </button>
+        <button className="btn primary" onClick={() => onChoose(null, remember)}>
+          Wszystkich potomków ({peopleCount(person.descendants)})
+        </button>
+      </div>
+    </Dialog>
   );
 }
 
@@ -647,9 +743,9 @@ function Loading({ count, busy }: { count: number; busy: boolean }) {
 function JumpBox({ onPick }: { onPick: (id: string) => void }) {
   const setPalette = useStore((s) => s.setPalette);
   return (
-    <button className="search-box jump-box" style={{ height: 38, background: "var(--surface)" }} onClick={() => setPalette(true, { scope: "people", pick: onPick })}>
+    <button className="search-box jump-box" title="Skocz do osoby" style={{ height: 38, background: "var(--surface)" }} onClick={() => setPalette(true, { scope: "people", pick: onPick })}>
       <Crosshair size={15} />
-      <span className="grow" style={{ textAlign: "left" }}>
+      <span className="grow jump-label" style={{ textAlign: "left" }}>
         Skocz do osoby…
       </span>
     </button>

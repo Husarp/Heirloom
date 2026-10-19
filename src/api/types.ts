@@ -9,6 +9,8 @@ export interface RecentArchive {
   kind?: "archive" | "set";
   /** A set's number of archives. */
   archives?: number;
+  /** When Heirloom last saved changes into this archive on this computer; none if it never did. */
+  editedAt?: string;
 }
 
 export interface Appearance {
@@ -247,8 +249,12 @@ export interface Editor {
 export interface AppState {
   version: string;
   recent: RecentArchive[];
+  /** How the recent list is sorted; null: by last opened. */
+  recentSort: "opened" | "edited" | "name" | null;
   appearance: Appearance;
   lastEditor: string | null;
+  /** Names used for „Kto edytuje?” on this computer, most recent first. */
+  editorNames: string[];
   /** „Sprawdzaj aktualizacje” (this computer's setting). */
   updates: { check: boolean };
   archive: ArchiveStatus | null;

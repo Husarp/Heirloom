@@ -462,7 +462,7 @@ pub fn missing_files(d: &Derived, roots: &FileRoots) -> Vec<String> {
         .collect()
 }
 
-fn media_people(d: &Derived) -> HashMap<&str, Vec<usize>> {
+pub(crate) fn media_people(d: &Derived) -> HashMap<&str, Vec<usize>> {
     let mut map: HashMap<&str, Vec<usize>> = HashMap::new();
     for (i, p) in d.view.people.iter().enumerate() {
         for link in &p.media {
@@ -483,6 +483,7 @@ fn media_json(d: &Derived, id: &str, roots: &FileRoots, people_of: &HashMap<&str
         "id": id,
         "path": m.file,
         "kind": m.kind.code(),
+        "category": m.category,
         "documentType": m.document_type,
         "title": m.title,
         "date": date.map(|v| polish::format_date_short(&v)).or_else(|| m.date_text.clone()),
@@ -511,6 +512,41 @@ pub fn media_list(d: &Derived, roots: &FileRoots) -> Value {
     let people_of = media_people(d);
     let items: Vec<Value> = d.view.media_order.iter().filter_map(|id| media_json(d, id, roots, &people_of)).collect();
     json!({ "items": items })
+}
+
+/// The own categories saved in the archive's display settings (`mediaCategories: [{name, base}]`), in their order.
+/// A wrong entry (no name, an unknown base) is skipped; a repeated name counts once.
+pub fn saved_categories(display: &serde_json::Map<String, Value>) -> Vec<(String, MediaKind)> {
+    let mut out: Vec<(String, MediaKind)> = Vec::new();
+    for entry in display.get("mediaCategories").and_then(Value::as_array).into_iter().flatten() {
+        let Some(name) = entry.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()) else { continue };
+        let base = match entry.get("base").and_then(Value::as_str) {
+            Some("photo") => MediaKind::Photo,
+            Some("document") => MediaKind::Document,
+            Some("other") => MediaKind::Other,
+            _ => continue,
+        };
+        if !out.iter().any(|(n, _)| n == name) {
+            out.push((name.to_string(), base));
+        }
+    }
+    out
+}
+
+/// „Kategorie plików”: the saved list, then the names found on files that it doesn't have (their kind from the file),
+/// each with the number of files that use it. A file keeps its category even when the settings file is gone.
+pub fn media_categories(d: &Derived, saved: &[(String, MediaKind)]) -> Value {
+    let mut rows: Vec<(String, MediaKind, usize, bool)> = saved.iter().map(|(n, b)| (n.clone(), *b, 0, true)).collect();
+    let mut found: Vec<(String, MediaKind, usize, bool)> = Vec::new();
+    for m in d.view.media_order.iter().filter_map(|id| d.view.media.get(id)) {
+        let Some(name) = m.category.as_deref() else { continue };
+        match rows.iter_mut().chain(found.iter_mut()).find(|r| r.0 == name) {
+            Some(row) => row.2 += 1,
+            None => found.push((name.to_string(), m.kind, 1, false)),
+        }
+    }
+    found.sort_by_cached_key(|r| r.0.to_lowercase());
+    json!(rows.into_iter().chain(found).map(|(name, base, count, saved)| json!({ "name": name, "base": base.code(), "count": count, "saved": saved })).collect::<Vec<_>>())
 }
 
 pub fn media_get(d: &Derived, id: &str, roots: &FileRoots) -> Result<Value, ApiError> {

@@ -221,7 +221,8 @@
   filter: grayscale(0.8);
 }
 
-/* Compact: the box scales with the zoom, the text keeps its screen size. */
+/* Compact: the box scales with the zoom, the text keeps its screen size down to 50 %, then shrinks with the card
+   (--ts, see compactTextScale), never below 8 px for the years. */
 .tree-card.compact {
   background: var(--card);
   border: 1px solid var(--card-border);
@@ -229,10 +230,10 @@
   overflow: hidden;
   display: flex;
   align-items: center;
-  padding: 0 calc(6px * var(--inv)) 0 calc(9px * var(--inv));
+  padding: 0 calc(6px * var(--inv) * var(--ts, 1)) 0 calc(9px * var(--inv) * var(--ts, 1));
 }
 .tree-card.compact .stripe {
-  width: calc(3px * var(--inv));
+  width: calc(3px * var(--inv) * var(--ts, 1));
 }
 .tree-card.compact.selected {
   border: calc(2px * var(--inv)) solid var(--accent);
@@ -245,14 +246,14 @@
 }
 .tree-card.compact .compact-name {
   font-family: var(--f-serif);
-  font-size: calc(13px * var(--inv));
+  font-size: calc(13px * var(--inv) * var(--ts, 1));
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .tree-card.compact .compact-years {
-  font-size: calc(11px * var(--inv));
+  font-size: max(calc(8px * var(--inv)), calc(11px * var(--inv) * var(--ts, 1)));
   color: var(--text2);
   white-space: nowrap;
 }
@@ -380,17 +381,35 @@
 .lod-1 .tree-pill {
   transform: none;
 }
+/* Below the full card the pill is bigger than the card's edge allows (it is scaled up by --inv): hang it outside
+   the card, the layout's top or bottom edge being its anchor (y sits 11 above the edge, so +11 puts the pill's own
+   top on the edge). */
+.tree-canvas:not(.lod-1) .tree-pill.at-bottom {
+  transform: translateY(11px) scale(var(--inv));
+}
+.tree-canvas:not(.lod-1) .tree-pill.at-top {
+  transform: translateY(11px) scale(var(--inv)) translateY(-100%);
+}
 .tree-pill:hover {
   color: var(--text);
   border-color: var(--text3);
 }
 
 /* Toolbars and controls over the canvas (spec §3.2–§3.3). */
-.tree-toolbar {
+/* Both rows in one box, so a first row that wraps on a narrow window pushes the second one down. */
+.tree-toolbars {
   position: absolute;
+  top: 14px;
   left: 16px;
   right: 16px;
   z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+  container-type: inline-size;
+}
+.tree-toolbar {
   display: flex;
   gap: 12px;
   pointer-events: none;
@@ -402,11 +421,11 @@
   white-space: nowrap;
 }
 .tree-toolbar.row1 {
-  top: 14px;
   justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 8px;
 }
 .tree-toolbar.row2 {
-  top: 62px;
   gap: 6px;
   flex-wrap: wrap;
   font-size: 13px;
@@ -424,6 +443,31 @@
   width: 210px;
   height: 38px;
   position: relative;
+}
+
+/* A narrow canvas (a small window with the side panel open): the two rows stay two. The tabs get tighter, the jump
+   box and the chips shrink to their icons, and the dropdowns lose their „Koloruj wg:” / „Karty:” prefix (all of them
+   keep a tooltip). */
+@container (max-width: 560px) {
+  .tree-toolbar.row1 {
+    gap: 8px;
+  }
+  .tree-toolbar .seg > button {
+    padding: 0 7px;
+  }
+  .jump-box {
+    width: 38px;
+    padding: 0;
+    justify-content: center;
+  }
+  .jump-box .jump-label,
+  .tree-toolbar .chip-label,
+  .tree-toolbar .dd-label {
+    display: none;
+  }
+  .tree-toolbar .chip {
+    padding: 0 9px;
+  }
 }
 
 /* The bottom row: the line legend on the left, the zoom on the right (as in Całe drzewo), all 34 px high. */
@@ -494,7 +538,7 @@
 
 /* The selected person (spec §4.1 side panel). */
 .tree-panel {
-  width: 340px;
+  width: clamp(290px, 31vw, 340px);
   flex: none;
   background: var(--surface);
   border-left: 1px solid var(--border);
@@ -512,12 +556,22 @@
   border-bottom: 1px solid var(--border);
 }
 .tree-panel-body {
+  flex: 1;
   padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 16px;
   overflow: auto;
   min-height: 0;
+}
+/* „Otwórz profil” stays pinned under the scrolling body. */
+.tree-panel-foot {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
 }
 .panel-photo {
   width: 100%;
