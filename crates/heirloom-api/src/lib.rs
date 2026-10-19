@@ -367,6 +367,14 @@ impl Api {
                 self.update_config(|c| c.updates.check = check);
                 Ok(self.app_state())
             }
+            "recent.setSort" => {
+                let sort = str_arg(&args, "sort")?;
+                if !["opened", "edited", "name"].contains(&sort.as_str()) {
+                    return Err(ApiError::bad_args("sort"));
+                }
+                self.update_config(|c| c.recent_sort = Some(sort));
+                Ok(self.app_state())
+            }
             "recent.forget" => {
                 let path = str_arg(&args, "path")?;
                 self.update_config(|c| c.forget(&path));
@@ -424,6 +432,7 @@ impl Api {
                 let progress = self.progress.clone();
                 let result = overlay::writeback::write_back(self.session()?, &author, allow_foreign, &progress)?;
                 self.update_config(|c| c.set_editor(author));
+                self.touch_edited();
                 Ok(json!({ "result": result, "status": self.archive_status()? }))
             }
             "archive.undoWriteBack" => {
@@ -509,6 +518,9 @@ impl Api {
             m if m.starts_with("import.") => {
                 let session = self.session.as_mut().ok_or_else(ApiError::no_archive)?;
                 let result = import::call(session, &mut self.import, m, &args);
+                if m == "import.commit" && result.is_ok() {
+                    self.touch_edited();
+                }
                 self.media.set_imports(self.import.as_ref().map(|d| d.files.iter().map(|f| f.path.clone()).collect()).unwrap_or_default());
                 result
             }
@@ -642,6 +654,7 @@ impl Api {
                     u.hash = Some(hash);
                 }
             });
+            self.touch_edited();
             result["status"] = self.archive_status()?;
         }
         Ok(result)
@@ -715,6 +728,7 @@ impl Api {
         json!({
             "version": env!("CARGO_PKG_VERSION"),
             "recent": self.config.recent,
+            "recentSort": self.config.recent_sort,
             "appearance": self.config.appearance,
             "lastEditor": self.config.last_editor,
             "editorNames": self.config.editor_names,
@@ -869,6 +883,7 @@ impl Api {
             people: archive.doc.records.iter().filter(|r| r.tag == "INDI").count(),
             kind: "archive".into(),
             archives: None,
+            edited_at: None,
         };
         self.update_config(|c| c.remember(entry));
         let mut session = Session::new(archive);
@@ -918,6 +933,7 @@ impl Api {
             people: archive.doc.records.iter().filter(|r| r.tag == "INDI").count(),
             kind: "archive".into(),
             archives: None,
+            edited_at: None,
         };
         self.update_config(|c| c.remember(entry));
         let mut session = Session::new(archive);
@@ -1218,6 +1234,7 @@ impl Api {
             people: set.people(),
             kind: "set".into(),
             archives: Some(set.parts.len()),
+            edited_at: None,
         };
         self.update_config(|c| c.remember(entry));
         self.session = None;
@@ -1253,6 +1270,7 @@ impl Api {
                 r.0.hash = Some(r.1);
             }
         });
+        self.touch_edited();
         Ok(json!({
             "backup": report.backup.map(|p| p.display().to_string()),
             "changes": report.history_entries,
@@ -1297,6 +1315,13 @@ impl Api {
         }
         s.archive.save_settings()?;
         self.archive_status()
+    }
+
+    /// Marks the open archive (by the path it was opened from) as edited by Heirloom just now, for sorting the recent list.
+    fn touch_edited(&mut self) {
+        let Some(path) = self.session.as_ref().map(|s| s.opened.clone()).filter(|p| !p.is_empty()) else { return };
+        let now = heirloom_core::history::now();
+        self.update_config(|c| c.touch_edited(&path, now));
     }
 
     /// One change to `aplikacja.json`, made on the file as it is now: another window (another process) may have
@@ -1512,6 +1537,19 @@ mod tests {
     }
 
     /// A file held by another program isn't copied, and its link keeps pointing at the file where it is.
+    #[test]
+    fn saving_marks_the_archive_edited_and_the_sort_is_stored() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut api = Api::new(None, None);
+        api.call("archive.create", json!({ "folder": dir.path().join("a").to_str().unwrap(), "name": "A" })).unwrap();
+        assert!(api.call("app.state", Value::Null).unwrap()["recent"][0].get("editedAt").is_none());
+        api.call("person.create", json!({ "given": "Jan" })).unwrap();
+        api.call("archive.save", json!({ "author": "Ewa" })).unwrap();
+        assert!(api.call("app.state", Value::Null).unwrap()["recent"][0]["editedAt"].is_string());
+        assert!(api.call("recent.setSort", json!({ "sort": "bogus" })).is_err());
+        assert_eq!(api.call("recent.setSort", json!({ "sort": "name" })).unwrap()["recentSort"], "name");
+    }
+
     #[cfg(windows)]
     #[test]
     fn a_file_that_cannot_be_copied_keeps_its_link() {
