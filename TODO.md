@@ -553,6 +553,7 @@ This is the roadmap, with a checkbox per task.
       separate program with a long list of security fixes, and Heirloom already has the `image` library, which can
       rotate, crop and straighten. So: „Obróć”, „Przytnij”, „Wyprostuj” in the photo view, saved as a new version,
       the original kept
+  - decided 2026-10-22: no ImageMagick, the `image` library; for batch 2b (with cropping the profile photo)
 
 ### Tree
 - [x] **View switch is misaligned** (done 2026-10-19) (screenshot 2026-10-16, „Rodzina · Przodkowie · Potomkowie · Całe drzewo”): it
@@ -604,6 +605,9 @@ This is the roadmap, with a checkbox per task.
 - [ ] **Relatives the import mentions but who have no profile** (to decide in detail): created as unfinished
       people, shown in Rodzina and in the people list; on the tree only where the relationship is known. The note
       „Do uzupełnienia” shows only on their own profile, never as a banner on every screen
+  - decided 2026-10-22: a mentioned relative whose relationship is unknown (e.g. „ciocia Zosia”) becomes an
+    unfinished person with no link, shown only in „Do uzupełnienia” and the people list, not on the tree until the
+    relationship is added; batch 2b
 - [ ] **New tab „Do uzupełnienia”** — unfinished people and undescribed photos and documents in one place, each
       can be ignored, and anyone can be added by hand („Do dokończenia”); undescribed photos still show in the
       gallery, marked „nieopisane”
