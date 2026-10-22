@@ -4,7 +4,7 @@
 // text shrinks a little below 50 %).
 
 import { Camera, ChevronLeft, ChevronsDown, ChevronsUp, Plus } from "lucide-react";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type HTMLAttributes } from "react";
 import type { TreeCamera } from "../../app/store";
 import { ArchiveDot, Avatar, CardYears } from "../../components/bits";
 import { cardName, cardYears } from "../../lib/format";
@@ -14,6 +14,7 @@ import type { Graph, GraphPerson } from "./graph";
 import { CARD_H, CARD_W, type Scene, type SceneCard } from "./layout";
 import { compactTextScale, nextLod, type Lod } from "./lod";
 import { fitName, forgetNameWidths, nameWidth } from "./nameFit";
+import { CSS_INK, fillCss, markFor, markUnit, paintCss, type ZoomLook } from "./zoomLook";
 
 export interface FocusCanvasHandle {
   fit: () => void;
@@ -38,11 +39,6 @@ export interface CardStyle {
   highlighted: Set<string>;
 }
 
-function shape(branch: number): CSSProperties {
-  const s = branch % 3;
-  return { borderRadius: s === 0 ? "50%" : s === 1 ? 1.5 : 1, transform: s === 2 ? "rotate(45deg) scale(0.85)" : undefined };
-}
-
 export const FocusCanvas = forwardRef<FocusCanvasHandle, {
   scene: Scene;
   graph: Graph;
@@ -58,6 +54,8 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
   onZoom: (zoom: number) => void;
   focusId: string;
   photos: boolean;
+  /** How a person looks zoomed far out (mini and dot levels). */
+  zoomLook: ZoomLook;
   /** Where the person starts on screen: the middle (Rodzina), the right (Przodkowie) or the top (Potomkowie). */
   anchor: "center" | "right" | "top";
   /** In a new layout of the same centre, the card that keeps its place on screen (the one just unfolded or folded);
@@ -74,7 +72,7 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
   /** A relative was unlinked or deleted with those tools. */
   onGone?: (id: string) => void;
 }>(function FocusCanvas(props, ref) {
-  const { scene, graph, selected, style, hidden, animate, onSelect, onOpen, onHover, onPill, onBox, onZoom, focusId, photos, anchor, pin, restore, onRestored, onCamera, tools, onGone } = props;
+  const { scene, graph, selected, style, hidden, animate, onSelect, onOpen, onHover, onPill, onBox, onZoom, focusId, photos, zoomLook, anchor, pin, restore, onRestored, onCamera, tools, onGone } = props;
   const host = useRef<HTMLDivElement>(null);
   const [camera, setCamera] = useState<Camera2D>({ x: 0, y: 0, zoom: 1 });
   const [lod, setLod] = useState<Lod>(1);
@@ -323,9 +321,9 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
             const on = l.people.length > 0 && l.people.every((p) => style.highlighted.has(p));
             return <path key={l.key} d={l.d} className={`link ${l.kind}${on ? " on" : ""}`} />;
           })}
-          {/* A card drawn as a dot is a small mark in the middle of its box, while the lines end at the box's edges:
+          {/* A card drawn as a mark is a small shape in the middle of its box, while the lines end at the box's edges:
               each such end goes on to the mark, under it, in the line's own style. */}
-          {lod === 4 &&
+          {lod >= 3 &&
             scene.links.flatMap((l) => {
               const on = l.people.length > 0 && l.people.every((p) => style.highlighted.has(p));
               return l.ends.flatMap((e, i) => {
@@ -367,6 +365,8 @@ export const FocusCanvas = forwardRef<FocusCanvasHandle, {
             card={c}
             person={graph.people[c.id]}
             lod={lod}
+            zoom={camera.zoom}
+            look={zoomLook}
             selected={selected === c.id}
             color={graph.people[c.id] ? style.color(graph.people[c.id]) : null}
             dimmed={style.dimmed(c.id)}
@@ -454,10 +454,58 @@ function StickyLabels({ labels, camera, lod, smooth }: { labels: Scene["labels"]
   );
 }
 
+/** A person zoomed far out (mini and dot levels) in the chosen look: sizes are screen pixels from zoomLook.ts, turned
+ *  into the scaled world's by 1 / zoom. */
+function Mark({
+  card,
+  look,
+  zoom,
+  color,
+  selected,
+  base,
+  events,
+}: {
+  card: SceneCard;
+  look: ZoomLook;
+  zoom: number;
+  color: number | null;
+  selected: boolean;
+  base: CSSProperties;
+  events: HTMLAttributes<HTMLDivElement>;
+}) {
+  const m = markFor(look, color ? `var(--b${color})` : null, color, markUnit(zoom), CSS_INK);
+  const k = 1 / zoom;
+  const px = (n: number) => `${n * k}px`;
+  const middle = (extra = "") => ({ position: "absolute" as const, left: "50%", top: "50%", transform: `translate(-50%, -50%)${extra}` });
+  return (
+    <div className={`tree-card mark${card.partner ? " partner" : ""}`} style={base} {...events}>
+      <span
+        className="mark-shape"
+        style={{
+          ...middle(m.shape === "diamond" ? " rotate(45deg)" : ""),
+          width: px(m.w),
+          height: px(m.h),
+          borderRadius: px(m.radius),
+          borderWidth: px(m.strokeWidth),
+          borderStyle: m.stroke ? "solid" : "none",
+          borderColor: m.stroke ? paintCss(m.stroke) : undefined,
+          background: fillCss(m),
+        }}
+      >
+        {m.stripe && <span className="mark-stripe" style={{ height: px(m.stripe.height), background: m.stripe.color }} />}
+        {m.bar && <span className="mark-bar" style={{ left: px(m.bar.x - m.strokeWidth), top: px(m.bar.y - m.strokeWidth), width: px(m.bar.w), height: px(m.bar.h), borderRadius: px(m.bar.h / 2), background: paintCss(m.bar.paint) }} />}
+      </span>
+      {selected && <span className="mark-ring" style={{ ...middle(), width: px(m.ring.w), height: px(m.ring.h), borderRadius: px(m.ring.radius), borderWidth: px(m.ring.width), borderColor: m.ring.color }} />}
+    </div>
+  );
+}
+
 function Card({
   card,
   person: p,
   lod,
+  zoom,
+  look,
   selected,
   color,
   dimmed,
@@ -470,6 +518,8 @@ function Card({
   card: SceneCard;
   person: GraphPerson | undefined;
   lod: Lod;
+  zoom: number;
+  look: ZoomLook;
   selected: boolean;
   color: number | null;
   dimmed: boolean;
@@ -503,24 +553,7 @@ function Card({
     onMouseEnter: () => onHover(card.id),
     onMouseLeave: () => onHover(null),
   };
-  if (lod === 4) {
-    return (
-      <div className="tree-card dot" style={base} {...events}>
-        <span className="dot-shape" style={{ background: branchColor, ...shape(color ?? 3) }} />
-      </div>
-    );
-  }
-  if (lod === 3) {
-    // The ink made for that branch colour (D3), per palette and theme through the tokens.
-    const ink = color ? `var(--b${color}-ink)` : "var(--lod-ink)";
-    return (
-      <div className={`tree-card mini${selected ? " selected" : ""}${card.partner ? " partner" : ""}`} style={{ ...base, background: branchColor }} {...events}>
-        <span className="mini-letter" style={{ color: ink }}>
-          {(p.given || p.name).charAt(0)}
-        </span>
-      </div>
-    );
-  }
+  if (lod >= 3) return <Mark card={card} look={look} zoom={zoom} color={color} selected={selected} base={base} events={events} />;
   const dates = (
     <span className="card-dates">
       <CardYears birth={p.birth} death={p.death} living={p.living} />

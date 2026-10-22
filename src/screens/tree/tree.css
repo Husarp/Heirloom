@@ -217,7 +217,7 @@
 .tree-card.full.partner:hover > * {
   opacity: 0.9;
 }
-.tree-card.mini.partner {
+.tree-card.mark.partner {
   filter: grayscale(0.8);
 }
 
@@ -258,29 +258,25 @@
   white-space: nowrap;
 }
 
-.tree-card.mini {
-  border-radius: 3px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* A person zoomed far out (mini and dot levels): the box stays the click target, the look itself (zoomLook.ts) is
+   sized inline in screen pixels, scaled back by 1 / zoom. */
+.tree-card.mark .mark-shape {
+  box-sizing: border-box;
+  overflow: hidden;
 }
-.tree-card.mini.selected {
-  outline: calc(2px * var(--inv)) solid var(--text);
+.tree-card.mark .mark-stripe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
 }
-.tree-card.mini .mini-letter {
-  font-size: calc(10px * var(--inv));
-  font-weight: 600;
-  line-height: 1;
+.tree-card.mark .mark-bar {
+  position: absolute;
 }
-
-.tree-card.dot {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.tree-card.dot .dot-shape {
-  width: calc(7px * var(--inv));
-  height: calc(7px * var(--inv));
+.tree-card.mark .mark-ring {
+  box-sizing: border-box;
+  border-style: solid;
+  pointer-events: none;
 }
 
 .tree-card.stub {

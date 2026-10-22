@@ -8,6 +8,7 @@ import { BRANCH_NAMES, BranchColorPicker, useBranchColors } from "../../componen
 import { BranchShape, Segmented, SettingRow, Toggle } from "../../components/bits";
 import { num, people } from "../../lib/format";
 import { collator } from "../surnames/split";
+import { zoomLookOf } from "../tree/zoomLook";
 import { ArchiveSections } from "./archive";
 import { AboutSection, EditorsSection, ImportSection } from "./more";
 import { failed, Section, Select, setDisplay } from "./parts";
@@ -242,6 +243,19 @@ function TreeSection({ archive }: { archive: ArchiveStatus }) {
           options={[
             { value: "straight", label: "Proste" },
             { value: "rounded", label: "Zaokrąglone" },
+          ]}
+        />
+      </SettingRow>
+      <SettingRow wide label="Wygląd przy oddaleniu" note="Jak wyglądają osoby, gdy drzewo jest bardzo pomniejszone">
+        <Select
+          label="Wygląd przy oddaleniu"
+          value={zoomLookOf(display.treeZoomLook)}
+          onChange={(v) => setDisplay("treeZoomLook", v)}
+          options={[
+            { value: "shapes", label: "Kształty" },
+            { value: "outline", label: "Obwódka" },
+            { value: "tiles", label: "Kafelki" },
+            { value: "cards", label: "Mini-karty" },
           ]}
         />
       </SettingRow>
