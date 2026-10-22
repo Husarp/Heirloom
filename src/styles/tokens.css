@@ -1,7 +1,9 @@
 /* Design tokens, direction 1a „Muzeum” (design/IMPLEMENTATION_SPEC.md §1, with the contrast fixes of design v2, page 17). Light is the default; dark is set with
-   data-theme="dark" on <html> (the app resolves „Systemowy” itself). */
+   data-theme="dark" on <html> (the app resolves „Systemowy” itself). „Muzeum” is the default colour scheme; the others, and the
+   accent colours, are in schemes.css (.sch-museum shows this one on its own, like the others there). */
 
-:root {
+:root,
+.sch-museum {
   --bg: #f7f4ee;
   --surface: #ffffff;
   --surface2: #efebe3;
@@ -66,7 +68,8 @@
   color-scheme: light;
 }
 
-:root[data-theme="dark"] {
+:root[data-theme="dark"],
+:root[data-theme="dark"] .sch-museum {
   --bg: #1b1a17;
   --surface: #24221e;
   --surface2: #2d2a25;

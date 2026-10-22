@@ -147,11 +147,28 @@ pub struct Appearance {
     pub animations: bool,
     /// What opening an archive shows: `start` (the Start screen) or `last` (the place where it was left).
     pub start_in: String,
+    /// The colour scheme of the whole app (one of `COLOUR_SCHEMES`); `museum` is the original look.
+    pub scheme: String,
+    /// The accent colour (one of `ACCENT_COLOURS`); `default` is the scheme's own.
+    pub accent: String,
 }
+
+/// The values `scheme` and `accent` can take: they are the `data-scheme` / `data-accent` of src/styles/schemes.css
+/// (`museum` and `default` have no rule: the tokens of tokens.css).
+pub const COLOUR_SCHEMES: [&str; 4] = ["museum", "poranek", "terakota", "wrzos"];
+pub const ACCENT_COLOURS: [&str; 7] = ["default", "green", "navy", "burgundy", "plum", "copper", "sea"];
 
 impl Default for Appearance {
     fn default() -> Self {
-        Appearance { theme: "system".into(), text_size: 100, density: "comfortable".into(), animations: true, start_in: "start".into() }
+        Appearance {
+            theme: "system".into(),
+            text_size: 100,
+            density: "comfortable".into(),
+            animations: true,
+            start_in: "start".into(),
+            scheme: "museum".into(),
+            accent: "default".into(),
+        }
     }
 }
 
@@ -322,7 +339,21 @@ mod tests {
         std::fs::write(dir.path().join(FILE), br#"{"appearance": {"theme": "dark"}}"#).unwrap();
         let config = AppConfig::load(dir.path());
         assert_eq!((config.appearance.theme.as_str(), config.appearance.start_in.as_str()), ("dark", "start"));
+        // The colour scheme and accent came in 0.9.0: a file without them keeps the original look.
+        assert_eq!((config.appearance.scheme.as_str(), config.appearance.accent.as_str()), ("museum", "default"));
         assert!(config.places.is_empty());
+    }
+
+    #[test]
+    fn the_colour_scheme_and_accent_are_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::default();
+        config.appearance.scheme = "wrzos".into();
+        config.appearance.accent = "sea".into();
+        config.save(dir.path()).unwrap();
+        let loaded = AppConfig::load(dir.path());
+        assert_eq!((loaded.appearance.scheme.as_str(), loaded.appearance.accent.as_str()), ("wrzos", "sea"));
+        assert!(std::fs::read_to_string(dir.path().join(FILE)).unwrap().contains(r#""scheme": "wrzos""#));
     }
 
     #[test]

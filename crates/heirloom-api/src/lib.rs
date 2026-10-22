@@ -24,7 +24,7 @@ pub mod text;
 pub(crate) mod tools;
 pub mod update;
 
-use config::{AppConfig, IN_PLACE, OVERLAY, RecentArchive, data_key};
+use config::{ACCENT_COLOURS, AppConfig, COLOUR_SCHEMES, IN_PLACE, OVERLAY, RecentArchive, data_key};
 use derive::Derived;
 use heirloom_core::{Archive, Error as CoreError, SaveOptions};
 use serde::Serialize;
@@ -770,6 +770,14 @@ impl Api {
         if start_in.is_some_and(|s| !["start", "last"].contains(&s)) {
             return Err(ApiError::bad_args("startIn"));
         }
+        let scheme = args.get("scheme").and_then(Value::as_str);
+        if scheme.is_some_and(|s| !COLOUR_SCHEMES.contains(&s)) {
+            return Err(ApiError::bad_args("scheme"));
+        }
+        let accent = args.get("accent").and_then(Value::as_str);
+        if accent.is_some_and(|a| !ACCENT_COLOURS.contains(&a)) {
+            return Err(ApiError::bad_args("accent"));
+        }
         self.update_config(|c| {
             let appearance = &mut c.appearance;
             if let Some(theme) = theme {
@@ -786,6 +794,12 @@ impl Api {
             }
             if let Some(start_in) = start_in {
                 appearance.start_in = start_in.into();
+            }
+            if let Some(scheme) = scheme {
+                appearance.scheme = scheme.into();
+            }
+            if let Some(accent) = accent {
+                appearance.accent = accent.into();
             }
         });
         Ok(self.app_state())
@@ -1477,6 +1491,26 @@ mod tests {
         assert_eq!(date_feedback("ok. 14.03.1878")["qualifier"], "about");
         assert_eq!(date_feedback("między 1850 a 1855")["text"], "między 1850 a 1855");
         assert_eq!(date_feedback("zimą 1915")["qualifier"], "text");
+    }
+
+    #[test]
+    fn the_colour_scheme_and_accent_are_chosen_for_the_whole_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config");
+        let mut api = Api::new(Some(config.clone()), None);
+        let state = api.call("app.state", Value::Null).unwrap();
+        assert_eq!((&state["appearance"]["scheme"], &state["appearance"]["accent"]), (&json!("museum"), &json!("default")));
+        assert_eq!(api.call("app.setAppearance", json!({ "scheme": "neon" })).unwrap_err().code, "bad_args");
+        assert_eq!(api.call("app.setAppearance", json!({ "accent": "neon" })).unwrap_err().code, "bad_args");
+        // One at a time: the other choices stay.
+        api.call("app.setAppearance", json!({ "theme": "dark" })).unwrap();
+        api.call("app.setAppearance", json!({ "scheme": "terakota" })).unwrap();
+        let state = api.call("app.setAppearance", json!({ "accent": "plum" })).unwrap();
+        assert_eq!((&state["appearance"]["scheme"], &state["appearance"]["accent"], &state["appearance"]["theme"]), (&json!("terakota"), &json!("plum"), &json!("dark")));
+        // After a restart they are back (they belong to this computer, not to an archive).
+        let mut api = Api::new(Some(config), None);
+        let state = api.call("app.state", Value::Null).unwrap();
+        assert_eq!((&state["appearance"]["scheme"], &state["appearance"]["accent"]), (&json!("terakota"), &json!("plum")));
     }
 
     #[test]

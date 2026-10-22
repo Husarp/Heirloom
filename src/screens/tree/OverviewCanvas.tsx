@@ -6,7 +6,7 @@ import { Application, BitmapFont, BitmapText, Container, Graphics, Sprite, type 
 import { Minus, Plus, LocateFixed, Maximize } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { TreeCamera } from "../../app/store";
-import { useBranchPalette } from "../../app/useAppearance";
+import { useBranchPalette, useColorLook } from "../../app/useAppearance";
 import { cardYears, count, roman } from "../../lib/format";
 import { cameraOf, viewOf } from "./camera";
 import { placeLabels } from "./labels";
@@ -129,6 +129,8 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
 
   // The colours are read from CSS, so a palette change (Ustawienia › Kolory gałęzi) re-tints too.
   const branchPalette = useBranchPalette();
+  // The scheme and the accent colour the canvas, the cards and the text too: those are baked in, so they rebuild it.
+  const colorLook = useColorLook();
   useEffect(() => api.current?.recolor(), [colorFor, branchPalette]);
   useEffect(() => api.current?.drawSelection(), [selected]);
   useEffect(() => api.current?.drawLine(), [focus]);
@@ -532,9 +534,9 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
       destroyed = true;
       cleanup();
     };
-    // Rebuilt when the data or the theme changes (a new centre person only redraws the line, above).
+    // Rebuilt when the data, the theme, the colour scheme or the accent changes (a new centre person only redraws the line, above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, dark]);
+  }, [data, dark, colorLook]);
 
   const z = overlay.zoom;
   const bandTopScreen = (g: number) => overlay.y + (g - 1) * data.bandHeight * z;

@@ -360,3 +360,72 @@
     padding: 24px 24px 48px;
   }
 }
+
+/* „Kolorystyka” and „Kolor akcentu” (Wygląd): the options are the .pal-option buttons above. The preview and the swatch carry
+   the scheme / accent class of schemes.css, so they show that scheme's own colours (in the current theme) whichever is on. */
+.sch-prev {
+  display: flex;
+  flex: none;
+  width: 84px;
+  height: 28px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl-2);
+  background: var(--bg);
+}
+.sch-prev .sch-side {
+  width: 20px;
+  background: var(--sidebar);
+  border-right: 1px solid var(--sidebar-border);
+}
+/* The open item of the sidebar, in the accent. */
+.sch-prev .sch-side::after {
+  content: "";
+  display: block;
+  height: 4px;
+  margin: 7px 4px 0;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.sch-prev .sch-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 5px;
+  background: var(--canvas);
+}
+.sch-prev .sch-card {
+  width: 14px;
+  height: 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 2px;
+  background: var(--card);
+}
+.sch-prev .sch-dot {
+  width: 10px;
+  height: 10px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.pal-options.acc-options {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+.pal-option.acc-option {
+  padding: 0 12px 0 8px;
+}
+.acc-option .acc-sw {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text) 18%, transparent);
+}

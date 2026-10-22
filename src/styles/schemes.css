@@ -1,0 +1,397 @@
+/* Whole-app colour schemes („Kolorystyka”, Ustawienia › Wygląd) and accent colours („Kolor akcentu”). „Muzeum” is the
+   default and lives in tokens.css (no data-scheme on <html>); the others are data-scheme="…" on <html>, each with a light
+   and a dark variant that define every token of the scheme, so a variant never leaves a colour of another one behind. An
+   accent (data-accent="…") replaces only the --accent tokens (and the toast icon/action and nav-active ones) of whatever scheme
+   is on; with none, the scheme's own accent stays. The .sch-* and .acc-* classes show a scheme / an accent on their own in
+   the current theme (the swatches in the choice). The cascade is the one the browser uses: the more attributes a selector
+   tests, the stronger it is, then the later one — so the accents come after the schemes. src/styles/palettes.test.ts
+   checks the contrast of every scheme × accent × theme, and that the branch colours stay readable on every canvas. */
+
+/* „Poranek”: light and cool, like a blue morning: a near-white sidebar over a blue-tinted page, a bright azure accent; the dark variant is a navy night. */
+:root[data-scheme="poranek"],
+.sch-poranek {
+  --bg: #eef5fe;
+  --surface: #ffffff;
+  --surface2: #e5edf8;
+  --border: #d4ddea;
+  --text: #161c25;
+  --text2: #49505a;
+  --text3: #5e656f;
+  --accent: #285cc2;
+  --accent-ink: #ffffff;
+  --accent-soft: #e1ecff;
+  --accent-text: #2256bb;
+  --accent-hover: #134098;
+  --sidebar: #f7fafe;
+  --sidebar-text: #222933;
+  --sidebar-muted: #5e656f;
+  --sidebar-border: #d4ddea;
+  --nav-active-bg: #d5e4fe;
+  --nav-active-text: #2256bb;
+  --canvas: #e6eef8;
+  --grid: #d6dfeb;
+  --line: #7e858f;
+  --card: #ffffff;
+  --card-border: #b6beca;
+  --pop-border: #d4ddea;
+  --err: #a82e27;
+  --err-soft: #ffe4e2;
+  --warn: #755914;
+  --warn-soft: #f7edce;
+  --toast-bg: #151f2b;
+  --toast-text: #eaeff5;
+  --toast-icon: #9dbefb;
+  --toast-action: #9dbefb;
+  --toast-err: #ef958a;
+  --lod-ink: #ffffff;
+}
+
+:root[data-scheme="poranek"][data-theme="dark"],
+:root[data-theme="dark"] .sch-poranek {
+  --bg: #111722;
+  --surface: #191f2b;
+  --surface2: #222935;
+  --border: #323843;
+  --text: #e6ebf5;
+  --text2: #b7bcc6;
+  --text3: #9ea3ac;
+  --accent: #91b7fe;
+  --accent-ink: #09152c;
+  --accent-soft: #1c2b46;
+  --accent-text: #a5c5ff;
+  --accent-hover: #cddffe;
+  --sidebar: #0b101b;
+  --sidebar-text: #d2d8e1;
+  --sidebar-muted: #9ea3ac;
+  --sidebar-border: #222935;
+  --nav-active-bg: #1c2b46;
+  --nav-active-text: #a5c5ff;
+  --canvas: #171d28;
+  --grid: #272e3a;
+  --line: #727b8a;
+  --card: #191f2b;
+  --card-border: #727b8a;
+  --pop-border: #414854;
+  --err: #f19f94;
+  --err-soft: #3d1f1d;
+  --warn: #dbba66;
+  --warn-soft: #332a13;
+  --toast-bg: #e6ebf5;
+  --toast-text: #131b28;
+  --toast-icon: #31559a;
+  --toast-action: #31559a;
+  --toast-err: #ac312a;
+  --lod-ink: #0e1624;
+}
+
+/* „Terakota”: warm and sunny: apricot-cream paper with a deeper sand sidebar and a baked-clay accent; the dark variant is coffee-with-milk brown. */
+:root[data-scheme="terakota"],
+.sch-terakota {
+  --bg: #fef4ea;
+  --surface: #ffffff;
+  --surface2: #f7eadc;
+  --border: #e9d9cb;
+  --text: #24190e;
+  --text2: #594d42;
+  --text3: #6e6257;
+  --accent: #a73b15;
+  --accent-ink: #ffffff;
+  --accent-soft: #ffe5dd;
+  --accent-text: #a0340b;
+  --accent-hover: #7f2400;
+  --sidebar: #f3e3d4;
+  --sidebar-text: #32261b;
+  --sidebar-muted: #6e6257;
+  --sidebar-border: #e9d9cb;
+  --nav-active-bg: #ffd9ce;
+  --nav-active-text: #a0340b;
+  --canvas: #f7eade;
+  --grid: #eadbcd;
+  --line: #8e8277;
+  --card: #ffffff;
+  --card-border: #c9bbad;
+  --pop-border: #e9d9cb;
+  --err: #a82e27;
+  --err-soft: #ffe4e2;
+  --warn: #755914;
+  --warn-soft: #f7edcd;
+  --toast-bg: #2a1a0a;
+  --toast-text: #f5ede5;
+  --toast-icon: #edac97;
+  --toast-action: #edac97;
+  --toast-err: #ef958a;
+  --lod-ink: #ffffff;
+}
+
+:root[data-scheme="terakota"][data-theme="dark"],
+:root[data-theme="dark"] .sch-terakota {
+  --bg: #20140e;
+  --surface: #281c16;
+  --surface2: #32261f;
+  --border: #41352f;
+  --text: #f3e9e4;
+  --text2: #c4bab5;
+  --text3: #aaa19c;
+  --accent: #f59a76;
+  --accent-ink: #270d04;
+  --accent-soft: #422115;
+  --accent-text: #fea988;
+  --accent-hover: #ffcfbc;
+  --sidebar: #180e08;
+  --sidebar-text: #dfd5d0;
+  --sidebar-muted: #aaa19c;
+  --sidebar-border: #32261f;
+  --nav-active-bg: #422115;
+  --nav-active-text: #fea988;
+  --canvas: #261a14;
+  --grid: #372b24;
+  --line: #87766e;
+  --card: #281c16;
+  --card-border: #87766e;
+  --pop-border: #51453f;
+  --err: #f19f94;
+  --err-soft: #3d1f1d;
+  --warn: #dbba66;
+  --warn-soft: #332a13;
+  --toast-bg: #f3e9e4;
+  --toast-text: #251710;
+  --toast-icon: #8d3c18;
+  --toast-action: #8d3c18;
+  --toast-err: #ac312a;
+  --lod-ink: #22110b;
+}
+
+/* „Wrzos”: soft and elegant: lilac-white with a violet accent; the dark variant is aubergine. */
+:root[data-scheme="wrzos"],
+.sch-wrzos {
+  --bg: #f9f2fa;
+  --surface: #ffffff;
+  --surface2: #f2e9f4;
+  --border: #e2d8e5;
+  --text: #201922;
+  --text2: #554d56;
+  --text3: #69626b;
+  --accent: #7337a4;
+  --accent-ink: #ffffff;
+  --accent-soft: #f1e6ff;
+  --accent-text: #6d319e;
+  --accent-hover: #541e7e;
+  --sidebar: #f1e7f3;
+  --sidebar-text: #2d262f;
+  --sidebar-muted: #69626b;
+  --sidebar-border: #e2d8e5;
+  --nav-active-bg: #ebdbff;
+  --nav-active-text: #6d319e;
+  --canvas: #f4ebf5;
+  --grid: #e4dae6;
+  --line: #89828b;
+  --card: #ffffff;
+  --card-border: #c3bac5;
+  --pop-border: #e2d8e5;
+  --err: #a82e27;
+  --err-soft: #ffe4e2;
+  --warn: #755914;
+  --warn-soft: #f7edce;
+  --toast-bg: #241a26;
+  --toast-text: #f2ecf3;
+  --toast-icon: #cdaeee;
+  --toast-action: #cdaeee;
+  --toast-err: #ef958a;
+  --lod-ink: #ffffff;
+}
+
+:root[data-scheme="wrzos"][data-theme="dark"],
+:root[data-theme="dark"] .sch-wrzos {
+  --bg: #1b141f;
+  --surface: #241c27;
+  --surface2: #2e2531;
+  --border: #3c3540;
+  --text: #efe8f2;
+  --text2: #c0b9c2;
+  --text3: #a7a0a9;
+  --accent: #d1a1ef;
+  --accent-ink: #1d0f26;
+  --accent-soft: #34233f;
+  --accent-text: #ddaffa;
+  --accent-hover: #edd2fe;
+  --sidebar: #150d18;
+  --sidebar-text: #dbd5de;
+  --sidebar-muted: #a7a0a9;
+  --sidebar-border: #2e2531;
+  --nav-active-bg: #34233f;
+  --nav-active-text: #ddaffa;
+  --canvas: #211925;
+  --grid: #332a36;
+  --line: #817685;
+  --card: #241c27;
+  --card-border: #817685;
+  --pop-border: #4c4450;
+  --err: #f19f94;
+  --err-soft: #3d1f1d;
+  --warn: #dbba66;
+  --warn-soft: #332a13;
+  --toast-bg: #efe8f2;
+  --toast-text: #201624;
+  --toast-icon: #6e4188;
+  --toast-action: #6e4188;
+  --toast-err: #ac312a;
+  --lod-ink: #1b1220;
+}
+
+/* ---------- Accent colours ---------- */
+
+:root[data-accent="green"],
+.acc-green {
+  --accent: #2f5d50;
+  --accent-ink: #ffffff;
+  --accent-soft: #e1eae5;
+  --accent-text: #2f5d50;
+  --accent-hover: #1f3f36;
+  --nav-active-bg: #e1eae5;
+  --nav-active-text: #2f5d50;
+  --toast-icon: #9fd0be;
+  --toast-action: #9fd0be;
+}
+
+:root[data-accent="green"][data-theme="dark"],
+:root[data-theme="dark"] .acc-green {
+  --accent: #7fb8a4;
+  --accent-ink: #10201a;
+  --accent-soft: #233730;
+  --accent-text: #8fc6b2;
+  --accent-hover: #b3dccd;
+  --nav-active-bg: #233730;
+  --nav-active-text: #8fc6b2;
+  --toast-icon: #2f5d50;
+  --toast-action: #2f5d50;
+}
+
+:root[data-accent="navy"],
+.acc-navy {
+  --accent: #20477f;
+  --accent-ink: #ffffff;
+  --accent-soft: #e0ecfe;
+  --accent-text: #1a4179;
+  --accent-hover: #0a2c5c;
+  --nav-active-bg: #d6e4f8;
+  --nav-active-text: #1a4179;
+  --toast-icon: #a7bfe3;
+  --toast-action: #a7bfe3;
+}
+
+:root[data-accent="navy"][data-theme="dark"],
+:root[data-theme="dark"] .acc-navy {
+  --accent: #88b4ed;
+  --accent-ink: #091627;
+  --accent-soft: #1c2c40;
+  --accent-text: #96c1f7;
+  --accent-hover: #bedaff;
+  --nav-active-bg: #1c2c40;
+  --nav-active-text: #96c1f7;
+  --toast-icon: #31598c;
+  --toast-action: #31598c;
+}
+
+:root[data-accent="burgundy"],
+.acc-burgundy {
+  --accent: #801b34;
+  --accent-ink: #ffffff;
+  --accent-soft: #ffe3e6;
+  --accent-text: #79142f;
+  --accent-hover: #5b001d;
+  --nav-active-bg: #fdd9dc;
+  --nav-active-text: #79142f;
+  --toast-icon: #e9aab1;
+  --toast-action: #e9aab1;
+}
+
+:root[data-accent="burgundy"][data-theme="dark"],
+:root[data-theme="dark"] .acc-burgundy {
+  --accent: #ea909e;
+  --accent-ink: #260c11;
+  --accent-soft: #402026;
+  --accent-text: #f59eab;
+  --accent-hover: #fec2ca;
+  --nav-active-bg: #402026;
+  --nav-active-text: #f59eab;
+  --toast-icon: #8a3a4a;
+  --toast-action: #8a3a4a;
+}
+
+:root[data-accent="plum"],
+.acc-plum {
+  --accent: #6e2a5b;
+  --accent-ink: #ffffff;
+  --accent-soft: #fae4f1;
+  --accent-text: #682455;
+  --accent-hover: #4d123e;
+  --nav-active-bg: #f4daea;
+  --nav-active-text: #682455;
+  --toast-icon: #daaecb;
+  --toast-action: #daaecb;
+}
+
+:root[data-accent="plum"][data-theme="dark"],
+:root[data-theme="dark"] .acc-plum {
+  --accent: #de9bca;
+  --accent-ink: #210e1c;
+  --accent-soft: #3a2233;
+  --accent-text: #eaa9d6;
+  --accent-hover: #facaeb;
+  --nav-active-bg: #3a2233;
+  --nav-active-text: #eaa9d6;
+  --toast-icon: #7b406b;
+  --toast-action: #7b406b;
+}
+
+:root[data-accent="copper"],
+.acc-copper {
+  --accent: #97571c;
+  --accent-ink: #ffffff;
+  --accent-soft: #fbe7d9;
+  --accent-text: #915114;
+  --accent-hover: #743d03;
+  --nav-active-bg: #f5dece;
+  --nav-active-text: #915114;
+  --toast-icon: #dcb598;
+  --toast-action: #dcb598;
+}
+
+:root[data-accent="copper"][data-theme="dark"],
+:root[data-theme="dark"] .acc-copper {
+  --accent: #e8a776;
+  --accent-ink: #231103;
+  --accent-soft: #3c2514;
+  --accent-text: #f3b586;
+  --accent-hover: #fed5b6;
+  --nav-active-bg: #3c2514;
+  --nav-active-text: #f3b586;
+  --toast-icon: #804813;
+  --toast-action: #804813;
+}
+
+:root[data-accent="sea"],
+.acc-sea {
+  --accent: #03717a;
+  --accent-ink: #ffffff;
+  --accent-soft: #daf0f3;
+  --accent-text: #006b74;
+  --accent-hover: #025259;
+  --nav-active-bg: #cfe9eb;
+  --nav-active-text: #006b74;
+  --toast-icon: #99c7cd;
+  --toast-action: #99c7cd;
+}
+
+:root[data-accent="sea"][data-theme="dark"],
+:root[data-theme="dark"] .acc-sea {
+  --accent: #74cbd4;
+  --accent-ink: #001a1d;
+  --accent-soft: #103134;
+  --accent-text: #85d7e0;
+  --accent-hover: #b3edf4;
+  --nav-active-bg: #103134;
+  --nav-active-text: #85d7e0;
+  --toast-icon: #04646d;
+  --toast-action: #04646d;
+}

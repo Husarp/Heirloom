@@ -2,6 +2,7 @@ import { Archive, Calendar, Check, ChevronDown, Import, Info, Network, Palette, 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { call } from "../../api/transport";
 import type { AppState, Appearance, ArchiveStatus } from "../../api/types";
+import { ACCENTS, knownAccent, knownScheme, SCHEMES } from "../../app/colorLooks";
 import { useStore } from "../../app/store";
 import { useApi } from "../../app/useApi";
 import { BRANCH_NAMES, BranchColorPicker, useBranchColors } from "../../components/BranchColorPicker";
@@ -111,6 +112,8 @@ export function Settings({ section }: { section?: string }) {
 function AppearanceSection() {
   const appearance = useStore((s) => s.app?.appearance);
   if (!appearance) return null;
+  const scheme = knownScheme(appearance.scheme);
+  const accent = knownAccent(appearance.accent);
   const set = async (patch: Partial<Appearance>) => {
     try {
       const app = await call<AppState>("app.setAppearance", patch);
@@ -133,8 +136,34 @@ function AppearanceSection() {
           ]}
         />
       </SettingRow>
-      <SettingRow label="Kolor akcentu" soon>
-        <Select label="Kolor akcentu" value="green" options={[{ value: "green", label: "Zieleń (domyślny)" }]} onChange={() => {}} />
+      <SettingRow wide label="Kolorystyka" note="Tło, panele, boczny pasek i płótno drzewa; każda ma jasną i ciemną wersję">
+        <div className="pal-options" role="radiogroup" aria-label="Kolorystyka">
+          {SCHEMES.map((s) => (
+            <button key={s.value} className={`pal-option${scheme === s.value ? " on" : ""}`} role="radio" aria-checked={scheme === s.value} title={s.note} onClick={() => set({ scheme: s.value })}>
+              <span className="pal-check">{scheme === s.value && <Check size={14} />}</span>
+              <span className="pal-name">{s.label}</span>
+              <span className={`sch-prev sch-${s.value}`} aria-hidden>
+                <span className="sch-side" />
+                <span className="sch-main">
+                  <span className="sch-card" />
+                  <span className="sch-card" />
+                  <span className="sch-dot" />
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </SettingRow>
+      <SettingRow wide label="Kolor akcentu" note="Przyciski, odnośniki, zaznaczenia i wskaźnik klawiatury">
+        <div className="pal-options acc-options" role="radiogroup" aria-label="Kolor akcentu">
+          {ACCENTS.map((a) => (
+            <button key={a.value} className={`pal-option acc-option${accent === a.value ? " on" : ""}`} role="radio" aria-checked={accent === a.value} onClick={() => set({ accent: a.value })}>
+              {/* „Domyślny” shows the accent the scheme has on its own; the others, their own. */}
+              <span className={`acc-sw ${a.value === "default" ? `sch-${scheme}` : `acc-${a.value}`}`}>{accent === a.value && <Check size={12} strokeWidth={3} />}</span>
+              <span>{a.label}</span>
+            </button>
+          ))}
+        </div>
       </SettingRow>
       <SettingRow label="Wielkość tekstu" note="100–150%, powiększa cały program">
         <TextSize value={appearance.textSize} onChange={(textSize) => set({ textSize })} />
