@@ -88,7 +88,7 @@ const numbers = Array.from({ length: 12 }, (_, i) => i + 1);
 const SCHEME_TOKENS = [
   "bg", "surface", "surface2", "border", "text", "text2", "text3", "accent", "accent-ink", "accent-soft", "accent-text", "accent-hover",
   "sidebar", "sidebar-text", "sidebar-muted", "sidebar-border", "nav-active-bg", "nav-active-text", "canvas", "grid", "line", "card", "card-border",
-  "pop-border", "err", "err-soft", "warn", "warn-soft", "toast-bg", "toast-text", "toast-icon", "toast-action", "toast-err", "lod-ink",
+  "pop-border", "err", "err-soft", "warn", "warn-soft", "toast-bg", "toast-text", "toast-icon", "toast-action", "toast-err",
 ].map((name) => `--${name}`);
 /** What an accent replaces. */
 const ACCENT_TOKENS = ["accent", "accent-ink", "accent-soft", "accent-text", "accent-hover", "nav-active-bg", "nav-active-text", "toast-icon", "toast-action"].map((name) => `--${name}`);
@@ -228,9 +228,8 @@ describe("colour schemes and accent colours", () => {
           for (const on of ["bg", "surface", "err-soft"]) check("err", on, 4.5);
           for (const on of ["bg", "surface", "warn-soft"]) check("warn", on, 4.5);
           for (const token of ["toast-text", "toast-icon", "toast-action", "toast-err"]) check(token, "toast-bg", 4.5);
-          // The line (no branch colour, control edges) and the letter on an uncoloured mini card.
+          // The line (no branch colour, control edges).
           for (const on of ["bg", "surface", "canvas"]) check("line", on, 3);
-          check("lod-ink", "line", 3);
         });
       }
     }

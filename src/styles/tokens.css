@@ -39,8 +39,6 @@
   --toast-icon: #9fd0be;
   --toast-action: #9fd0be;
   --toast-err: #e08a7c;
-  /* The letter on an uncoloured mini card (LOD 3, D3); on a branch colour it is that colour's --bN-ink. */
-  --lod-ink: #ffffff;
 
   /* Archives opened together (a set): each archive's colour, taken from the branch colours so the tree's „Koloruj
      wg: archiwum” and the badges agree (bits.tsx ARCH_BRANCH). Follows the theme and the palette through the --b tokens. */
@@ -103,7 +101,6 @@
   --toast-icon: #2f5d50;
   --toast-action: #2f5d50;
   --toast-err: #a3392b;
-  --lod-ink: #10201a;
 
   color-scheme: dark;
 }

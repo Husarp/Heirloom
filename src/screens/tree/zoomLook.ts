@@ -90,15 +90,16 @@ export function branchShape(branch: number | null): MarkShape {
  */
 export function markFor(look: ZoomLook, color: string | null, branch: number | null, u: number, ink: LookInk): Mark {
   const col = color ?? ink.neutral;
-  const accent = (w: number, h: number, radius: number, pad: number) => ({ w: w + 2 * pad, h: h + 2 * pad, radius, width: 2.4, color: ink.accent });
-  const pad = Math.max(2.5, u * 0.31);
+  // The mockup's ring sizes run to the middle of the 2.4 px stroke; the border is drawn inside the box, so add half of it.
+  const accent = (w: number, h: number, radius: number, pad: number) => ({ w: w + 2 * (pad + 1.2), h: h + 2 * (pad + 1.2), radius: radius + 1.2, width: 2.4, color: ink.accent });
+  const pad = Math.max(2.5, u * 0.3125);
   if (look === "shapes" || look === "outline") {
     const shape = branchShape(branch);
     const filled = look === "shapes";
     const strokeWidth = filled ? 0 : Math.max(1.5, u * 0.2);
     // A diamond reaches further than a square of the same size, so a line meeting it still touches: its outer corners
     // lie 1.5 px (at u = 16) beyond the circle that touches the other shapes.
-    const side = shape === "diamond" ? (u + u * 0.1875 * 2) / Math.SQRT2 : u;
+    const side = shape === "diamond" ? (u + u * 0.1875) / Math.SQRT2 : u;
     const radius = shape === "circle" ? side / 2 : shape === "diamond" ? Math.max(0.5, u * 0.06) : Math.max(1, u * (filled ? 0.125 : 0.28));
     return {
       shape,

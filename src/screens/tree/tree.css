@@ -217,7 +217,7 @@
 .tree-card.full.partner:hover > * {
   opacity: 0.9;
 }
-.tree-card.mark.partner {
+.tree-card.mark.partner > :not(.mark-ring) {
   filter: grayscale(0.8);
 }
 

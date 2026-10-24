@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CSS_INK, DEFAULT_ZOOM_LOOK, fillCss, MARK_REF_UNIT, markFor, markScale, markUnit, markVariant, markVariants, paintCss, ZOOM_LOOKS, zoomLookOf, type LookInk } from "./zoomLook";
+import { CSS_INK, DEFAULT_ZOOM_LOOK, fillCss, MARK_REF_UNIT, markFor, markScale, markUnit, markVariant, markVariants, paintCss, ZOOM_LOOKS, zoomLookOf, type LookInk, type ZoomLook } from "./zoomLook";
 
 const LIGHT: LookInk = { canvas: "#f2eee7", surface: "#ffffff", line: "#857c6f", muted: "#554e45", accent: "#2f5d50", neutral: "#857c6f" };
 const DARK: LookInk = { canvas: "#1f1e1a", surface: "#24221e", line: "#7a7266", muted: "#bdb5a8", accent: "#7fb8a4", neutral: "#7a7266" };
@@ -66,7 +66,20 @@ describe("markFor", () => {
   });
   it("reaches a diamond further than a square so lines still touch it", () => {
     const d = markFor("shapes", "x", 5, 16, LIGHT);
-    expect((d.w * Math.SQRT2) / 2).toBeGreaterThan(8);
+    // Its tips lie 1.5 px beyond the circle of the other shapes (mockup: r + 1.5).
+    expect((d.w * Math.SQRT2) / 2).toBeCloseTo(16 / 2 + 1.5);
+  });
+});
+
+describe("the accent ring", () => {
+  it("runs to the middle of its stroke at the mockup's size, so the border sits half a stroke further out", () => {
+    // Mockup at u = 16: circle r + 5, tile and card 4 px around the box, to the middle of the 2.4 px stroke.
+    const ring = (look: ZoomLook) => markFor(look, "x", 0, 16, LIGHT).ring;
+    expect(ring("shapes").w).toBeCloseTo(16 + 2 * 5 + 2.4);
+    expect(ring("outline").w).toBeCloseTo(16 + 2 * 5 + 2.4);
+    expect(ring("tiles").w).toBeCloseTo(16 + 2 * 4 + 2.4);
+    expect(ring("tiles").radius).toBeCloseTo(8 + 1.2);
+    expect(ring("shapes").w / 2).toBeGreaterThan(markFor("shapes", "x", 2, 16, LIGHT).w * Math.SQRT2 / 2);
   });
 });
 

@@ -43,7 +43,6 @@
   --toast-icon: #9dbefb;
   --toast-action: #9dbefb;
   --toast-err: #ef958a;
-  --lod-ink: #ffffff;
 }
 
 :root[data-scheme="poranek"][data-theme="dark"],
@@ -81,7 +80,6 @@
   --toast-icon: #31559a;
   --toast-action: #31559a;
   --toast-err: #ac312a;
-  --lod-ink: #0e1624;
 }
 
 /* „Terakota”: warm and sunny: apricot-cream paper with a deeper sand sidebar and a baked-clay accent; the dark variant is coffee-with-milk brown. */
@@ -120,7 +118,6 @@
   --toast-icon: #edac97;
   --toast-action: #edac97;
   --toast-err: #ef958a;
-  --lod-ink: #ffffff;
 }
 
 :root[data-scheme="terakota"][data-theme="dark"],
@@ -158,7 +155,6 @@
   --toast-icon: #8d3c18;
   --toast-action: #8d3c18;
   --toast-err: #ac312a;
-  --lod-ink: #22110b;
 }
 
 /* „Wrzos”: soft and elegant: lilac-white with a violet accent; the dark variant is aubergine. */
@@ -197,7 +193,6 @@
   --toast-icon: #cdaeee;
   --toast-action: #cdaeee;
   --toast-err: #ef958a;
-  --lod-ink: #ffffff;
 }
 
 :root[data-scheme="wrzos"][data-theme="dark"],
@@ -235,7 +230,6 @@
   --toast-icon: #6e4188;
   --toast-action: #6e4188;
   --toast-err: #ac312a;
-  --lod-ink: #1b1220;
 }
 
 /* ---------- Accent colours ---------- */

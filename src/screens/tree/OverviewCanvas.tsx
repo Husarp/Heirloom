@@ -270,6 +270,7 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
         markUnder.renderable = hasUnder;
         for (const t of [...(old?.under ?? []), ...(old?.tint ?? [])]) t?.destroy(true);
         lastZoom = -1;
+        drawLine();
         drawSelection();
         dirty = true;
       };
@@ -387,7 +388,14 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
           directLine.stroke({ width: 2.5 / camera.zoom, color: accent, alpha: 0.85, join: "round" });
         }
         const [, x, y] = data.people[start];
-        directLine.roundRect(x - 6 / camera.zoom, y - 6 / camera.zoom, CARD_W + 12 / camera.zoom, CARD_H + 12 / camera.zoom, 10 / camera.zoom).stroke({ width: 2.5 / camera.zoom, color: accent });
+        const u = 1 / camera.zoom;
+        if (camera.zoom < MARK_ZOOM) {
+          // Around the mark: the size of its selection ring plus a 4 px gap (screen px), the stroke's inner edge on the gap.
+          const r = markFor(look, null, null, markUnit(camera.zoom), ink).ring;
+          const w = (r.w + 8 + 2.5) * u;
+          const h = (r.h + 8 + 2.5) * u;
+          directLine.roundRect(x + CARD_W / 2 - w / 2, y + CARD_H / 2 - h / 2, w, h, (r.radius + 4 + 1.25) * u).stroke({ width: 2.5 * u, color: accent });
+        } else directLine.roundRect(x - 6 * u, y - 6 * u, CARD_W + 12 * u, CARD_H + 12 * u, 10 * u).stroke({ width: 2.5 * u, color: accent });
       };
       api.current = { fit, centerOn, zoomBy: (f) => zoomAt(camera.zoom * f, view.w / 2, view.h / 2), showCluster, recolor, setLook, drawSelection, drawLine, setView };
       setLook(look);
@@ -559,6 +567,8 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
         observer.disconnect();
         canvas.removeEventListener("wheel", onWheel);
         api.current = null;
+        BitmapFont.uninstall(nameFont);
+        BitmapFont.uninstall(smallFont);
         app.destroy(true, { children: true, texture: true, textureSource: true });
       };
     })();
