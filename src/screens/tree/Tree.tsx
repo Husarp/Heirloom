@@ -453,6 +453,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
               focus={focus}
               selected={selected}
               colorFor={overviewColor}
+              zoomLook={zoomLookOf(display.treeZoomLook)}
               onSelect={(id) => {
                 setSelected(id);
                 setPanelOpen(true);

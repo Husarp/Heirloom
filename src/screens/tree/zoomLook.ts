@@ -59,6 +59,24 @@ export function markUnit(zoom: number): number {
   return Math.min(16, Math.max(7, 72 * zoom * 0.8));
 }
 
+/** The base size the canvas textures of the marks are drawn at; a sprite is scaled to the size of the zoom. */
+export const MARK_REF_UNIT = 16;
+
+/** The scale of a mark texture (drawn at `MARK_REF_UNIT`) for a world drawn at `zoom`: the mark's screen size, undone by 1 / zoom. */
+export function markScale(zoom: number): number {
+  return markUnit(zoom) / MARK_REF_UNIT / zoom;
+}
+
+/** How many textures of a look differ by the person's branch: A and B tell branches apart by shape, C and D don't. */
+export function markVariants(look: ZoomLook): number {
+  return look === "shapes" || look === "outline" ? 3 : 1;
+}
+
+/** Which of the look's `markVariants` textures belongs to a branch. */
+export function markVariant(look: ZoomLook, branch: number): number {
+  return markVariants(look) === 1 ? 0 : ((branch % 3) + 3) % 3;
+}
+
 const SHAPES: MarkShape[] = ["circle", "square", "diamond"];
 
 /** The shape that tells branches apart without colour (A and B): by branch colour index, circle if there is none. */

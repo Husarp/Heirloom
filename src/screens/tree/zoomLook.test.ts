@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CSS_INK, DEFAULT_ZOOM_LOOK, fillCss, markFor, markUnit, paintCss, ZOOM_LOOKS, zoomLookOf, type LookInk } from "./zoomLook";
+import { CSS_INK, DEFAULT_ZOOM_LOOK, fillCss, MARK_REF_UNIT, markFor, markScale, markUnit, markVariant, markVariants, paintCss, ZOOM_LOOKS, zoomLookOf, type LookInk } from "./zoomLook";
 
 const LIGHT: LookInk = { canvas: "#f2eee7", surface: "#ffffff", line: "#857c6f", muted: "#554e45", accent: "#2f5d50", neutral: "#857c6f" };
 const DARK: LookInk = { canvas: "#1f1e1a", surface: "#24221e", line: "#7a7266", muted: "#bdb5a8", accent: "#7fb8a4", neutral: "#7a7266" };
@@ -80,5 +80,22 @@ describe("markUnit and paintCss", () => {
   it("mixes a see-through paint with transparent", () => {
     expect(paintCss({ color: "#fff", alpha: 1 })).toBe("#fff");
     expect(paintCss({ color: "#fff", alpha: 0.55 })).toBe("color-mix(in srgb, #fff 55%, transparent)");
+  });
+});
+
+describe("markScale and markVariant (canvas textures)", () => {
+  it("scales a texture drawn at the reference size to the mark's screen size, undone by the zoom", () => {
+    for (const zoom of [0.01, 0.1, 0.2, 0.39]) expect(markScale(zoom) * zoom * MARK_REF_UNIT).toBeCloseTo(markUnit(zoom));
+  });
+  it("tells branches apart by shape only in Kształty and Obwódka", () => {
+    expect([0, 1, 2, 3, 4].map((b) => markVariant("shapes", b))).toEqual([0, 1, 2, 0, 1]);
+    expect(markVariants("outline")).toBe(3);
+    for (const look of ["tiles", "cards"] as const) {
+      expect(markVariants(look)).toBe(1);
+      expect(markVariant(look, 7)).toBe(0);
+    }
+  });
+  it("picks the variant whose texture has the shape the branch gets in the focus views", () => {
+    for (const b of [1, 2, 3, 8, 12]) expect(["circle", "square", "diamond"][markVariant("outline", b)]).toBe(markFor("outline", null, b, 16, LIGHT).shape);
   });
 });
