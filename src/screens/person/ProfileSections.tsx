@@ -47,6 +47,7 @@ import { Lightbox } from "../media/Lightbox";
 import { UndescribedChip } from "../todo/UndescribedChip";
 import { runEdit } from "../media/shared";
 import { RelativeTools } from "./RelativeTools";
+import { CropButton, useProfileCrop } from "./ProfileCrop";
 import { FactCellEditor, FactForm, factKey } from "./FactEdit";
 import { moveNextTo, sameOrder, shiftBy, useTileDrag } from "./galleryOrder";
 import { SectionEditButton, SectionFoot, useDraftGuard, useSection, type SectionEdit } from "./sectionEdit";
@@ -825,6 +826,7 @@ export function GallerySection({ data }: Props) {
   const canEdit = useStore((s) => s.mode === "edit" && !(s.archive?.combined || s.archive?.readOnly));
   const sec = useSection(`${data.person.id}:gallery`, "Galeria");
   const setAsk = useStore((s) => s.setAsk);
+  const crop = useProfileCrop(data);
   const [all, setAll] = useState(false);
   const [viewing, setViewing] = useState<number | null>(null);
   // The order just chosen, shown at once while the profile is fetched again.
@@ -952,6 +954,7 @@ export function GallerySection({ data }: Props) {
               </button>
               <span className="gallery-spot-label">Profilowe</span>
               {star(profile)}
+              {crop.start && <CropButton onClick={crop.start} />}
             </div>
             <span className="ellipsis" style={{ fontSize: 13 }}>
               {profile.caption || "bez podpisu"}
@@ -1006,6 +1009,7 @@ export function GallerySection({ data }: Props) {
       </div>
       {drag && dragged && createPortal(<div className="gallery-ghost" style={{ left: drag.x, top: drag.y }}><Thumb path={dragged.path} size={256} icon={<ImageIcon size={18} />} style={{ width: "100%", height: "100%" }} /></div>, document.body)}
       <Foot edit={sec} />
+      {crop.dialog}
       {viewing != null && (
         <Lightbox items={list.map((g) => ({ id: g.id, path: g.path, title: g.caption, date: g.date }))} index={viewing} onClose={() => setViewing(null)} title={data.person.name} />
       )}

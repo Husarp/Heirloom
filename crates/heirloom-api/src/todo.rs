@@ -275,7 +275,6 @@ mod tests {
         assert_eq!(depth(&api), depth0);
         // Taken by later tickets.
         assert_eq!(api.call("media.editPhoto", json!({ "id": "@O1@" })).unwrap_err().code, "unknown_method");
-        assert_eq!(api.call("media.setCrop", json!({ "id": "@O1@" })).unwrap_err().code, "unknown_method");
     }
 
     #[test]

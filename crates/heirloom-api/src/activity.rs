@@ -76,6 +76,11 @@ fn fields(d: &Derived, text: Option<&str>) -> Vec<(String, String)> {
                 let title = link.title.clone().or_else(|| d.view.media.get(&link.object).and_then(|m| m.title.clone())).unwrap_or_else(|| link.object.clone());
                 let kind = d.view.media.get(&link.object).map_or("Plik", |m| if m.kind == view::MediaKind::Photo { "Zdjęcie" } else { "Dokument" });
                 out.push((kind.into(), title));
+                if let Some(c) = link.crop {
+                    // A width or height of 0 or none goes to the image's edge.
+                    let side = |n: Option<u32>| n.filter(|&n| n > 0).map_or("…".to_string(), |n| n.to_string());
+                    out.push(("Kadr zdjęcia profilowego".into(), format!("{}, {}, {}×{}", c.left, c.top, side(c.width), side(c.height))));
+                }
             }
             for t in &details.texts {
                 if let view::TextRef::Shared(x) = t {

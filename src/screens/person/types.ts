@@ -181,7 +181,9 @@ export interface Profile {
   age: string | null;
   generationBranch: string;
   tags: string[];
-  portrait: { path: string; caption: string | null; date: string | null } | null;
+  /** `path` is the photo file; `thumb` how to ask for it as a thumbnail (`crop:L,T,W,H/<path>` when it has a crop);
+   *  `crop` is that crop as fractions 0–1 of the upright image. */
+  portrait: { path: string; thumb: string; crop: { x: number; y: number; w: number; h: number } | null; caption: string | null; date: string | null } | null;
   summary: TextItem | null;
   facts: Fact[];
   family: FamilyGroup[];

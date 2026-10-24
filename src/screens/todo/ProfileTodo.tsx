@@ -1,6 +1,6 @@
 // „Do uzupełnienia” on a profile: the note at the top of the article and the „⋯” menu in the hero's buttons.
 
-import { ListTodo, MoreHorizontal } from "lucide-react";
+import { Crop, ListTodo, MoreHorizontal } from "lucide-react";
 import { useState } from "react";
 import { call } from "../../api/transport";
 import { afterChange, useStore } from "../../app/store";
@@ -52,7 +52,7 @@ export function TodoNote({ data }: { data: Profile }) {
 }
 
 /** The „⋯” menu at the end of the hero's buttons: a small list, more items can follow. */
-export function ProfileMenu({ data }: { data: Profile }) {
+export function ProfileMenu({ data, onCrop }: { data: Profile; onCrop?: (() => void) | null }) {
   const allowed = useTodoAllowed();
   const [open, setOpen] = useState(false);
   const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
@@ -78,6 +78,19 @@ export function ProfileMenu({ data }: { data: Profile }) {
             <ListTodo size={14} />
             {unfinished ? "Gotowe — usuń z „Do uzupełnienia”" : "Do dokończenia"}
           </button>
+          {onCrop && (
+            <button
+              className="menu-item"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onCrop();
+              }}
+            >
+              <Crop size={14} />
+              Kadruj zdjęcie profilowe
+            </button>
+          )}
         </div>
       )}
     </div>

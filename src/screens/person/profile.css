@@ -1055,3 +1055,29 @@
   border: 2px dashed var(--border);
   background: transparent;
 }
+
+/* „Kadruj” in the corner of the profile photo (ProfileCrop.tsx). */
+.portrait-frame {
+  position: relative;
+}
+.crop-btn {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.crop-btn:hover {
+  background: var(--surface2);
+}
