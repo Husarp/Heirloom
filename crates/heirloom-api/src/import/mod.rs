@@ -1212,6 +1212,7 @@ mod tests {
         // Another photo replaces the first: one profile photo per person.
         let state = call(&mut session, &mut draft, "import.profile", &json!({ "persons": [ids[1]], "file": "M002" })).unwrap();
         assert_eq!(profile_of(&state, &ids[1]), json!("M002"));
+    }
 
     #[test]
     fn a_profile_crop_goes_with_its_file_is_refused_without_one_and_survives_adding_files() {
@@ -1244,6 +1245,5 @@ mod tests {
         call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": "M001", "crop": crop })).unwrap();
         let state = call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": "M001", "crop": null })).unwrap();
         assert_eq!(crop_of(&state), Value::Null);
-    }
     }
 }

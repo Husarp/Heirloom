@@ -473,16 +473,18 @@ pub(crate) fn media_people(d: &Derived) -> HashMap<&str, Vec<usize>> {
 }
 
 /// A photo or document record that still needs a caption: none, or just the file's name (other programs write that
-/// as the title). Objects written inside a person (id with `#`) and „inne” never count.
+/// as the title; after an edit that is the original's name too). Objects written inside a person (id with `#`) and
+/// „inne” never count.
 pub fn undescribed(m: &MediaObject) -> bool {
     if m.id.contains('#') || m.kind == MediaKind::Other {
         return false;
     }
     let Some(title) = m.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) else { return true };
-    let Some(name) = m.file.as_deref().and_then(|f| f.rsplit(['/', '\\']).next()) else { return false };
-    let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
     let title = title.to_lowercase();
-    title == name.to_lowercase() || title == stem.to_lowercase()
+    [m.file.as_deref(), m.original.as_deref()].into_iter().flatten().filter_map(|f| f.rsplit(['/', '\\']).next()).any(|name| {
+        let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+        title == name.to_lowercase() || title == stem.to_lowercase()
+    })
 }
 
 pub(crate) fn media_json(d: &Derived, id: &str, roots: &FileRoots, people_of: &HashMap<&str, Vec<usize>>) -> Option<Value> {
@@ -758,6 +760,7 @@ mod tests {
 0 @O6@ OBJE\n1 FILE media/skan.pdf\n2 FORM application/pdf\n3 MEDI MANUSCRIPT\n1 TITL Akt chrztu\n\
 0 @O7@ OBJE\n1 FILE media/rzecz.dat\n2 FORM application/octet-stream\n3 MEDI OTHER\n\
 0 @O8@ OBJE\n1 FILE media/b.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n1 _HLM_CATEGORY Pocztówki\n\
+0 @O9@ OBJE\n1 FILE media/IMG_0042%20(edytowane).jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n2 TITL IMG_0042.jpg\n1 FILE media/IMG_0042.jpg\n2 FORM image/jpeg\n2 _HLM_VERSION original\n\
 0 @I1@ INDI\n1 NAME Jan /Nowak/\n1 OBJE\n2 FILE media/w.jpg\n2 FORM image/jpeg\n0 TRLR\n";
         let d = crate::derive::build(&heirloom_core::gedcom::Document::from_bytes(text.as_bytes()).0);
         let flag = |id: &str| undescribed(&d.view.media[id]);
@@ -768,6 +771,7 @@ mod tests {
         assert!(flag("@O5@") && !flag("@O6@"), "documents too; the object's own TITL counts when the file has none");
         assert!(!flag("@O7@"), "„inne” never");
         assert!(flag("@O8@"), "an own category counts by the kind it behaves like");
+        assert!(flag("@O9@"), "an edited photo whose caption is its original's file name stays undescribed");
         assert!(!flag("@I1@#0"), "an object written inside a person is no record");
         let item = media_json(&d, "@O2@", &FileRoots::one(std::path::PathBuf::from("/nonexistent")), &HashMap::new()).unwrap();
         assert_eq!((item["undescribed"].as_bool(), item["ignored"].as_bool(), item["edited"].as_bool(), item["original"].is_null()), (Some(true), Some(false), Some(false), true));

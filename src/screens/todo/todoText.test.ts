@@ -38,7 +38,7 @@ describe("texts", () => {
 describe("noteText", () => {
   it("names the import and warns when outside the family", () => {
     expect(noteText({ linked: false, batch: "Nowak" })).toBe(
-      "Ta osoba pochodzi z importu „Nowak” — materiały tylko o niej wspominają. Nie jest jeszcze połączona z rodziną, więc nie widać jej w drzewie.",
+      "Ta osoba pochodzi z importu „Nowak” i czeka na uzupełnienie. Nie jest jeszcze połączona z rodziną, więc nie widać jej w drzewie.",
     );
   });
   it("says it was marked by hand without a batch", () => {

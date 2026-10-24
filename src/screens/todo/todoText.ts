@@ -34,6 +34,6 @@ export const TOAST_RESTORED = "Przywrócono.";
 
 /** The profile note: where the person comes from, and that they are not in the family yet. */
 export function noteText(todo: { linked: boolean; batch: string | null }): string {
-  const origin = todo.batch ? `Ta osoba pochodzi z importu „${todo.batch}” — materiały tylko o niej wspominają.` : "Oznaczono ją do dokończenia.";
+  const origin = todo.batch ? `Ta osoba pochodzi z importu „${todo.batch}” i czeka na uzupełnienie.` : "Oznaczono ją do dokończenia.";
   return todo.linked ? origin : `${origin} Nie jest jeszcze połączona z rodziną, więc nie widać jej w drzewie.`;
 }

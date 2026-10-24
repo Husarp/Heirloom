@@ -135,10 +135,11 @@ export function Lightbox({ items, index, onClose, title }: { items: LightboxItem
 
   // Keys go to the lightbox first (capture), so Esc and the arrows don't also reach the screen underneath. Keys
   // meant for something opened above it (Ctrl K, a dialog) are left alone; `body` means a focused button went away.
+  // While the photo editor is open it owns the keys: a focus drop to `body` must not close the lightbox under it.
   const onKey = useRef<(e: KeyboardEvent) => void>(() => {});
   onKey.current = (e) => {
     const target = e.target as Node;
-    if (e.ctrlKey || e.metaKey || (target !== document.body && !rootRef.current?.contains(target))) return;
+    if (editing || e.ctrlKey || e.metaKey || (target !== document.body && !rootRef.current?.contains(target))) return;
     const actions: Record<string, () => void> = {
       Escape: onClose,
       ArrowLeft: () => step(-1),

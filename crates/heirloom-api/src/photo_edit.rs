@@ -130,27 +130,36 @@ fn files_of(s: &mut Session, id: &str) -> Result<(Option<String>, Option<String>
     Ok((media.file.clone(), media.original.clone()))
 }
 
-/// The ids of the people whose link to the object has a `CROP` (it was cut from the old pixels).
-fn cropped_links(s: &Session, id: &str) -> Vec<String> {
-    s.archive
-        .doc
-        .records
-        .iter()
-        .filter(|r| r.tag == "INDI")
-        .filter(|r| r.children.iter().any(|c| c.tag == "OBJE" && c.pointer() == Some(id) && c.child("CROP").is_some()))
-        .filter_map(|r| r.xref.clone())
-        .collect()
+/// Whether a link to the object, at any depth under the node (an event's `OBJE` too), has a `CROP`.
+fn has_cropped_link(node: &Node, id: &str) -> bool {
+    node.children.iter().any(|c| (c.tag == "OBJE" && c.pointer() == Some(id) && c.child("CROP").is_some()) || has_cropped_link(c, id))
 }
 
-/// Takes the `CROP` off every person's link to the object; how many links had one.
-fn drop_crops(changes: &mut Changes, id: &str, people: &[String]) -> Result<usize, ApiError> {
+/// The ids of the records (people, families, sources, ...) with a link to the object that has a `CROP` (it was cut
+/// from the old pixels).
+fn cropped_links(s: &Session, id: &str) -> Vec<String> {
+    s.archive.doc.records.iter().filter(|r| has_cropped_link(r, id)).filter_map(|r| r.xref.clone()).collect()
+}
+
+fn remove_crops(node: &mut Node, id: &str) -> usize {
     let mut dropped = 0;
-    for person in people {
-        for link in changes.get(person)?.children.iter_mut().filter(|c| c.tag == "OBJE" && c.pointer() == Some(id)) {
-            let before = link.children.len();
-            link.children.retain(|c| c.tag != "CROP");
-            dropped += usize::from(link.children.len() < before);
+    for child in &mut node.children {
+        if child.tag == "OBJE" && child.pointer() == Some(id) {
+            let before = child.children.len();
+            child.children.retain(|c| c.tag != "CROP");
+            dropped += usize::from(child.children.len() < before);
         }
+        dropped += remove_crops(child, id);
+    }
+    dropped
+}
+
+/// Takes the `CROP` off every link to the object in the given records; how many links had one (all kinds of records
+/// count, not only people's).
+fn drop_crops(changes: &mut Changes, id: &str, records: &[String]) -> Result<usize, ApiError> {
+    let mut dropped = 0;
+    for record in records {
+        dropped += remove_crops(changes.get(record)?, id);
     }
     Ok(dropped)
 }
@@ -201,18 +210,20 @@ fn write_new(s: &Session, dir: &str, name: &str, bytes: &[u8]) -> Result<(String
     made.map(|file| (relative, file)).ok_or_else(|| ApiError::new("io", format!("Nie można zapisać pliku {name}.")))
 }
 
-/// The new file becomes the first `FILE` (a copy of the shown one, so its caption and kind stay); the shown one follows
-/// it as the original (the first time) or an earlier version, without the caption. Returns how many links lost a crop.
+/// The new file becomes the first `FILE`, with the shown one's FORM (and its MEDI) and caption only: size, checksum and
+/// other programs' substructures belong to the old file and stay with it. The shown one follows it as the original (the
+/// first time) or an earlier version, without the caption. Returns how many links lost a crop.
 fn record_new_version(changes: &mut Changes, id: &str, relative: &str, people: &[String]) -> Result<usize, ApiError> {
     let object = changes.get(id)?;
     let first = first_file(object, id)?;
     let has_original = object.children_tagged("FILE").any(|f| f.child_value("_HLM_VERSION").map(str::trim) == Some("original"));
-    let mut shown = object.children[first].clone();
-    shown.value = Some(file_uri(relative));
-    set_version(&mut shown, None);
-    match shown.child_mut("FORM") {
-        Some(form) => form.value = Some(media_type(relative).to_string()),
-        None => shown.children.insert(0, Node::with_value("FORM", media_type(relative))),
+    let mut shown = Node::with_value("FILE", &file_uri(relative));
+    let mut form = object.children[first].child("FORM").cloned().unwrap_or_else(|| Node::new("FORM"));
+    form.value = Some(media_type(relative).to_string());
+    form.children.retain(|c| c.tag == "MEDI");
+    shown.children.push(form);
+    if let Some(title) = object.children[first].child("TITL") {
+        shown.children.push(title.clone());
     }
     let old = &mut object.children[first];
     old.children.retain(|c| c.tag != "TITL");
@@ -284,7 +295,7 @@ fn restore_original(s: &mut Session, args: &Value) -> ApiResult {
     let (_, original) = files_of(s, &id)?;
     let original = original.ok_or_else(|| ApiError::new("not_edited", "To zdjęcie nie było edytowane."))?;
     if !s.file_roots().resolve(&original).is_file() {
-        return Err(ApiError::new("not_found", format!("Nie ma pliku oryginału: {original}. Sprawdź „Brakujące pliki”.")));
+        return Err(ApiError::new("not_found", format!("Nie ma pliku oryginału: {original}. Jeśli go przeniesiono, odłóż go na to miejsce.")));
     }
     let people = cropped_links(s, &id);
     let mut changes = Changes::new(&s.archive.doc);
@@ -584,6 +595,32 @@ mod tests {
     }
 
     #[test]
+    fn a_new_version_copies_only_the_form_and_caption_and_every_cropped_link_loses_its_crop() {
+        // The old FILE carries another program's substructures; a family and an event also link the photo with a crop.
+        let ged = GED
+            .replace("3 MEDI PHOTO\n2 TITL Józef w mundurze\n", "3 MEDI PHOTO\n4 PHRASE zdjęcie\n2 TITL Józef w mundurze\n2 _SIZE 12345\n2 TRAN media/jozef.png\n3 FORM image/png\n")
+            .replace(
+                "0 TRLR\n",
+                "0 @F1@ FAM\n1 HUSB @I1@\n1 WIFE @I2@\n1 OBJE @O1@\n2 CROP\n3 TOP 1\n3 LEFT 1\n3 HEIGHT 5\n3 WIDTH 5\n1 MARR\n2 OBJE @O1@\n3 CROP\n4 TOP 0\n1 OBJE @O4@\n2 CROP\n3 TOP 7\n0 TRLR\n",
+            );
+        let (_dir, mut api) = open(&ged, &["media/jozef.jpg", "media/stara.bmp"], Some("inPlace"));
+        let done = api.call("media.editPhoto", json!({ "id": "@O1@", "rotate": 90 })).unwrap();
+        assert_eq!(done["droppedCrops"], 3, "the person's, the family's and the event's link (all kinds of records count)");
+        let text = record(&api, "@O1@");
+        assert_eq!(text.matches("_SIZE").count(), 1, "{text}");
+        assert_eq!(text.matches("TRAN").count(), 1, "{text}");
+        let session = api.session.as_ref().unwrap();
+        let object = session.archive.doc.record("@O1@").unwrap();
+        let new = object.children_tagged("FILE").next().unwrap();
+        let tags: Vec<&str> = new.children.iter().map(|c| c.tag.as_str()).collect();
+        assert_eq!(tags, ["FORM", "TITL"], "{text}");
+        assert_eq!(new.child("FORM").unwrap().child("MEDI").unwrap().child_value("PHRASE"), Some("zdjęcie"), "{text}");
+        let family = heirloom_core::gedcom::line::write(&[session.archive.doc.record("@F1@").unwrap().clone()], heirloom_core::gedcom::line::Eol::Lf, true);
+        assert_eq!(family.matches("CROP").count(), 1, "only the link to the other photo keeps its crop: {family}");
+        assert!(!record(&api, "@I1@").contains("CROP"));
+    }
+
+    #[test]
     fn wrong_requests_are_refused_and_change_nothing() {
         let (dir, mut api) = in_place();
         let depth0 = depth(&api);
@@ -611,7 +648,7 @@ mod tests {
         api.call("media.editPhoto", json!({ "id": "@O1@", "rotate": 270 })).unwrap();
         std::fs::remove_file(dir.path().join("a/media/jozef.jpg")).unwrap();
         let error = api.call("media.restoreOriginal", json!({ "id": "@O1@" })).unwrap_err();
-        assert_eq!(error.message, "Nie ma pliku oryginału: media/jozef.jpg. Sprawdź „Brakujące pliki”.");
+        assert_eq!(error.message, "Nie ma pliku oryginału: media/jozef.jpg. Jeśli go przeniesiono, odłóż go na to miejsce.");
         assert_eq!(depth(&api), depth0 + 1);
     }
 

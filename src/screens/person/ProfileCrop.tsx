@@ -17,7 +17,8 @@ export function useProfileCrop(data: Profile): { start: (() => void) | null; dia
   const portrait = data.portrait;
   // The gallery item of the profile photo has the media id the portrait lacks.
   const photoId = data.gallery.find((g) => g.profile)?.id;
-  if (!canEdit || !portrait || !photoId) return { start: null, dialog: null };
+  // An object written inside the person (id with `#`) has no record of its own to cut.
+  if (!canEdit || !portrait || !photoId || photoId.includes("#")) return { start: null, dialog: null };
 
   const person = data.person.id;
   const save = (crop: Crop | null) => {

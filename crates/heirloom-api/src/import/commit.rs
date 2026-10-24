@@ -1583,6 +1583,7 @@ mod tests {
         assert_eq!(refused(&mut s, &mut draft, json!({ "id": "P7", "given": "Ewa" })).code, "bad_args");
         assert_eq!(refused(&mut s, &mut draft, json!({ "id": "P2", "given": "Jan" })).code, "bad_args");
         assert_eq!(state["persons"].as_array().unwrap().len(), 3);
+        assert_eq!(state["batch"]["counts"]["persons"], 3);
 
         let state = call(&mut s, &mut draft, "import.addMentioned", json!({ "id": "P9", "given": "Antoni", "surname": "Maj", "sex": "M" })).unwrap();
         assert!(warnings(&state).is_empty(), "{:?}", warnings(&state));
@@ -1591,6 +1592,7 @@ mod tests {
         assert_eq!((p9["name"].as_str(), p9["sex"].as_str(), p9["decision"].as_str()), (Some("Antoni Maj"), Some("M"), Some("new")));
         assert_eq!(p9["mentioned"], json!({ "by": "P1", "byName": "Józef Kowalski", "as": null }));
         assert_eq!(state["summary"]["unfinished"], 3);
+        assert_eq!(state["batch"]["counts"]["persons"], 4, "the header's count follows the added person");
 
         // Adding the missing part or files reloads the batch: the person comes back; a plain load forgets them.
         let state = call(&mut s, &mut draft, "import.load", json!({ "texts": [], "paths": [], "add": true })).unwrap();
