@@ -7,9 +7,12 @@ export interface ImportIssue {
   level: "error" | "warning" | "info";
   message: string;
   reference: string;
-  /** `paste` (the missing part), `show`, `fix` (a date written as text). */
-  action: "paste" | "show" | "skip" | "fix" | null;
+  /** `paste` (the missing part), `show`, `fix` (a date written as text), `mention` (add the unknown person as someone to complete). */
+  action: "paste" | "show" | "skip" | "fix" | "mention" | null;
+  /** The person's id for `mention`. */
   target: string | null;
+  /** The mention's visible text for `mention` (to prefill the name). */
+  detail?: string | null;
 }
 
 export type Answer = "yes" | "no" | "unknown";
@@ -57,6 +60,8 @@ export interface ImportPerson {
   excluded: boolean;
   excludedFields: string[];
   summary: string | null;
+  /** The material only mentions this person: where (the first mention) and how they are related, in its words. */
+  mentioned: { by: string | null; byName: string | null; as: string | null } | null;
 }
 
 export interface ImportFile {
@@ -135,7 +140,7 @@ export interface ImportState {
   files: ImportFile[];
   undecided: number;
   unresolved: { mentions: number; questions: number };
-  summary: { new: number; merged: number; skipped: number; events: number; relationships: number; texts: number; files: number; duplicates: number; sources: number };
+  summary: { new: number; merged: number; skipped: number; unfinished: number; events: number; relationships: number; texts: number; files: number; duplicates: number; sources: number };
 }
 
 export interface PastImport {

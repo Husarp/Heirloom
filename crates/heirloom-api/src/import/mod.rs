@@ -77,6 +77,9 @@ pub struct Draft {
     /// Dropped paths that are gone: shown in step 1 so they can be taken off the list.
     pub missing: Vec<PathBuf>,
     pub exclude: Vec<PathBuf>,
+    /// People typed in step 2 for a mention of someone the batch doesn't have (`import.addMentioned`): a reload that
+    /// adds to the batch puts them back while their id is still mentioned and still not in the batch.
+    pub added: Vec<format::Person>,
 }
 
 /// A file picked for M-number `n` (it replaces any other file with that number).
@@ -155,6 +158,9 @@ pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Val
                 new.answers = old.answers;
                 new.file_choices = old.file_choices;
                 new.profile.extend(old.profile);
+                for person in old.added {
+                    let _ = add_mentioned(s, &mut new, person);
+                }
                 for (id, decision) in old.decisions {
                     if new.decisions.contains_key(&id) {
                         new.decisions.insert(id, decision);
@@ -311,6 +317,26 @@ pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Val
                     let n = m_number(&label).ok_or_else(|| ApiError::bad_args("file"))?;
                     attach(d, n, PathBuf::from(req(args, "path")?))?;
                 }
+                "import.addMentioned" => {
+                    let id = req(args, "id")?;
+                    let text = |key: &str| args.get(key).and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty()).map(str::to_string);
+                    let (given, surname) = (text("given"), text("surname"));
+                    if given.is_none() && surname.is_none() {
+                        return Err(ApiError::new("bad_args", "Podaj imię albo nazwisko."));
+                    }
+                    let sex = match args.get("sex").and_then(Value::as_str) {
+                        Some("M") => "M",
+                        Some("F") => "F",
+                        _ => "U",
+                    };
+                    let person = format::Person {
+                        id,
+                        names: vec![format::Name { kind: Some("birth".into()), given, surname, ..Default::default() }],
+                        sex: Some(sex.into()),
+                        ..Default::default()
+                    };
+                    add_mentioned(s, d, person)?;
+                }
                 "import.fixDate" => {
                     // A date the AI wrote as free text, set by hand in step 2.
                     let id = req(args, "event")?;
@@ -396,6 +422,7 @@ fn load(s: &mut Session, texts: &[String], paths: &[PathBuf], exclude: &[PathBuf
             reference: "Wklejony tekst".into(),
             action: None,
             target: None,
+            detail: None,
         });
     }
     let roots = s.file_roots();
@@ -412,6 +439,7 @@ fn load(s: &mut Session, texts: &[String], paths: &[PathBuf], exclude: &[PathBuf
                 reference: format!("Plik {}", f.name),
                 action: None,
                 target: None,
+                detail: None,
             });
             duplicates.insert(m_label(n), existing);
         }
@@ -424,10 +452,7 @@ fn load(s: &mut Session, texts: &[String], paths: &[PathBuf], exclude: &[PathBuf
     }
     matching::family_boost(d, &batch.merged, &mut candidates);
     for p in &batch.merged.persons {
-        let list = &candidates[&p.id];
-        let kind = if matching::status_for(list.first()) == "new" { Kind::New } else { Kind::Undecided };
-        let target = list.first().map(|c| c.xref.clone());
-        decisions.insert(p.id.clone(), Decision { kind, target, fields: HashMap::new(), excluded: false, excluded_fields: HashSet::new() });
+        decisions.insert(p.id.clone(), first_decision(&candidates[&p.id]));
     }
     // The AI's profile-photo suggestions.
     let mut profile = HashMap::new();
@@ -450,6 +475,7 @@ fn load(s: &mut Session, texts: &[String], paths: &[PathBuf], exclude: &[PathBuf
                     reference: format!("Osoba {} · {}", role.p, who.trim()),
                     action: None,
                     target: Some(role.p.clone()),
+                    detail: None,
                 });
             }
         }
@@ -475,7 +501,41 @@ fn load(s: &mut Session, texts: &[String], paths: &[PathBuf], exclude: &[PathBuf
         skipped,
         missing: inputs.missing,
         exclude: exclude.to_vec(),
+        added: Vec::new(),
     }
+}
+
+/// A person's decision before the user decides: new when nothing in the archive is close, else waiting.
+fn first_decision(candidates: &[matching::Candidate]) -> Decision {
+    let kind = if matching::status_for(candidates.first()) == "new" { Kind::New } else { Kind::Undecided };
+    Decision { kind, target: candidates.first().map(|c| c.xref.clone()), fields: HashMap::new(), excluded: false, excluded_fields: HashSet::new() }
+}
+
+/// The first text of the batch that mentions `id` (`[…](person:P9)`).
+fn first_text_mentioning<'a>(batch: &'a Part, id: &str) -> Option<&'a format::Text> {
+    batch.texts.iter().find(|t| check::mention_links(t.md.as_deref().unwrap_or("")).iter().any(|(_, _, _, mentioned)| mentioned == id))
+}
+
+/// Adds `person` to the batch as a person only mentioned, for an id some text mentions that the batch doesn't have: its
+/// candidates and decision come as for any person of a load, its warnings go, and the draft remembers it.
+fn add_mentioned(s: &mut Session, d: &mut Draft, mut person: format::Person) -> Result<(), ApiError> {
+    let batch = &d.batch.merged;
+    if batch.persons.iter().any(|p| p.id == person.id) {
+        return Err(ApiError::new("bad_args", "Ta osoba jest już w paczce."));
+    }
+    let Some(text) = first_text_mentioning(batch, &person.id) else {
+        return Err(ApiError::new("bad_args", format!("Żaden tekst z paczki nie wspomina o osobie {}.", person.id)));
+    };
+    person.mentioned = Some(vec![format::Mention { by: text.person.clone(), relation: None }]);
+    let archive = s.derived();
+    let candidates = matching::candidates(archive, &matching::surname_keys(archive), batch, &person);
+    d.decisions.insert(person.id.clone(), first_decision(&candidates));
+    d.candidates.insert(person.id.clone(), candidates);
+    d.issues.retain(|i| !(i.action == Some("mention") && i.target.as_deref() == Some(person.id.as_str())));
+    d.added.retain(|p| p.id != person.id);
+    d.added.push(person.clone());
+    d.batch.merged.persons.push(person);
+    Ok(())
 }
 
 /// Step 1's list of everything dropped or pasted (design 17d): each AI answer with its part and counts, each file with
@@ -917,6 +977,11 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
             "excluded": decision.is_some_and(|x| x.excluded),
             "excludedFields": decision.map(|x| x.excluded_fields.iter().cloned().collect::<Vec<_>>()).unwrap_or_default(),
             "summary": p.summary,
+            "mentioned": p.mentioned.as_ref().map(|list| {
+                let first = list.first();
+                let by = first.and_then(|m| m.by.as_deref());
+                json!({ "by": by, "byName": by.and_then(|by| batch.persons.iter().find(|x| x.id == by)).map(batch_name), "as": first.and_then(|m| m.relation.as_deref()) })
+            }),
         }));
     }
 
@@ -996,6 +1061,8 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
     let mentions_plain = draft.issues.iter().filter(|i| i.message.starts_with("Wzmianka o")).count();
     let unanswered = batch.questions.iter().filter(|q| !draft.answers.get(&q.id).is_some_and(|a| !a.0.is_empty())).count();
     let count_kind = |k: Kind| draft.decisions.values().filter(|x| x.kind == k && !x.excluded).count();
+    // People saved as new that the material only mentions: they land in „Do uzupełnienia”.
+    let unfinished = batch.persons.iter().filter(|p| p.mentioned.is_some() && draft.decisions.get(&p.id).is_some_and(|x| x.kind == Kind::New && !x.excluded)).count();
     let inputs = input_list(draft, &files);
     Ok(json!({
         "loadId": draft.load_id,
@@ -1029,6 +1096,7 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
             "new": count_kind(Kind::New),
             "merged": count_kind(Kind::Merge),
             "skipped": count_kind(Kind::Skip) + draft.decisions.values().filter(|x| x.excluded).count(),
+            "unfinished": unfinished,
             "events": batch.events.len(),
             "relationships": batch.relationships.len(),
             "texts": batch.texts.len(),

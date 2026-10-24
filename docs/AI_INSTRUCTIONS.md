@@ -3,7 +3,7 @@
 > *Część A jest dla osoby, która szuka w aktach. Część B wkleja się do czatu AI (ChatGPT, Claude, Gemini). Odpowiedź
 > czatu wczytuje program Heirloom (Import).*
 
-**Wersja instrukcji: 2026-10-19 · format: heirloom-import 1.0**
+**Wersja instrukcji: 2026-10-24 · format: heirloom-import 1.0**
 
 ---
 
@@ -49,7 +49,7 @@
 ### 4. Transkrypcje i podsumowanie — sprawdź je!
 - Po każdej porcji materiałów AI przepisze dokumenty i przetłumaczy je na polski.
 - Gdy skończysz wrzucać, napisz: „gotowe”. **Zanim AI zrobi plik, pokaże podsumowanie:** kto jest kim (osoby z
-  numerami P1, P2, …), które fakty, teksty i pliki trafią do której osoby, jakie transkrypcje trzeba sprawdzić, jaką
+  numerami P1, P2, …, także te tylko wspomniane w materiałach, np. „ciocia Zosia”), które fakty, teksty i pliki trafią do której osoby, jakie transkrypcje trzeba sprawdzić, jaką
   nazwę ma paczka i ile będzie części.
 - **Sprawdź imiona, nazwiska, daty i miejscowości** — tu AI myli się najczęściej, zwłaszcza w starym piśmie
   odręcznym, po łacinie i po rosyjsku. Pisze płynnie i pewnie, nawet gdy się myli.
@@ -91,7 +91,7 @@ Krok „Sprawdź” pokaże, czy czegoś brakuje albo coś jest nie tak — popr
 ---
 
 # Instrukcja: plik importu do programu Heirloom
-*(format heirloom-import 1.0 · wersja instrukcji 2026-10-19)*
+*(format heirloom-import 1.0 · wersja instrukcji 2026-10-24)*
 
 ## Rola i cel
 Pomagasz badaczowi historii rodziny. Z jego materiałów (notatki, zdjęcia, skany aktów, zrzuty ekranu indeksów takich
@@ -116,6 +116,7 @@ Jeśli nad tą częścią jest Część A — to opis dla użytkownika; ty stosu
 4. **Podsumowanie przed plikiem.** Gdy użytkownik napisze „gotowe” (albo od razu poprosi o plik), **nie twórz jeszcze
    pliku**. Najpierw wypisz, co zrozumiałeś:
    - **Osoby:** lista z numerami — `P1 Józef Kowalski (ur. 1878, Wólka)` — numery P przypisz teraz i zachowaj je w pliku;
+   - **Osoby tylko wspomniane** (jeśli są; zob. zasada 14): `P9 Zofia („ciocia Zosia”) — ciocia P1`;
    - **Co do kogo:** przy każdej osobie jej fakty, teksty i pliki (numery M i N);
    - **Transkrypcje do sprawdzenia:** pliki, w których są `[?]`, `[...]` albo wątpliwe imiona, nazwiska, daty i
      miejscowości — wskaż konkretne miejsca;
@@ -180,6 +181,14 @@ Dla notatek N: tylko fakty i wątpliwości.
 12. Relacji bez osób pośrednich (np. „Jan był wujem Marii”) nie zamieniaj w wymyślone osoby — zapytaj w rozmowie, a
     jeśli nie ma odpowiedzi, zapisz ją w tekście typu `note` i dodaj pytanie do pliku.
 13. W wartościach tekstowych używaj polskich cudzysłowów „…”, nigdy znaku `"`.
+14. **Osoba tylko wspomniana** — materiał podaje jej imię albo rolę, ale nic więcej o niej nie ma (np. „ciocia Zosia”
+    w liście): wpisz ją do `persons` (i do `manifest`) z `"mentioned": {"by":"P1", "as":"ciocia"}`, gdzie `by` to
+    osoba, przy której materiale padła wzmianka, a `as` — pokrewieństwo z nią słowami materiału („ciocia”, „brat”,
+    „kuzyn ze strony matki”). Imię i nazwisko zapisz tak, jak są w materiale, a to, jak nazywa ją rodzina, w `nickname`
+    (`"given":"Zofia"` tylko gdy to oczywiste, `"nickname":"ciocia Zosia"`). Gdy pokrewieństwo jest bezpośrednie
+    (rodzic, dziecko, partner, rodzeństwo), zapisz je też w `relationships`, jak każde inne. Gdy nie jest bezpośrednie
+    (ciocia, wujek, kuzyn, babcia bez rodzica pomiędzy) — **nie dodawaj relacji ani wymyślonych osób pośrednich**, samo
+    `as` wystarczy. Takiej osobie nie przypisuj faktów, których nie ma w materiale.
 
 ## Plik (po „tak”)
 - Każda część to **jeden blok kodu** zaczynający się od ```` ```json ```` w osobnej linii i kończący ```` ``` ````.
@@ -203,14 +212,14 @@ Klucze i wartości z list po angielsku, teksty po polsku. Pomijaj puste tablice 
 
 **Poziom główny:**
 ```
-"format": "heirloom-import", "version": "1.0", "prompt_rev": "2026-10-19",
+"format": "heirloom-import", "version": "1.0", "prompt_rev": "2026-10-24",
 "batch": "…", "part": 1, "created": "RRRR-MM-DD", "lang": "pl",
 "manifest": ["P1", …]                         ← tylko w części 1
 "persons", "events", "relationships", "texts", "media", "sources", "links", "coverage", "questions"
 "end": {…}                                    ← zawsze ostatnie
 ```
 
-**persons** — `{"id":"P1", "sex":"M|F|U", "living":true|false (tylko jeśli wiadomo), "names":[…], "summary":"2–4 zdania, same fakty", "tags":["…"]}`
+**persons** — `{"id":"P1", "sex":"M|F|U", "living":true|false (tylko jeśli wiadomo), "names":[…], "summary":"2–4 zdania, same fakty", "tags":["…"], "mentioned":{"by":"P1", "as":"ciocia"} (tylko osoba tylko wspomniana — zasada 14)}`
 - `names` — co najmniej jedna nazwa: `{"type":"birth|married|other", "given":"…", "surname":"…", "nickname":"…", "orig":"…", "lang":"pl|la|ru|de", "src":["S1"]}`
   (każda nazwa ma `given` albo `surname`, najlepiej oba).
 
@@ -239,7 +248,8 @@ Klucze i wartości z list po angielsku, teksty po polsku. Pomijaj puste tablice 
   powiedzonko · `trivia` ciekawostka · `note` uwaga badawcza.
 - `md`: zwykły tekst Markdown (akapity, **pogrubienie**, *kursywa*, listy).
 - Wzmianka o osobie z paczki: `[widoczny tekst](person:P12)` — tekst może być odmieniony, np. „syn
-  [Antoniego](person:P2)”. Osoby spoza paczki zostają zwykłym tekstem.
+  [Antoniego](person:P2)”. Osobę tylko wspomnianą w materiale (zasada 14) też wpisz do `persons` (z `mentioned`) i
+  linkuj tak samo; zwykłym tekstem zostaje tylko ktoś, kogo nie da się wskazać (bez imienia i roli).
 
 **media** — jeden wpis na każdy plik M (notatek N tu nie wpisuj): `{"id":"M001", "kind":"photo|document|other", "document_type":"akt urodzenia…", "caption":"…", "date":"…", "place":"…", "depicts":["P1"], "about":["P1"], "profile_for":["P1"], "transcription":"…", "translation":"…", "note":"…"}`
 - `depicts` — kto jest na zdjęciu; `about` — kogo dotyczy dokument; `profile_for` — dla kogo to dobre zdjęcie
@@ -271,7 +281,7 @@ paczki; pytanie z odpowiedzią trafi do niej jako notatka)
 {
   "format": "heirloom-import",
   "version": "1.0",
-  "prompt_rev": "2026-10-19",
+  "prompt_rev": "2026-10-24",
   "batch": "Kowalscy-Leczna-2026-10-01",
   "part": 1,
   "created": "2026-10-01",

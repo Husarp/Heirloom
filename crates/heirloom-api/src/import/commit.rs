@@ -269,6 +269,10 @@ fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, St
                     _ => "U",
                 };
                 indi.children.push(Node::with_value("SEX", sex));
+                // Only mentioned in the material: unfinished, so „Do uzupełnienia” lists them.
+                if p.mentioned.is_some() {
+                    indi.children.push(Node::with_value("_HLM_TODO", "Y"));
+                }
                 for tag in &p.tags {
                     indi.children.push(Node::with_value("_HLM_TAG", tag));
                 }
@@ -795,6 +799,23 @@ fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, St
             _ => "note",
         };
         add_text(&mut changes, &ctx, owner, kind, t.title.as_deref(), body, t.date.as_deref(), t.place.as_deref(), &t.src, t.certainty.as_deref(), t.basis.as_deref())?;
+    }
+    // How a mentioned person is related to whom, in the material's words, as a research note (new or merged).
+    for p in &batch.persons {
+        let mut seen: Vec<String> = Vec::new();
+        for m in p.mentioned.iter().flatten() {
+            let Some(relation) = m.relation.as_deref() else { continue };
+            // Linked to the person whose material it was, when that one is saved.
+            let by = m.by.as_deref().filter(|by| ctx.uids.contains_key(*by)).and_then(|by| batch.persons.iter().find(|x| x.id == by));
+            let body = match by {
+                Some(by) => format!("Wspomniana w materiałach przy osobie [{}](person:{}) jako: „{relation}”.", super::batch_name(by), by.id),
+                None => format!("Wspomniana w materiałach jako: „{relation}”."),
+            };
+            if !seen.contains(&body) {
+                add_text(&mut changes, &ctx, &p.id, "note", None, &body, None, None, &[], None, None)?;
+                seen.push(body);
+            }
+        }
     }
     // Answers to the AI's questions become research notes at the people they are about.
     for q in &batch.questions {
@@ -1373,5 +1394,153 @@ mod tests {
         let state = call(&mut s, &mut draft, "import.state", Value::Null).unwrap();
         let p1 = state["persons"].as_array().unwrap().iter().find(|p| p["id"] == "P1").unwrap();
         assert_eq!(p1["candidates"][0]["id"], jozef.as_str());
+    }
+
+    /// An answer with people the material only mentions: Jan (P2, Józef's brother, with the relationship), „ciocia Zosia”
+    /// (P3, no relationship) and P9 in a text but not in the batch.
+    fn mentioned_answer() -> String {
+        r#"```json
+{
+  "format": "heirloom-import", "version": "1.0", "prompt_rev": "2026-10-24", "batch": "Wspomniani-2026-10-24", "part": 1, "manifest": ["P1", "P2", "P3"],
+  "persons": [
+    { "id": "P1", "sex": "M", "names": [ { "type": "birth", "given": "Józef", "surname": "Kowalski" } ] },
+    { "id": "P2", "sex": "M", "names": [ { "type": "birth", "given": "Jan", "surname": "Kowalski" } ], "mentioned": { "by": "P1", "as": "brat" } },
+    { "id": "P3", "sex": "F", "names": [ { "type": "birth", "given": "Zofia", "nickname": "ciocia Zosia" } ], "mentioned": [ { "by": "P1", "as": "„ciocia”" } ] }
+  ],
+  "relationships": [ { "type": "sibling", "a": "P1", "b": "P2", "kind": "full" } ],
+  "texts": [ { "id": "T1", "person": "P1", "kind": "story", "title": "Odwiedziny", "md": "Józef odwiedzał brata [Jana](person:P2) i [ciocię Zosię](person:P3). Zajrzał też do [Antoniego Maja](person:P9)." } ],
+  "end": { "part": 1, "final": true, "counts": { "persons": 3, "relationships": 1, "texts": 1 }, "marker": "END-HEIRLOOM-IMPORT" }
+}
+```"#
+        .to_string()
+    }
+
+    fn person_of<'a>(state: &'a Value, id: &str) -> &'a Value {
+        state["persons"].as_array().unwrap().iter().find(|p| p["id"] == id).unwrap_or_else(|| panic!("no {id}"))
+    }
+
+    fn warnings(state: &Value) -> Vec<String> {
+        state["issues"].as_array().unwrap().iter().filter(|i| i["level"] == "warning").map(|i| i["message"].as_str().unwrap().to_string()).collect()
+    }
+
+    /// The research notes of a person, as the profile shows them.
+    fn notes_of(s: &mut Session, given: &str) -> Vec<String> {
+        let d = s.derived();
+        let i = (0..d.info.len()).find(|&i| d.info[i].given == given).unwrap();
+        crate::people::profile(d, d.xref(i), &[]).unwrap()["notes"].as_array().unwrap().iter().map(|n| n["body"].as_str().unwrap().to_string()).collect()
+    }
+
+    #[test]
+    fn a_person_only_mentioned_is_saved_unfinished_with_a_note_and_is_linked_only_where_the_relationship_is_known() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let mut draft = None;
+        let state = call(&mut s, &mut draft, "import.load", json!({ "texts": [mentioned_answer()], "paths": [] })).unwrap();
+        assert_eq!(state["errors"], 0, "{}", state["issues"]);
+        assert_eq!(warnings(&state), ["Wzmianka o „Antoniego Maja” wskazuje nieznaną osobę — zostanie zwykłym tekstem."]);
+        assert!(person_of(&state, "P1")["mentioned"].is_null());
+        assert_eq!(person_of(&state, "P2")["mentioned"], json!({ "by": "P1", "byName": "Józef Kowalski", "as": "brat" }));
+        assert_eq!(person_of(&state, "P3")["mentioned"]["as"], "ciocia", "quotes round the words are dropped");
+        assert_eq!(state["summary"]["unfinished"], 2);
+        // A person left out is not counted.
+        call(&mut s, &mut draft, "import.include", json!({ "person": "P3", "include": false })).unwrap();
+        let state = call(&mut s, &mut draft, "import.include", json!({ "person": "P3", "include": true })).unwrap();
+        assert_eq!(state["summary"]["unfinished"], 2);
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+
+        let (jozef, jan, zofia) = (xref_of(&mut s, "Józef"), xref_of(&mut s, "Jan"), xref_of(&mut s, "Zofia"));
+        let mark = |s: &Session, x: &str| s.archive.doc.record(x).unwrap().child_value("_HLM_TODO").map(str::to_string);
+        assert_eq!((mark(&s, &jozef), mark(&s, &jan), mark(&s, &zofia)), (None, Some("Y".into()), Some("Y".into())));
+        let d = s.derived();
+        let at = |x: &str| d.index(x).unwrap();
+        assert!(d.info[at(&jan)].unfinished && d.info[at(&jan)].linked, "a brother is on the tree");
+        assert!(d.info[at(&zofia)].unfinished && !d.info[at(&zofia)].linked, "an aunt with no link is not");
+        assert!(!d.info[at(&jozef)].unfinished);
+        let overview = crate::tree::overview(d, None);
+        assert!(!overview.to_string().contains(&zofia), "„Całe drzewo” leaves out the unlinked one");
+        assert_eq!(notes_of(&mut s, "Jan"), [format!("Wspomniana w materiałach przy osobie [Józef Kowalski](person:{jozef}) jako: „brat”.")]);
+        assert_eq!(notes_of(&mut s, "Zofia"), [format!("Wspomniana w materiałach przy osobie [Józef Kowalski](person:{jozef}) jako: „ciocia”.")]);
+        // The text's mentions work, the unknown one stays plain text.
+        let d = s.derived();
+        let story = crate::people::profile(d, &jozef, &[]).unwrap()["stories"][0]["body"].as_str().unwrap().to_string();
+        assert!(story.contains(&format!("[Jana](person:{jan})")) && story.contains(&format!("[ciocię Zosię](person:{zofia})")), "{story}");
+        assert!(story.contains("Zajrzał też do Antoniego Maja.") && !story.contains("P9"), "{story}");
+        // Józef's own record has no such note.
+        assert!(notes_of(&mut s, "Józef").is_empty());
+    }
+
+    #[test]
+    fn a_mentioned_person_merged_into_an_archive_person_gets_the_note_and_no_mark() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let jan = crate::edit::call(&mut s, "person.create", &json!({ "given": "Jan", "surname": "Kowalski", "sex": "M" })).unwrap()["id"].as_str().unwrap().to_string();
+        let mut draft = None;
+        call(&mut s, &mut draft, "import.load", json!({ "texts": [mentioned_answer()], "paths": [] })).unwrap();
+        call(&mut s, &mut draft, "import.decide", json!({ "person": "P2", "kind": "merge", "target": jan })).unwrap();
+        let state = call(&mut s, &mut draft, "import.state", Value::Null).unwrap();
+        assert_eq!(state["summary"]["unfinished"], 1, "only Zofia is saved as new");
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+        assert_eq!(s.archive.doc.record(&jan).unwrap().child_value("_HLM_TODO"), None, "a person already in the archive is not marked");
+        let notes = notes_of(&mut s, "Jan");
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].starts_with("Wspomniana w materiałach przy osobie [Józef Kowalski](person:") && notes[0].ends_with("jako: „brat”."), "{notes:?}");
+        assert_eq!(s.archive.doc.records.iter().filter(|r| r.tag == "INDI" && r.child_value("_HLM_TODO").is_some()).count(), 1);
+    }
+
+    #[test]
+    fn a_note_without_the_person_it_was_mentioned_by_names_only_the_words() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        // No `by`, and a `by` that isn't in the batch (warned in step 2): the words stay.
+        let answer = mentioned_answer().replace("\"mentioned\": { \"by\": \"P1\", \"as\": \"brat\" }", "\"mentioned\": { \"as\": \"brat\" }").replace("\"by\": \"P1\", \"as\": \"„ciocia”\"", "\"by\": \"P7\", \"as\": \"„ciocia”\"");
+        let mut draft = None;
+        let state = call(&mut s, &mut draft, "import.load", json!({ "texts": [answer], "paths": [] })).unwrap();
+        assert!(warnings(&state).contains(&"Osoba P3: wzmianka wskazuje P7, której nie ma w paczce — ten opis zostanie pominięty.".to_string()), "{:?}", warnings(&state));
+        assert!(person_of(&state, "P2")["mentioned"]["byName"].is_null());
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+        assert_eq!(notes_of(&mut s, "Jan"), ["Wspomniana w materiałach jako: „brat”."]);
+        assert_eq!(notes_of(&mut s, "Zofia"), ["Wspomniana w materiałach jako: „ciocia”."]);
+    }
+
+    #[test]
+    fn an_unknown_mention_can_be_added_as_a_person_to_complete() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let mut draft = None;
+        let state = call(&mut s, &mut draft, "import.load", json!({ "texts": [mentioned_answer()], "paths": [] })).unwrap();
+        let issue = state["issues"].as_array().unwrap().iter().find(|i| i["action"] == "mention").unwrap().clone();
+        assert_eq!((issue["target"].as_str(), issue["detail"].as_str()), (Some("P9"), Some("Antoniego Maja")));
+        // Refused: no name, an id no text mentions, a person the batch has.
+        let refused = |s: &mut Session, draft: &mut Option<Draft>, args: Value| call(s, draft, "import.addMentioned", args).unwrap_err();
+        assert_eq!(refused(&mut s, &mut draft, json!({ "id": "P9", "given": " ", "surname": "" })).message, "Podaj imię albo nazwisko.");
+        assert_eq!(refused(&mut s, &mut draft, json!({ "id": "P7", "given": "Ewa" })).code, "bad_args");
+        assert_eq!(refused(&mut s, &mut draft, json!({ "id": "P2", "given": "Jan" })).code, "bad_args");
+        assert_eq!(state["persons"].as_array().unwrap().len(), 3);
+
+        let state = call(&mut s, &mut draft, "import.addMentioned", json!({ "id": "P9", "given": "Antoni", "surname": "Maj", "sex": "M" })).unwrap();
+        assert!(warnings(&state).is_empty(), "{:?}", warnings(&state));
+        assert!(!state["issues"].to_string().contains("\"mention\""));
+        let p9 = person_of(&state, "P9");
+        assert_eq!((p9["name"].as_str(), p9["sex"].as_str(), p9["decision"].as_str()), (Some("Antoni Maj"), Some("M"), Some("new")));
+        assert_eq!(p9["mentioned"], json!({ "by": "P1", "byName": "Józef Kowalski", "as": null }));
+        assert_eq!(state["summary"]["unfinished"], 3);
+
+        // Adding the missing part or files reloads the batch: the person comes back; a plain load forgets them.
+        let state = call(&mut s, &mut draft, "import.load", json!({ "texts": [], "paths": [], "add": true })).unwrap();
+        assert_eq!(person_of(&state, "P9")["name"], "Antoni Maj");
+        assert!(warnings(&state).is_empty(), "{:?}", warnings(&state));
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+
+        let (jozef, antoni) = (xref_of(&mut s, "Józef"), xref_of(&mut s, "Antoni"));
+        assert_eq!(s.archive.doc.record(&antoni).unwrap().child_value("_HLM_TODO"), Some("Y"));
+        let d = s.derived();
+        assert!(d.info[d.index(&antoni).unwrap()].unfinished && !d.info[d.index(&antoni).unwrap()].linked);
+        let story = crate::people::profile(d, &jozef, &[]).unwrap()["stories"][0]["body"].as_str().unwrap().to_string();
+        assert!(story.contains(&format!("[Antoniego Maja](person:{antoni})")), "the mention points at the new person: {story}");
+
+        // Not added: the mention stays plain text and the warning comes back after a fresh load.
+        let state = call(&mut s, &mut draft, "import.load", json!({ "texts": [mentioned_answer()], "paths": [] })).unwrap();
+        assert_eq!(warnings(&state).len(), 1);
+        assert_eq!(state["persons"].as_array().unwrap().len(), 3);
     }
 }

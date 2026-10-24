@@ -496,6 +496,55 @@
   height: 30px;
   font-weight: 600;
 }
+/* The form under a warning about an unknown mention („Dodaj jako osobę do uzupełnienia”). */
+.imp-issue.open {
+  flex-wrap: wrap;
+}
+.imp-mention-form {
+  flex: 1 0 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--r-card);
+  background: var(--surface2);
+}
+.imp-mention-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+.imp-mention-fields .field {
+  flex: 1 1 150px;
+}
+.imp-mention-fields .field:last-child {
+  flex: none;
+}
+.imp-mention-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text3);
+}
+/* „tylko wzmianka”: a person the material only mentions (steps 3 and 5). */
+.imp-mention-chip {
+  flex: none;
+  padding: 0 6px;
+  font-size: 10.5px;
+  line-height: 16px;
+}
+.imp-mention-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.imp-unfinished-line {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text2);
+}
 .imp-question {
   padding: 14px 16px;
   background: var(--surface);

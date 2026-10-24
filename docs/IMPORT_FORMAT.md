@@ -46,7 +46,7 @@ choices is in [RESEARCH.md §8](RESEARCH.md#8-ai-assisted-import-external-ai-cha
 |---|---|---|
 | `format` | yes | Always `"heirloom-import"`. |
 | `version` | yes | `"1.0"` (the number `1.0` is accepted too). Any `1.x` is read; another major version is a blocking error. |
-| `prompt_rev` | yes | The revision of AI_INSTRUCTIONS.md used, e.g. `"2026-10-19"`. Not checked; kept for tracing.. |
+| `prompt_rev` | yes | The revision of AI_INSTRUCTIONS.md used, e.g. `"2026-10-24"`. Not checked; kept for tracing.. |
 | `batch` | yes | A unique name for the batch: a short label plus a date, e.g. `"Kowalscy-Leczna-2026-10-01"`. The same in every part (parts with different names are a blocking error). It names the import in the history and „Cofnij import”. |
 | `part` | yes | 1, 2, 3, … (`"2"` as text is accepted). |
 | `created` | no | The date the file was made, `YYYY-MM-DD`. |
@@ -68,9 +68,22 @@ choices is in [RESEARCH.md §8](RESEARCH.md#8-ai-assisted-import-external-ai-cha
 | `living` | no | `true` or `false`. Leave it out if unknown. `false` marks a new person as deceased when the batch has no death or burial for them; `true` is not stored. |
 | `summary` | no | 2–4 factual sentences in Polish; saved as the person's summary unless they already have one. Mentions (§4.3) work here too. |
 | `tags` | no | Short Polish labels, e.g. `["kolejarz", "emigrant"]`. |
+| `mentioned` | no | The material only **mentions** this person and says nothing else about them: `true`, or `{ "by": "P1", "as": "ciocia" }`, or a list of such objects. `by` is the batch person in whose material the mention is; `as` is how they are related to `by`, in the material's words („ciocia”, „brat”, „kuzyn ze strony matki”). New in prompt revision 2026-10-24. |
 | `match` | no | **Planned** (§8): the handle of an existing person from a roster, e.g. `"@K3F9X"`. Read but not used yet. |
 
 Other keys on a person are kept and shown as a warning („Nieznane pole …”), but not saved.
+
+**People only mentioned.** A relative the material names but has nothing else about (a letter mentions „ciocia Zosia”)
+is a person with `mentioned`, in `persons` and in the `manifest` like any other. The name goes in as the material gives
+it, in `given` / `surname`; the way the family calls them in `nickname` (`"given": "Zofia"` only when obvious,
+`"nickname": "ciocia Zosia"`). When the exact relation is known (parent, child, partner, sibling) it is also written in
+`relationships`, as always, and the person shows on the tree. When it is not a direct one (ciocia, wujek, kuzyn, a
+grandmother without the parent in between), there is no relationship and no invented intermediate person: `as` is
+enough. The app saves such a person, when added as new, as **unfinished**: shown in Rodzina and the people list, and
+on the tree only where the relation is known; one with no link is only in „Do uzupełnienia” and the people list. A
+research note records how they were mentioned („Wspomniana w materiałach przy osobie … jako: „ciocia”.”). A person
+joined with someone already in the archive gets the note but is not marked. Texts mention them with
+`[…](person:P9)` like any person of the batch.
 
 Each person is listed in `persons` **once** in the whole batch; later parts refer to it by ID only (a second entry
 with the same ID is a blocking error).
@@ -124,7 +137,8 @@ The importer builds families from these. Always state them explicitly, even when
 Every relationship may also carry `src`, `basis` and `certainty` (§4.4).
 
 A relation the material states without the people in between (e.g. "Jan był wujem Marii") is **not** turned into
-invented intermediate persons. It goes into a `note` text and a question.
+invented intermediate persons. It goes into a `note` text and a question. (A relative the material only names, such as
+„ciocia Zosia”, is a person with `mentioned` instead, §3.1: still no relationship and no intermediate persons.)
 
 ### 3.4 `texts`
 
@@ -247,7 +261,9 @@ without `about` is shown but not saved.
 - **Form:** `[visible text](person:P12)`. The visible text can be inflected: "syn [Antoniego](person:P2)".
 - **Roster people (planned, §8):** `[Jana](person:@K3F9X)`. Until the roster exists these become plain text.
 - **Unknown people:** someone who is neither in the batch nor in the roster stays plain text. A mention of an ID that
-  isn't in the batch gives a warning and becomes plain text.
+  isn't in the batch gives a warning and becomes plain text, unless the user adds it in step 2 („Dodaj jako osobę do
+  uzupełnienia”): the app then adds a person with that ID and `mentioned` (§3.1), and the mention links to them. The AI
+  should not leave such people to that: it lists them in `persons` itself.
 
 ### 4.4 Evidence fields
 - **`src`:** a list of S-, M- or N-IDs, e.g. `["S1"]` or `["M004"]` (a single `"S1"` is accepted too). An M- or N-ID
@@ -266,7 +282,7 @@ without `about` is shown but not saved.
 {
   "format": "heirloom-import",
   "version": "1.0",
-  "prompt_rev": "2026-10-19",
+  "prompt_rev": "2026-10-24",
   "batch": "Kowalscy-Leczna-2026-10-01",
   "part": 1,
   "created": "2026-10-01",
@@ -479,9 +495,11 @@ The Import has five steps; nothing is written before the last one.
      - the same part number twice with different contents (the first one is used);
      - `counts` that don't match (persons, events, texts, media, sources);
      - unknown event types (saved as „other”) and unknown keys on persons (shown, not saved);
+     - a `mentioned.by` that is not a person of the batch (that description is left out);
      - an event `date` that doesn't fit §4.1 (fix it by hand, or it is saved as text);
      - files described in `media` but not added, files without an M-number, files over 100 MB;
-     - mentions of unknown IDs (turned into plain text);
+     - mentions of unknown IDs (turned into plain text, or added as people to complete with „Dodaj jako osobę do
+       uzupełnienia”);
      - low-certainty events; files marked `unreadable` in `coverage`;
      - two persons in the batch with the same name and birth year.
    - **Info:** added files the batch doesn't describe; ages turned into estimated birth years (§4.1).
@@ -493,6 +511,8 @@ The Import has five steps; nothing is written before the last one.
    star (pre-set from `profile_for`), files already in the archive.
 5. **Podsumowanie.** Everything ticked is saved as one change group named after the batch:
    - every saved record carries the batch name (`_HLM_BATCH`), and „Cofnij import” takes the whole batch back;
+   - a new person with `mentioned` gets `_HLM_TODO Y` (unfinished) and a research note with the words of `as`; in the
+     steps they carry the chip „tylko wspomniana”, and the summary counts them;
    - the AI's answers are kept unchanged in the archive's `zrodla-ai/<batch>/` folder.
    - In „Nie ruszaj oryginału” (since 0.7.0) the archive itself is not written: the import goes into the user's changes
      (`<Documents>\Heirloom\Moje zmiany\<archive>`), `zrodla-ai/<batch>/` included, and reaches the archive with
@@ -503,6 +523,8 @@ The Import has five steps; nothing is written before the last one.
 
 - `format` + `version` identify the schema; a new major version is a breaking change.
 - `prompt_rev` records which revision of AI_INSTRUCTIONS.md produced the file.
+- `persons[].mentioned` is new in prompt revision 2026-10-24 and optional; the format stays 1.0. Files without it are
+  read exactly as before, and files with it are read by an older app as a person with an unknown key (a warning).
 - Unknown keys never stop an import: on persons they are shown as a warning; elsewhere they are ignored. A field
   that should be saved needs a format change first.
 

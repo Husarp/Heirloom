@@ -24,8 +24,30 @@ fn text_or_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::
     })
 }
 
+/// A person the material only mentions (`persons[].mentioned`): `true`, one `{ "by": "P1", "as": "ciocia" }` or a list
+/// of them. Anything else counts as not mentioned. `true` alone is an empty list of mentions. Quotes an AI put around
+/// the words of `as` are dropped.
+fn mentioned<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<Mention>>, D::Error> {
+    let one = |v: &Value| -> Option<Mention> {
+        let text = |key: &str| match v.get(key) {
+            Some(Value::String(s)) => Some(s.trim().trim_matches(|c| matches!(c, '"' | '„' | '”' | '“' | '«' | '»')).trim().to_string()).filter(|s| !s.is_empty()),
+            Some(Value::Number(n)) => Some(n.to_string()),
+            _ => None,
+        };
+        match v {
+            Value::Bool(true) => Some(Mention::default()),
+            Value::Object(_) => Some(Mention { by: text("by"), relation: text("as") }),
+            _ => None,
+        }
+    };
+    Ok(match Value::deserialize(d)? {
+        Value::Array(items) => Some(items.iter().filter_map(one).collect::<Vec<_>>()).filter(|list| !list.is_empty()),
+        other => one(&other).map(|m| if m == Mention::default() { Vec::new() } else { vec![m] }),
+    })
+}
+
 /// Slips of a chat AI fixed before reading, so one of them never loses a whole part: `null` where a list or a text
-/// should be, numbers written as text (`"part": "2"`), identifiers written as numbers (`"id": 5`), „tak” for true,
+/// should be, numbers written as text (`"part": "2"`), identifiers written as numbers (`"id": 5`, `"by": 1`), „tak” for true,
 /// and the sex in Polish (`"K"`, „kobieta”).
 pub fn normalize(value: &mut Value) {
     match value {
@@ -38,12 +60,12 @@ pub fn normalize(value: &mut Value) {
                             *v = Value::from(n);
                         }
                     }
-                    ("living" | "final", Value::String(s)) => match s.trim().to_lowercase().as_str() {
+                    ("living" | "final" | "mentioned", Value::String(s)) => match s.trim().to_lowercase().as_str() {
                         "true" | "tak" | "yes" => *v = Value::Bool(true),
                         "false" | "nie" | "no" => *v = Value::Bool(false),
                         _ => {}
                     },
-                    ("id" | "p" | "parent" | "child" | "a" | "b" | "person" | "m", Value::Number(n)) => *v = Value::String(n.to_string()),
+                    ("id" | "p" | "parent" | "child" | "a" | "b" | "person" | "m" | "by", Value::Number(n)) => *v = Value::String(n.to_string()),
                     ("sex", Value::String(s)) => {
                         let code = match s.trim().to_lowercase().as_str() {
                             "k" | "kobieta" | "f" | "female" => Some("F"),
@@ -107,8 +129,20 @@ pub struct Person {
     pub tags: Vec<String>,
     #[serde(rename = "match")]
     pub matching: Option<String>,
+    /// The material only mentions this person (no facts of their own): `Some` with where and how, `Some(vec![])` for a
+    /// bare `true`. Such a person is saved as unfinished.
+    #[serde(deserialize_with = "mentioned")]
+    pub mentioned: Option<Vec<Mention>>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+/// Where a mentioned person was mentioned: `by` is the batch person whose material it was, `relation` (`as`) how they
+/// are related to `by`, in the material's words („ciocia”, „kuzyn ze strony matki”).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Mention {
+    pub by: Option<String>,
+    pub relation: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -382,5 +416,31 @@ mod tests {
         assert_eq!(part.persons[0].names[0].src, ["S1"]);
         assert!(part.persons[0].extra.contains_key("imie_ojca"));
         assert_eq!(part.sources[0].year.as_deref(), Some("1878"));
+    }
+
+    #[test]
+    fn mentioned_is_read_as_true_an_object_or_a_list() {
+        let read = |mentioned: &str| -> Option<Vec<Mention>> {
+            let mut value: Value = serde_json::from_str(&format!(r#"{{ "persons": [ {{ "id": "P9", "names": [], {mentioned} }} ] }}"#)).unwrap();
+            normalize(&mut value);
+            let part: Part = serde_json::from_value(value).unwrap();
+            assert!(part.persons[0].extra.is_empty(), "a known field");
+            part.persons[0].mentioned.clone()
+        };
+        let mention = |by: Option<&str>, relation: Option<&str>| Mention { by: by.map(str::to_string), relation: relation.map(str::to_string) };
+        assert_eq!(read(r#""mentioned": true"#), Some(vec![]));
+        assert_eq!(read(r#""mentioned": "tak""#), Some(vec![]));
+        assert_eq!(read(r#""mentioned": false"#), None);
+        assert_eq!(read(r#""mentioned": null"#), None);
+        assert_eq!(read(r#""mentioned": "ciocia""#), None);
+        assert_eq!(read(r#""mentioned": []"#), None);
+        assert_eq!(read(r#""mentioned": { "by": "P1", "as": "ciocia" }"#), Some(vec![mention(Some("P1"), Some("ciocia"))]));
+        assert_eq!(read(r#""mentioned": { "by": 1, "as": " brat " }"#), Some(vec![mention(Some("1"), Some("brat"))]));
+        assert_eq!(read(r#""mentioned": { "by": "P1", "as": "„ciocia”" }"#), Some(vec![mention(Some("P1"), Some("ciocia"))]), "quotes round the words are dropped");
+        assert_eq!(read(r#""mentioned": { "as": "kuzyn ze strony matki" }"#), Some(vec![mention(None, Some("kuzyn ze strony matki"))]));
+        assert_eq!(
+            read(r#""mentioned": [ { "by": "P1", "as": "ciocia" }, { "by": "P2", "as": "wujek" } ]"#),
+            Some(vec![mention(Some("P1"), Some("ciocia")), mention(Some("P2"), Some("wujek"))])
+        );
     }
 }

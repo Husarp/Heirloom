@@ -58,7 +58,7 @@ const ANSWER: &str = r#"Oto część 1 z 2.
 {
   "format": "heirloom-import",
   "version": "1.0",
-  "prompt_rev": "2026-10-19",
+  "prompt_rev": "2026-10-24",
   "batch": "Nowakowie-Ciechanki-2026-10-05",
   "part": 1,
   "created": "2026-10-05",
@@ -130,7 +130,7 @@ Oto część 2 z 2.
 {
   "format": "heirloom-import",
   "version": "1.0",
-  "prompt_rev": "2026-10-19",
+  "prompt_rev": "2026-10-24",
   "batch": "Nowakowie-Ciechanki-2026-10-05",
   "part": 2,
   "created": "2026-10-05",
@@ -216,4 +216,85 @@ fn a_fresh_answer_that_follows_the_instructions_comes_in_whole() {
     assert!(jozef["notes"].to_string().contains("Odpowiedź: nie wiem."), "the answered question: {}", jozef["notes"]);
     assert!(jozef.to_string().contains("familysearch.org"), "the link");
     assert!(jozef["sources"].to_string().contains("Notatka N1 wklejona do czatu"), "{}", jozef["sources"]);
+}
+
+/// An answer written by following rule 14 (people only mentioned): the brother Jan has a direct relation, so he is also in
+/// `relationships`; „ciocia Zosia” is no direct relative, so only `as` says how she is related and nothing is invented.
+const MENTIONED_ANSWER: &str = r#"Oto część 1 z 1.
+
+```json
+{
+  "format": "heirloom-import",
+  "version": "1.0",
+  "prompt_rev": "2026-10-24",
+  "batch": "Kowalscy-Listy-2026-10-24",
+  "part": 1,
+  "created": "2026-10-24",
+  "lang": "pl",
+  "manifest": ["P1", "P2", "P3"],
+  "persons": [
+    {
+      "id": "P1", "sex": "M",
+      "names": [ { "type": "birth", "given": "Józef", "surname": "Kowalski", "src": ["N1"] } ]
+    },
+    {
+      "id": "P2", "sex": "M",
+      "names": [ { "type": "birth", "given": "Jan", "surname": "Kowalski", "src": ["N1"] } ],
+      "mentioned": { "by": "P1", "as": "brat" }
+    },
+    {
+      "id": "P3", "sex": "F",
+      "names": [ { "type": "birth", "given": "Zofia", "nickname": "ciocia Zosia", "src": ["N1"] } ],
+      "mentioned": { "by": "P1", "as": "ciocia" }
+    }
+  ],
+  "relationships": [
+    { "type": "sibling", "a": "P1", "b": "P2", "kind": "full", "src": ["N1"], "basis": "stated", "certainty": "medium" }
+  ],
+  "texts": [
+    { "id": "T1", "person": "P1", "kind": "story", "title": "Niedzielne odwiedziny", "md": "Według notatki Józef w niedziele odwiedzał brata [Jana](person:P2), a latem ciocię [Zosię](person:P3).", "src": ["N1"], "basis": "stated", "certainty": "medium" }
+  ],
+  "coverage": [
+    { "m": "N1", "status": "extracted" }
+  ],
+  "end": { "part": 1, "final": true, "counts": { "persons": 3, "relationships": 1, "texts": 1, "coverage": 1 }, "marker": "END-HEIRLOOM-IMPORT" }
+}
+```"#;
+
+#[test]
+fn people_only_mentioned_come_in_as_unfinished_and_the_rule_is_in_the_instructions() {
+    assert!(INSTRUCTIONS.contains("\"mentioned\":{\"by\":\"P1\", \"as\":\"ciocia\"}") && INSTRUCTIONS.contains("nie dodawaj relacji ani wymyślonych osób pośrednich"));
+    let dir = tempfile::tempdir().unwrap();
+    let mut api = new_archive(dir.path());
+    let state = run(&mut api, "import.load", json!({ "texts": [MENTIONED_ANSWER], "paths": [] }));
+    assert_eq!(issues(&state, "error"), Vec::<String>::new());
+    assert_eq!(issues(&state, "warning"), Vec::<String>::new());
+    assert_eq!(state["summary"]["unfinished"], 2);
+    let result = run(&mut api, "import.commit", json!({ "author": "Test" }));
+    assert_eq!(result["people"], 3);
+
+    let people = run(&mut api, "people.list", json!({}))["people"].as_array().unwrap().clone();
+    let id = |given: &str| people.iter().find(|p| p["name"].as_str().unwrap().starts_with(given)).unwrap_or_else(|| panic!("no {given}: {people:#?}"))["id"].as_str().unwrap().to_string();
+    let (jozef, jan, zofia) = (id("Józef"), id("Jan"), id("Zofia"));
+
+    // The brother is in Rodzina; the aunt has no place there.
+    let family = run(&mut api, "person.get", json!({ "id": jozef }))["family"].to_string();
+    assert!(family.contains("Jan Kowalski") && !family.contains("Zofia"), "{family}");
+    let jan_family = run(&mut api, "person.get", json!({ "id": jan }))["todo"].clone();
+    assert_eq!((jan_family["unfinished"].clone(), jan_family["linked"].clone()), (json!(true), json!(true)));
+    let aunt = run(&mut api, "person.get", json!({ "id": zofia }));
+    assert_eq!((aunt["todo"]["unfinished"].clone(), aunt["todo"]["linked"].clone()), (json!(true), json!(false)));
+    assert!(aunt["notes"].to_string().contains("jako: „ciocia”."), "{}", aunt["notes"]);
+
+    // „Do uzupełnienia” lists both; the tree has the brother but not the aunt.
+    let todo = run(&mut api, "todo.list", json!({}));
+    let listed: Vec<&str> = todo["people"].as_array().unwrap().iter().map(|p| p["id"].as_str().unwrap()).collect();
+    assert!(listed.contains(&jan.as_str()) && listed.contains(&zofia.as_str()) && !listed.contains(&jozef.as_str()), "{listed:?}");
+    let overview = run(&mut api, "tree.overview", json!({})).to_string();
+    assert!(overview.contains(&jozef) && overview.contains(&jan) && !overview.contains(&zofia), "the aunt is not on the tree");
+
+    // „Cofnij import” takes them back with the rest.
+    let status = run(&mut api, "history.undo", json!({ "batch": result["batch"] }));
+    assert_eq!(status["people"], 0);
+    assert_eq!(run(&mut api, "todo.list", json!({}))["people"].as_array().unwrap().len(), 0);
 }
