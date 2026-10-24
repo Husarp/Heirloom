@@ -3,6 +3,15 @@
 Format: `X.Y.Z — YYYY-MM-DD HH:MM: description`. Newest on top.
 X = major change, Y = feature / bigger change, Z = small change.
 
+## 0.9.0 (unreleased) — Looks: colour schemes, accent colour, zoomed-out tree
+- **Colours of the whole app.** Ustawienia › Wygląd › „Kolorystyka”: „Muzeum”, „Poranek”, „Terakota” and „Wrzos”
+  (background, panels, sidebar and the tree canvas; each has a light and a dark version). Ustawienia › Wygląd ›
+  „Kolor akcentu” (no longer „wkrótce”): „Domyślny dla kolorystyki”, „Zieleń”, „Granat”, „Bordo”, „Śliwka”, „Miedź”
+  and „Morski” for buttons, links, selections and the keyboard marker.
+- **Zoomed-out tree.** Ustawienia › Drzewo › „Wygląd przy oddaleniu”: how people look when the tree is very small —
+  „Kształty”, „Obwódka” (the default), „Kafelki” or „Mini-karty”, in the branch colours. It works in Rodzina,
+  Przodkowie, Potomkowie and Całe drzewo, and the selected person keeps the accent ring in all four.
+
 ## 0.8.0 — 2026-10-19 14:20: Fixes from the second test — tree, profile, gallery, import, archive list, AI instructions
 - **Tree.**
   - **Rodzina: the descendants arrow unfolds in place.** The „+N” under a child draws that child's descendants

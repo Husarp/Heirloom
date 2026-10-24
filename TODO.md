@@ -567,13 +567,13 @@ This is the roadmap, with a checkbox per task.
 - [x] **Choosing a branch's colour** (done 2026-10-19) (your question: it isn't there yet — Ustawienia › Drzewo › „Kolory gałęzi” is
       still „wkrótce”): build it, and put the colour on top of the surname's edit in Nazwiska too, next to the branch
       name; together with the brighter ready palettes (above, „Branch colours: a few ready palettes”)
-- [ ] **More colour and look choices** — prettier palettes for the whole app, not only the present dark, muted
+- [x] **More colour and look choices** (done 2026-10-22) — prettier palettes for the whole app, not only the present dark, muted
       ones (Wygląd › „Kolor akcentu” is still „wkrótce”); each checked in the light and the dark theme
 - [x] **Zooming out: shapes only later** (done 2026-10-19) — keep the normal cards (smaller text) down to about 30%, and switch to
       shapes only below that
 - [x] **Zoomed-out tree: lines must touch the shapes** (done 2026-10-19) — at e.g. 14% the line to a child stops short of the parents
       and of the child (screenshot 2026-10-16)
-- [ ] **Zoomed-out tree: four looks to choose from** (mockups `design/pomniejszone-drzewo-makiety.html`, 2026-10-19:
+- [x] **Zoomed-out tree: four looks to choose from** (done 2026-10-22) (mockups `design/pomniejszone-drzewo-makiety.html`, 2026-10-19:
       Adam likes all four) — a setting in Ustawienia › Drzewo, e.g. „Wygląd przy oddaleniu”:
   - **A „Kształty”**: filled shapes as today (with the lines touching them);
   - **B „Obwódka”** (the default): a thick border in the branch colour, empty centre, rounded corners, shapes kept;
