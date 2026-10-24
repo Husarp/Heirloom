@@ -841,6 +841,7 @@
   text-align: left;
 }
 .imp-profile-preview {
+  position: relative;
   width: 64px;
   height: 64px;
   border-radius: 50%;
@@ -857,6 +858,10 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+.imp-profile-preview img.crop {
+  position: absolute;
+  max-width: none;
 }
 .imp-files-main {
   padding: 16px 20px;

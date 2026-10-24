@@ -319,7 +319,7 @@ fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, St
     }
 
     // 2. Media records for the files (or the records already in the archive).
-    let mut profile_links: Vec<(String, String)> = Vec::new();
+    let mut profile_links: Vec<(String, String, Option<[u32; 4]>)> = Vec::new();
     for (key, relative) in copied {
         let described = batch.media.iter().find(|m| m_number(&m.id).map(m_label).as_deref() == Some(key.as_str()));
         let choice = ctx.draft.file_choices.get(key).cloned().unwrap_or_default();
@@ -407,17 +407,27 @@ fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, St
                 new_links.push((xref.clone(), object.clone()));
             }
             if profile {
-                profile_links.push((xref, object.clone()));
+                // The crop chosen for the photo, in pixels of the source file; no size, no crop (the photo is still saved).
+                let crop = ctx.draft.profile_crop.get(&pid).and_then(|c| {
+                    let file = ctx.draft.files.iter().find(|f| f.m.map(m_label).unwrap_or_else(|| f.name.clone()) == key)?;
+                    crate::crop::pixels(crate::media::upright_size(&file.path)?, c)
+                });
+                profile_links.push((xref, object.clone(), crop));
             }
         }
     }
-    for (xref, object) in profile_links {
+    for (xref, object, crop) in profile_links {
         let indi = changes.get(&xref)?;
         for link in indi.children.iter_mut().filter(|c| c.tag == "OBJE") {
             // As `add_link` does: an old `_PRIM Y` from another program must not win over the new star.
             link.children.retain(|c| c.tag != "_HLM_PROFILE" && c.tag != "_PRIM");
             if link.value.as_deref() == Some(object.as_str()) {
                 link.children.push(Node::with_value("_HLM_PROFILE", "Y"));
+                if let Some(pixels) = crop {
+                    // The chosen crop replaces one already on this link.
+                    link.children.retain(|c| c.tag != "CROP");
+                    link.children.push(crate::crop::crop_node(pixels));
+                }
             }
         }
     }
@@ -1297,6 +1307,63 @@ mod tests {
         assert!(links.iter().all(|(_, m)| m.is_empty()), "no marker written: the first photo still stands in {links:?}");
         let d = s.derived();
         assert_eq!(d.info[0].photo.as_ref().map(|p| p.1.as_str()), Some("media/stare.jpg"));
+    }
+
+    /// The CROP under a person's photo link as `LEFT TOP WIDTH HEIGHT`, per linked object.
+    fn crops(s: &Session, person: &str) -> Vec<(String, Option<String>)> {
+        let value = |c: &Node, tag: &str| c.child("CROP").and_then(|k| k.child_value(tag)).map(str::to_string);
+        s.archive.doc.record(person).unwrap().children_tagged("OBJE").map(|c| (c.pointer().unwrap_or("").to_string(), c.child("CROP").map(|_| ["LEFT", "TOP", "WIDTH", "HEIGHT"].map(|t| value(c, t).unwrap_or_default()).join(" ")))).collect()
+    }
+
+    #[test]
+    fn a_profile_photo_chosen_with_a_crop_is_saved_with_the_crop_in_pixels_of_the_source_image() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let (answer, photo) = example(dir.path());
+        let mut draft = None;
+        load(&mut s, &mut draft, &answer, &photo);
+        // The source is 4 x 3 px: the square frame is 3 px, pushed back inside the image.
+        call(&mut s, &mut draft, "import.profile", json!({ "person": "P1", "file": "M002", "crop": { "x": 0.5, "y": 0.0, "w": 0.75, "h": 1.0 } })).unwrap();
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+        let jozef = xref_of(&mut s, "Józef");
+        assert_eq!(marks(&s, &jozef).iter().map(|(_, m)| m.as_str()).collect::<Vec<_>>(), ["hlm Y"]);
+        assert_eq!(crops(&s, &jozef).into_iter().map(|(_, c)| c).collect::<Vec<_>>(), [Some("1 0 3 3".to_string())]);
+        // The profile shows the cropped photo.
+        let d = s.derived();
+        let i = (0..d.info.len()).find(|&i| d.info[i].given == "Józef").unwrap();
+        assert!(d.info[i].photo.is_some());
+        // Marianna had no crop chosen.
+        let marianna = xref_of(&mut s, "Marianna");
+        assert!(crops(&s, &marianna).iter().all(|(_, c)| c.is_none()));
+    }
+
+    #[test]
+    fn a_crop_on_a_photo_that_is_no_longer_the_profile_photo_is_not_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let (answer, photo) = example(dir.path());
+        let mut draft = None;
+        load(&mut s, &mut draft, &answer, &photo);
+        call(&mut s, &mut draft, "import.profile", json!({ "person": "P1", "file": "M002", "crop": { "x": 0.0, "y": 0.0, "w": 0.75, "h": 1.0 } })).unwrap();
+        call(&mut s, &mut draft, "import.profile", json!({ "person": "P1", "file": null })).unwrap();
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+        let jozef = xref_of(&mut s, "Józef");
+        assert!(crops(&s, &jozef).iter().all(|(_, c)| c.is_none()));
+    }
+
+    #[test]
+    fn a_crop_is_written_on_the_existing_persons_link_when_merging() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = archive_with_jozef(dir.path(), "1 OBJE @O1@\n2 CROP\n3 TOP 0\n3 LEFT 0\n3 WIDTH 1\n3 HEIGHT 1\n");
+        let (answer, photo) = example(dir.path());
+        let mut draft = None;
+        merge_jozef_only(&mut s, &mut draft, &answer, &photo);
+        call(&mut s, &mut draft, "import.profile", json!({ "person": "P1", "file": "M002", "crop": { "x": 0.0, "y": 0.0, "w": 0.75, "h": 1.0 } })).unwrap();
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+        let links = crops(&s, "@I1@");
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].1.as_deref(), Some("0 0 1 1"), "the old photo's own crop stays");
+        assert_eq!(links[1].1.as_deref(), Some("0 0 3 3"));
     }
 
     #[test]

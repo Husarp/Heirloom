@@ -60,6 +60,8 @@ pub struct Draft {
     pub file_choices: HashMap<String, FileChoice>,
     /// The profile photo per person (M label), starting with the AI's suggestion.
     pub profile: HashMap<String, Option<String>>,
+    /// The crop (`{x,y,w,h}` fractions of the upright image) of the chosen profile photo per person.
+    pub profile_crop: HashMap<String, Value>,
     /// M label → the existing media record with the same contents.
     pub duplicates: HashMap<String, String>,
     /// Changes with every load, so file previews from an earlier batch aren't reused.
@@ -158,6 +160,7 @@ pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Val
                 new.answers = old.answers;
                 new.file_choices = old.file_choices;
                 new.profile.extend(old.profile);
+                new.profile_crop.extend(old.profile_crop);
                 for person in old.added {
                     let _ = add_mentioned(s, &mut new, person);
                 }
@@ -355,8 +358,21 @@ pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Val
                         who.push(req(args, "person")?);
                     }
                     let file = args.get("file").and_then(Value::as_str).map(str::to_string);
+                    // A crop (`{x,y,w,h}`) belongs to the chosen file; `null` takes it off, no `crop` keeps the old one.
+                    let crop = args.get("crop").filter(|c| !c.is_null());
+                    if let Some(c) = crop {
+                        if file.is_none() || !["x", "y", "w", "h"].iter().all(|k| c.get(*k).is_some_and(Value::is_number)) {
+                            return Err(ApiError::bad_args("crop"));
+                        }
+                    }
                     for person in who {
-                        d.profile.insert(person, file.clone());
+                        let previous = d.profile.insert(person.clone(), file.clone()).flatten();
+                        if previous != file || (args.get("crop").is_some() && crop.is_none()) {
+                            d.profile_crop.remove(&person);
+                        }
+                        if let Some(c) = crop {
+                            d.profile_crop.insert(person, c.clone());
+                        }
                     }
                 }
                 "import.commit" => {
@@ -491,6 +507,7 @@ fn load(s: &mut Session, texts: &[String], paths: &[PathBuf], exclude: &[PathBuf
         answers: HashMap::new(),
         file_choices: HashMap::new(),
         profile,
+        profile_crop: HashMap::new(),
         duplicates,
         load_id,
         attached: Vec::new(),
@@ -974,6 +991,7 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
             "facts": facts,
             "files": files,
             "profile": draft.profile.get(&p.id).cloned().flatten(),
+            "profileCrop": draft.profile_crop.get(&p.id),
             "excluded": decision.is_some_and(|x| x.excluded),
             "excludedFields": decision.map(|x| x.excluded_fields.iter().cloned().collect::<Vec<_>>()).unwrap_or_default(),
             "summary": p.summary,
@@ -1194,5 +1212,38 @@ mod tests {
         // Another photo replaces the first: one profile photo per person.
         let state = call(&mut session, &mut draft, "import.profile", &json!({ "persons": [ids[1]], "file": "M002" })).unwrap();
         assert_eq!(profile_of(&state, &ids[1]), json!("M002"));
+
+    #[test]
+    fn a_profile_crop_goes_with_its_file_is_refused_without_one_and_survives_adding_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let mut draft = None;
+        let text = format!("```json\n{}\n```", check::extract_blocks(include_str!("../../../../docs/IMPORT_FORMAT.md"), "doc").into_iter().next().unwrap().text);
+        let state = call(&mut session, &mut draft, "import.load", &json!({ "texts": [text.clone()], "paths": [] })).unwrap();
+        let id = state["persons"][0]["id"].as_str().unwrap().to_string();
+        let crop_of = |state: &Value| state["persons"].as_array().unwrap().iter().find(|p| p["id"] == id.as_str()).unwrap()["profileCrop"].clone();
+        let crop = json!({ "x": 0.1, "y": 0.2, "w": 0.5, "h": 0.5 });
+
+        let state = call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": "M001", "crop": crop })).unwrap();
+        assert_eq!(crop_of(&state), crop);
+        // The same file again without `crop` keeps it (`crop: null` takes it off, below).
+        let state = call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": "M001" })).unwrap();
+        assert_eq!(crop_of(&state), crop);
+        // Adding files reloads the batch but keeps the crop.
+        let state = call(&mut session, &mut draft, "import.load", &json!({ "texts": [text], "paths": [], "add": true })).unwrap();
+        assert_eq!(crop_of(&state), crop);
+        // Another file (or none) drops it.
+        let state = call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": "M002" })).unwrap();
+        assert_eq!(crop_of(&state), Value::Null);
+        call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": "M002", "crop": crop })).unwrap();
+        let state = call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": null })).unwrap();
+        assert_eq!(crop_of(&state), Value::Null);
+        // A crop without a file, or a crop that is not {x,y,w,h}, is refused.
+        assert_eq!(call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": null, "crop": crop })).unwrap_err().code, "bad_args");
+        assert_eq!(call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": "M001", "crop": { "x": 0.1 } })).unwrap_err().code, "bad_args");
+        call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": "M001", "crop": crop })).unwrap();
+        let state = call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": "M001", "crop": null })).unwrap();
+        assert_eq!(crop_of(&state), Value::Null);
+    }
     }
 }

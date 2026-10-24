@@ -57,6 +57,8 @@ export interface ImportPerson {
   facts: number;
   files: string[];
   profile: string | null;
+  /** The crop of the chosen profile photo (fractions of the upright image), if one was set. */
+  profileCrop: { x: number; y: number; w: number; h: number } | null;
   excluded: boolean;
   excludedFields: string[];
   summary: string | null;

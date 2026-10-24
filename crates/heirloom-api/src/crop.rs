@@ -33,7 +33,7 @@ pub(crate) fn pixels(size: (u32, u32), crop: &Value) -> Option<[u32; 4]> {
     Some([left, top, side, side])
 }
 
-fn crop_node([left, top, width, height]: [u32; 4]) -> Node {
+pub(crate) fn crop_node([left, top, width, height]: [u32; 4]) -> Node {
     let mut node = Node::new("CROP");
     for (tag, v) in [("TOP", top), ("LEFT", left), ("HEIGHT", height), ("WIDTH", width)] {
         node.children.push(Node::with_value(tag, &v.to_string()));
