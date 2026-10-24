@@ -3,7 +3,7 @@
 Format: `X.Y.Z — YYYY-MM-DD HH:MM: description`. Newest on top.
 X = major change, Y = feature / bigger change, Z = small change.
 
-## 0.9.0 (unreleased) — Looks, „Do uzupełnienia”, photo editing and profile photo crop
+## 0.9.0 — 2026-10-24 18:01: Looks, „Do uzupełnienia”, photo editing and profile photo crop
 - **Colours of the whole app.** Ustawienia › Wygląd › „Kolorystyka”: „Muzeum”, „Poranek”, „Terakota” and „Wrzos”
   (background, panels, sidebar and the tree canvas; each has a light and a dark version). Ustawienia › Wygląd ›
   „Kolor akcentu” (no longer „wkrótce”): „Domyślny dla kolorystyki”, „Zieleń”, „Granat”, „Bordo”, „Śliwka”, „Miedź”
