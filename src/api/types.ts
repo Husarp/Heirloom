@@ -20,6 +20,10 @@ export interface Appearance {
   animations: boolean;
   /** What opening an archive shows: the Start screen, or the place where it was left („Po otwarciu archiwum”). */
   startIn: "start" | "last";
+  /** The colour scheme of the whole app („Kolorystyka”); „Muzeum” is the original look. */
+  scheme: "museum" | "poranek" | "terakota" | "wrzos";
+  /** The accent colour („Kolor akcentu”); `default` is the scheme's own. */
+  accent: "default" | "green" | "navy" | "burgundy" | "plum" | "copper" | "sea";
 }
 
 export interface FileWarning {

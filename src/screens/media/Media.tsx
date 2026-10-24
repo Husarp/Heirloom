@@ -7,6 +7,7 @@ import { useApi } from "../../app/useApi";
 import { Dropdown, EmptyState, Spinner } from "../../components/bits";
 import { count, num } from "../../lib/format";
 import { onFileDrop, pickFiles } from "../../lib/native";
+import { UndescribedChip } from "../todo/UndescribedChip";
 import { Lightbox } from "./Lightbox";
 import { MediaDetail } from "./MediaDetail";
 import { extension, fileName, isImage, isPdf, kindText, runEdit, ThumbImage, useElementSize, type MediaItem } from "./shared";
@@ -546,6 +547,7 @@ function Tile({ item, selected, thumbSize, onSelect, onOpen }: { item: MediaItem
         <Preview item={item} size={thumbSize} />
         {tag && <span className="media-tag">{tag}</span>}
         {item.layer === "mine" && <span className="media-mine">u Ciebie</span>}
+        {item.undescribed && !item.ignored && <UndescribedChip />}
         {item.profileOf.length > 0 && (
           <span className="media-star" title={`Zdjęcie profilowe: ${profileOf.join(", ")}`}>
             <Star size={11} fill="currentColor" />

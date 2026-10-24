@@ -189,8 +189,8 @@ This is the roadmap, with a checkbox per task.
       much of it the WebView starting); frame rates not measured yet
 
 ## Found while building (2026-09-28)
-- [ ] **Import:** link an unrecognised mention to a person or create them (the „Nierozpoznana wzmianka” card), crop the
-      profile photo during the import („Kadruj”); ~~show a file's transcription in step 4~~ done 2026-10-03 (the
+- [ ] **Import:** link an unrecognised mention to a person or create them (the „Nierozpoznana wzmianka” card), ~~crop the
+      profile photo during the import („Kadruj”)~~ done 2026-10-24; ~~show a file's transcription in step 4~~ done 2026-10-03 (the
       „transkrypcja” chip opens the file with its transcription, translation and note, read-only)
 - [x] **Import:** after a person is joined with someone in the archive, suggest their relatives from the batch for
       that person's relatives (matching by family, not only by name) (2026-09-29: +3 points per relative of a clear
@@ -549,10 +549,11 @@ This is the roadmap, with a checkbox per task.
       „Profilowe”), while it still shows among the normal photos
 - [x] **Profile contents (the side list): icons for the main sections** (done 2026-10-19) — on the other side of the progress line,
       only for the important ones (Dane osobowe, Rodzina, Życiorys, Galeria), so the list doesn't get crowded
-- [ ] **Simple photo editing** (to decide; your ImageMagick question): recommended without ImageMagick — it's a big
+- [x] **Simple photo editing** (done 2026-10-24) (to decide; your ImageMagick question): recommended without ImageMagick — it's a big
       separate program with a long list of security fixes, and Heirloom already has the `image` library, which can
       rotate, crop and straighten. So: „Obróć”, „Przytnij”, „Wyprostuj” in the photo view, saved as a new version,
       the original kept
+  - decided 2026-10-22: no ImageMagick, the `image` library; for batch 2b (with cropping the profile photo)
 
 ### Tree
 - [x] **View switch is misaligned** (done 2026-10-19) (screenshot 2026-10-16, „Rodzina · Przodkowie · Potomkowie · Całe drzewo”): it
@@ -566,13 +567,13 @@ This is the roadmap, with a checkbox per task.
 - [x] **Choosing a branch's colour** (done 2026-10-19) (your question: it isn't there yet — Ustawienia › Drzewo › „Kolory gałęzi” is
       still „wkrótce”): build it, and put the colour on top of the surname's edit in Nazwiska too, next to the branch
       name; together with the brighter ready palettes (above, „Branch colours: a few ready palettes”)
-- [ ] **More colour and look choices** — prettier palettes for the whole app, not only the present dark, muted
+- [x] **More colour and look choices** (done 2026-10-22) — prettier palettes for the whole app, not only the present dark, muted
       ones (Wygląd › „Kolor akcentu” is still „wkrótce”); each checked in the light and the dark theme
 - [x] **Zooming out: shapes only later** (done 2026-10-19) — keep the normal cards (smaller text) down to about 30%, and switch to
       shapes only below that
 - [x] **Zoomed-out tree: lines must touch the shapes** (done 2026-10-19) — at e.g. 14% the line to a child stops short of the parents
       and of the child (screenshot 2026-10-16)
-- [ ] **Zoomed-out tree: four looks to choose from** (mockups `design/pomniejszone-drzewo-makiety.html`, 2026-10-19:
+- [x] **Zoomed-out tree: four looks to choose from** (done 2026-10-22) (mockups `design/pomniejszone-drzewo-makiety.html`, 2026-10-19:
       Adam likes all four) — a setting in Ustawienia › Drzewo, e.g. „Wygląd przy oddaleniu”:
   - **A „Kształty”**: filled shapes as today (with the lines touching them);
   - **B „Obwódka”** (the default): a thick border in the branch colour, empty centre, rounded corners, shapes kept;
@@ -601,10 +602,13 @@ This is the roadmap, with a checkbox per task.
 - [x] **Own categories** (done 2026-10-19) — „+ Dodaj kategorię” at the end of Zdjęcie · Dokument · Inne; a new category shows
       everywhere, and Ustawienia gets a place to rename and remove them
 - [x] **„Kto edytuje?” at the end of the import** (done 2026-10-19) offers the names already used on this computer
-- [ ] **Relatives the import mentions but who have no profile** (to decide in detail): created as unfinished
+- [x] **Relatives the import mentions but who have no profile** (done 2026-10-24) (to decide in detail): created as unfinished
       people, shown in Rodzina and in the people list; on the tree only where the relationship is known. The note
       „Do uzupełnienia” shows only on their own profile, never as a banner on every screen
-- [ ] **New tab „Do uzupełnienia”** — unfinished people and undescribed photos and documents in one place, each
+  - decided 2026-10-22: a mentioned relative whose relationship is unknown (e.g. „ciocia Zosia”) becomes an
+    unfinished person with no link, shown only in „Do uzupełnienia” and the people list, not on the tree until the
+    relationship is added; batch 2b
+- [x] **New tab „Do uzupełnienia”** (done 2026-10-24) — unfinished people and undescribed photos and documents in one place, each
       can be ignored, and anyone can be added by hand („Do dokończenia”); undescribed photos still show in the
       gallery, marked „nieopisane”
 

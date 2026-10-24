@@ -68,6 +68,10 @@ export interface GalleryItem {
   people: { id: string; name: string }[];
   /** Whose profile photo it is. */
   profileOf: string[];
+  /** No real caption and not set aside in „Do uzupełnienia” (the „nieopisane” chip). */
+  undescribed?: boolean;
+  ignored?: boolean;
+  edited?: boolean;
 }
 
 export interface DocumentItem {
@@ -81,6 +85,8 @@ export interface DocumentItem {
   meta: string | null;
   tags: string[];
   year: string | null;
+  undescribed?: boolean;
+  ignored?: boolean;
 }
 
 export interface SourceItem {
@@ -175,7 +181,9 @@ export interface Profile {
   age: string | null;
   generationBranch: string;
   tags: string[];
-  portrait: { path: string; caption: string | null; date: string | null } | null;
+  /** `path` is the photo file; `thumb` how to ask for it as a thumbnail (`crop:L,T,W,H/<path>` when it has a crop);
+   *  `crop` is that crop as fractions 0–1 of the upright image. */
+  portrait: { path: string; thumb: string; crop: { x: number; y: number; w: number; h: number } | null; caption: string | null; date: string | null } | null;
   summary: TextItem | null;
   facts: Fact[];
   family: FamilyGroup[];
@@ -196,4 +204,6 @@ export interface Profile {
   created: string | null;
   changed: string | null;
   batch: string | null;
+  /** „Do uzupełnienia”: marked unfinished (by hand or by the import), set aside, not yet in the family, import batch. */
+  todo?: { unfinished: boolean; ignored: boolean; linked: boolean; batch: string | null };
 }

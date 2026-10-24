@@ -21,7 +21,7 @@ export default defineConfig({
   },
   test: {
     include: ["src/**/*.test.ts"],
-    // Vitest turns every CSS import into an empty string unless asked; palettes.test.ts reads tokens.css as text.
-    css: { include: [/styles\/tokens\.css/] },
+    // Vitest turns every CSS import into an empty string unless asked; palettes.test.ts reads tokens.css and schemes.css as text.
+    css: { include: [/styles\/(tokens|schemes)\.css/] },
   },
 });

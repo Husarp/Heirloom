@@ -269,6 +269,10 @@ fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, St
                     _ => "U",
                 };
                 indi.children.push(Node::with_value("SEX", sex));
+                // Only mentioned in the material: unfinished, so „Do uzupełnienia” lists them.
+                if p.mentioned.is_some() {
+                    indi.children.push(Node::with_value("_HLM_TODO", "Y"));
+                }
                 for tag in &p.tags {
                     indi.children.push(Node::with_value("_HLM_TAG", tag));
                 }
@@ -315,7 +319,7 @@ fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, St
     }
 
     // 2. Media records for the files (or the records already in the archive).
-    let mut profile_links: Vec<(String, String)> = Vec::new();
+    let mut profile_links: Vec<(String, String, Option<[u32; 4]>)> = Vec::new();
     for (key, relative) in copied {
         let described = batch.media.iter().find(|m| m_number(&m.id).map(m_label).as_deref() == Some(key.as_str()));
         let choice = ctx.draft.file_choices.get(key).cloned().unwrap_or_default();
@@ -403,17 +407,27 @@ fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, St
                 new_links.push((xref.clone(), object.clone()));
             }
             if profile {
-                profile_links.push((xref, object.clone()));
+                // The crop chosen for the photo, in pixels of the source file; no size, no crop (the photo is still saved).
+                let crop = ctx.draft.profile_crop.get(&pid).and_then(|c| {
+                    let file = ctx.draft.files.iter().find(|f| f.m.map(m_label).unwrap_or_else(|| f.name.clone()) == key)?;
+                    crate::crop::pixels(crate::media::upright_size(&file.path)?, c)
+                });
+                profile_links.push((xref, object.clone(), crop));
             }
         }
     }
-    for (xref, object) in profile_links {
+    for (xref, object, crop) in profile_links {
         let indi = changes.get(&xref)?;
         for link in indi.children.iter_mut().filter(|c| c.tag == "OBJE") {
             // As `add_link` does: an old `_PRIM Y` from another program must not win over the new star.
             link.children.retain(|c| c.tag != "_HLM_PROFILE" && c.tag != "_PRIM");
             if link.value.as_deref() == Some(object.as_str()) {
                 link.children.push(Node::with_value("_HLM_PROFILE", "Y"));
+                if let Some(pixels) = crop {
+                    // The chosen crop replaces one already on this link.
+                    link.children.retain(|c| c.tag != "CROP");
+                    link.children.push(crate::crop::crop_node(pixels));
+                }
             }
         }
     }
@@ -795,6 +809,23 @@ fn write(s: &mut Session, draft: &Draft, name: &str, copied: &HashMap<String, St
             _ => "note",
         };
         add_text(&mut changes, &ctx, owner, kind, t.title.as_deref(), body, t.date.as_deref(), t.place.as_deref(), &t.src, t.certainty.as_deref(), t.basis.as_deref())?;
+    }
+    // How a mentioned person is related to whom, in the material's words, as a research note (new or merged).
+    for p in &batch.persons {
+        let mut seen: Vec<String> = Vec::new();
+        for m in p.mentioned.iter().flatten() {
+            let Some(relation) = m.relation.as_deref() else { continue };
+            // Linked to the person whose material it was, when that one is saved.
+            let by = m.by.as_deref().filter(|by| ctx.uids.contains_key(*by)).and_then(|by| batch.persons.iter().find(|x| x.id == by));
+            let body = match by {
+                Some(by) => format!("Wspomniana w materiałach przy osobie [{}](person:{}) jako: „{relation}”.", super::batch_name(by), by.id),
+                None => format!("Wspomniana w materiałach jako: „{relation}”."),
+            };
+            if !seen.contains(&body) {
+                add_text(&mut changes, &ctx, &p.id, "note", None, &body, None, None, &[], None, None)?;
+                seen.push(body);
+            }
+        }
     }
     // Answers to the AI's questions become research notes at the people they are about.
     for q in &batch.questions {
@@ -1278,6 +1309,63 @@ mod tests {
         assert_eq!(d.info[0].photo.as_ref().map(|p| p.1.as_str()), Some("media/stare.jpg"));
     }
 
+    /// The CROP under a person's photo link as `LEFT TOP WIDTH HEIGHT`, per linked object.
+    fn crops(s: &Session, person: &str) -> Vec<(String, Option<String>)> {
+        let value = |c: &Node, tag: &str| c.child("CROP").and_then(|k| k.child_value(tag)).map(str::to_string);
+        s.archive.doc.record(person).unwrap().children_tagged("OBJE").map(|c| (c.pointer().unwrap_or("").to_string(), c.child("CROP").map(|_| ["LEFT", "TOP", "WIDTH", "HEIGHT"].map(|t| value(c, t).unwrap_or_default()).join(" ")))).collect()
+    }
+
+    #[test]
+    fn a_profile_photo_chosen_with_a_crop_is_saved_with_the_crop_in_pixels_of_the_source_image() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let (answer, photo) = example(dir.path());
+        let mut draft = None;
+        load(&mut s, &mut draft, &answer, &photo);
+        // The source is 4 x 3 px: the square frame is 3 px, pushed back inside the image.
+        call(&mut s, &mut draft, "import.profile", json!({ "person": "P1", "file": "M002", "crop": { "x": 0.5, "y": 0.0, "w": 0.75, "h": 1.0 } })).unwrap();
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+        let jozef = xref_of(&mut s, "Józef");
+        assert_eq!(marks(&s, &jozef).iter().map(|(_, m)| m.as_str()).collect::<Vec<_>>(), ["hlm Y"]);
+        assert_eq!(crops(&s, &jozef).into_iter().map(|(_, c)| c).collect::<Vec<_>>(), [Some("1 0 3 3".to_string())]);
+        // The profile shows the cropped photo.
+        let d = s.derived();
+        let i = (0..d.info.len()).find(|&i| d.info[i].given == "Józef").unwrap();
+        assert!(d.info[i].photo.is_some());
+        // Marianna had no crop chosen.
+        let marianna = xref_of(&mut s, "Marianna");
+        assert!(crops(&s, &marianna).iter().all(|(_, c)| c.is_none()));
+    }
+
+    #[test]
+    fn a_crop_on_a_photo_that_is_no_longer_the_profile_photo_is_not_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let (answer, photo) = example(dir.path());
+        let mut draft = None;
+        load(&mut s, &mut draft, &answer, &photo);
+        call(&mut s, &mut draft, "import.profile", json!({ "person": "P1", "file": "M002", "crop": { "x": 0.0, "y": 0.0, "w": 0.75, "h": 1.0 } })).unwrap();
+        call(&mut s, &mut draft, "import.profile", json!({ "person": "P1", "file": null })).unwrap();
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+        let jozef = xref_of(&mut s, "Józef");
+        assert!(crops(&s, &jozef).iter().all(|(_, c)| c.is_none()));
+    }
+
+    #[test]
+    fn a_crop_is_written_on_the_existing_persons_link_when_merging() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = archive_with_jozef(dir.path(), "1 OBJE @O1@\n2 CROP\n3 TOP 0\n3 LEFT 0\n3 WIDTH 1\n3 HEIGHT 1\n");
+        let (answer, photo) = example(dir.path());
+        let mut draft = None;
+        merge_jozef_only(&mut s, &mut draft, &answer, &photo);
+        call(&mut s, &mut draft, "import.profile", json!({ "person": "P1", "file": "M002", "crop": { "x": 0.0, "y": 0.0, "w": 0.75, "h": 1.0 } })).unwrap();
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+        let links = crops(&s, "@I1@");
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].1.as_deref(), Some("0 0 1 1"), "the old photo's own crop stays");
+        assert_eq!(links[1].1.as_deref(), Some("0 0 3 3"));
+    }
+
     #[test]
     fn a_file_already_in_the_archive_is_found_past_an_object_without_a_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -1373,5 +1461,155 @@ mod tests {
         let state = call(&mut s, &mut draft, "import.state", Value::Null).unwrap();
         let p1 = state["persons"].as_array().unwrap().iter().find(|p| p["id"] == "P1").unwrap();
         assert_eq!(p1["candidates"][0]["id"], jozef.as_str());
+    }
+
+    /// An answer with people the material only mentions: Jan (P2, Józef's brother, with the relationship), „ciocia Zosia”
+    /// (P3, no relationship) and P9 in a text but not in the batch.
+    fn mentioned_answer() -> String {
+        r#"```json
+{
+  "format": "heirloom-import", "version": "1.0", "prompt_rev": "2026-10-24", "batch": "Wspomniani-2026-10-24", "part": 1, "manifest": ["P1", "P2", "P3"],
+  "persons": [
+    { "id": "P1", "sex": "M", "names": [ { "type": "birth", "given": "Józef", "surname": "Kowalski" } ] },
+    { "id": "P2", "sex": "M", "names": [ { "type": "birth", "given": "Jan", "surname": "Kowalski" } ], "mentioned": { "by": "P1", "as": "brat" } },
+    { "id": "P3", "sex": "F", "names": [ { "type": "birth", "given": "Zofia", "nickname": "ciocia Zosia" } ], "mentioned": [ { "by": "P1", "as": "„ciocia”" } ] }
+  ],
+  "relationships": [ { "type": "sibling", "a": "P1", "b": "P2", "kind": "full" } ],
+  "texts": [ { "id": "T1", "person": "P1", "kind": "story", "title": "Odwiedziny", "md": "Józef odwiedzał brata [Jana](person:P2) i [ciocię Zosię](person:P3). Zajrzał też do [Antoniego Maja](person:P9)." } ],
+  "end": { "part": 1, "final": true, "counts": { "persons": 3, "relationships": 1, "texts": 1 }, "marker": "END-HEIRLOOM-IMPORT" }
+}
+```"#
+        .to_string()
+    }
+
+    fn person_of<'a>(state: &'a Value, id: &str) -> &'a Value {
+        state["persons"].as_array().unwrap().iter().find(|p| p["id"] == id).unwrap_or_else(|| panic!("no {id}"))
+    }
+
+    fn warnings(state: &Value) -> Vec<String> {
+        state["issues"].as_array().unwrap().iter().filter(|i| i["level"] == "warning").map(|i| i["message"].as_str().unwrap().to_string()).collect()
+    }
+
+    /// The research notes of a person, as the profile shows them.
+    fn notes_of(s: &mut Session, given: &str) -> Vec<String> {
+        let d = s.derived();
+        let i = (0..d.info.len()).find(|&i| d.info[i].given == given).unwrap();
+        crate::people::profile(d, d.xref(i), &[]).unwrap()["notes"].as_array().unwrap().iter().map(|n| n["body"].as_str().unwrap().to_string()).collect()
+    }
+
+    #[test]
+    fn a_person_only_mentioned_is_saved_unfinished_with_a_note_and_is_linked_only_where_the_relationship_is_known() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let mut draft = None;
+        let state = call(&mut s, &mut draft, "import.load", json!({ "texts": [mentioned_answer()], "paths": [] })).unwrap();
+        assert_eq!(state["errors"], 0, "{}", state["issues"]);
+        assert_eq!(warnings(&state), ["Wzmianka o „Antoniego Maja” wskazuje nieznaną osobę — zostanie zwykłym tekstem."]);
+        assert!(person_of(&state, "P1")["mentioned"].is_null());
+        assert_eq!(person_of(&state, "P2")["mentioned"], json!({ "by": "P1", "byName": "Józef Kowalski", "as": "brat" }));
+        assert_eq!(person_of(&state, "P3")["mentioned"]["as"], "ciocia", "quotes round the words are dropped");
+        assert_eq!(state["summary"]["unfinished"], 2);
+        // A person left out is not counted.
+        call(&mut s, &mut draft, "import.include", json!({ "person": "P3", "include": false })).unwrap();
+        let state = call(&mut s, &mut draft, "import.include", json!({ "person": "P3", "include": true })).unwrap();
+        assert_eq!(state["summary"]["unfinished"], 2);
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+
+        let (jozef, jan, zofia) = (xref_of(&mut s, "Józef"), xref_of(&mut s, "Jan"), xref_of(&mut s, "Zofia"));
+        let mark = |s: &Session, x: &str| s.archive.doc.record(x).unwrap().child_value("_HLM_TODO").map(str::to_string);
+        assert_eq!((mark(&s, &jozef), mark(&s, &jan), mark(&s, &zofia)), (None, Some("Y".into()), Some("Y".into())));
+        let d = s.derived();
+        let at = |x: &str| d.index(x).unwrap();
+        assert!(d.info[at(&jan)].unfinished && d.info[at(&jan)].linked, "a brother is on the tree");
+        assert!(d.info[at(&zofia)].unfinished && !d.info[at(&zofia)].linked, "an aunt with no link is not");
+        assert!(!d.info[at(&jozef)].unfinished);
+        let overview = crate::tree::overview(d, None);
+        assert!(!overview.to_string().contains(&zofia), "„Całe drzewo” leaves out the unlinked one");
+        assert_eq!(notes_of(&mut s, "Jan"), [format!("Wspomniana w materiałach przy osobie [Józef Kowalski](person:{jozef}) jako: „brat”.")]);
+        assert_eq!(notes_of(&mut s, "Zofia"), [format!("Wspomniana w materiałach przy osobie [Józef Kowalski](person:{jozef}) jako: „ciocia”.")]);
+        // The text's mentions work, the unknown one stays plain text.
+        let d = s.derived();
+        let story = crate::people::profile(d, &jozef, &[]).unwrap()["stories"][0]["body"].as_str().unwrap().to_string();
+        assert!(story.contains(&format!("[Jana](person:{jan})")) && story.contains(&format!("[ciocię Zosię](person:{zofia})")), "{story}");
+        assert!(story.contains("Zajrzał też do Antoniego Maja.") && !story.contains("P9"), "{story}");
+        // Józef's own record has no such note.
+        assert!(notes_of(&mut s, "Józef").is_empty());
+    }
+
+    #[test]
+    fn a_mentioned_person_merged_into_an_archive_person_gets_the_note_and_no_mark() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let jan = crate::edit::call(&mut s, "person.create", &json!({ "given": "Jan", "surname": "Kowalski", "sex": "M" })).unwrap()["id"].as_str().unwrap().to_string();
+        let mut draft = None;
+        call(&mut s, &mut draft, "import.load", json!({ "texts": [mentioned_answer()], "paths": [] })).unwrap();
+        call(&mut s, &mut draft, "import.decide", json!({ "person": "P2", "kind": "merge", "target": jan })).unwrap();
+        let state = call(&mut s, &mut draft, "import.state", Value::Null).unwrap();
+        assert_eq!(state["summary"]["unfinished"], 1, "only Zofia is saved as new");
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+        assert_eq!(s.archive.doc.record(&jan).unwrap().child_value("_HLM_TODO"), None, "a person already in the archive is not marked");
+        let notes = notes_of(&mut s, "Jan");
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].starts_with("Wspomniana w materiałach przy osobie [Józef Kowalski](person:") && notes[0].ends_with("jako: „brat”."), "{notes:?}");
+        assert_eq!(s.archive.doc.records.iter().filter(|r| r.tag == "INDI" && r.child_value("_HLM_TODO").is_some()).count(), 1);
+    }
+
+    #[test]
+    fn a_note_without_the_person_it_was_mentioned_by_names_only_the_words() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        // No `by`, and a `by` that isn't in the batch (warned in step 2): the words stay.
+        let answer = mentioned_answer().replace("\"mentioned\": { \"by\": \"P1\", \"as\": \"brat\" }", "\"mentioned\": { \"as\": \"brat\" }").replace("\"by\": \"P1\", \"as\": \"„ciocia”\"", "\"by\": \"P7\", \"as\": \"„ciocia”\"");
+        let mut draft = None;
+        let state = call(&mut s, &mut draft, "import.load", json!({ "texts": [answer], "paths": [] })).unwrap();
+        assert!(warnings(&state).contains(&"Osoba P3: wzmianka wskazuje P7, której nie ma w paczce — ten opis zostanie pominięty.".to_string()), "{:?}", warnings(&state));
+        assert!(person_of(&state, "P2")["mentioned"]["byName"].is_null());
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+        assert_eq!(notes_of(&mut s, "Jan"), ["Wspomniana w materiałach jako: „brat”."]);
+        assert_eq!(notes_of(&mut s, "Zofia"), ["Wspomniana w materiałach jako: „ciocia”."]);
+    }
+
+    #[test]
+    fn an_unknown_mention_can_be_added_as_a_person_to_complete() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let mut draft = None;
+        let state = call(&mut s, &mut draft, "import.load", json!({ "texts": [mentioned_answer()], "paths": [] })).unwrap();
+        let issue = state["issues"].as_array().unwrap().iter().find(|i| i["action"] == "mention").unwrap().clone();
+        assert_eq!((issue["target"].as_str(), issue["detail"].as_str()), (Some("P9"), Some("Antoniego Maja")));
+        // Refused: no name, an id no text mentions, a person the batch has.
+        let refused = |s: &mut Session, draft: &mut Option<Draft>, args: Value| call(s, draft, "import.addMentioned", args).unwrap_err();
+        assert_eq!(refused(&mut s, &mut draft, json!({ "id": "P9", "given": " ", "surname": "" })).message, "Podaj imię albo nazwisko.");
+        assert_eq!(refused(&mut s, &mut draft, json!({ "id": "P7", "given": "Ewa" })).code, "bad_args");
+        assert_eq!(refused(&mut s, &mut draft, json!({ "id": "P2", "given": "Jan" })).code, "bad_args");
+        assert_eq!(state["persons"].as_array().unwrap().len(), 3);
+        assert_eq!(state["batch"]["counts"]["persons"], 3);
+
+        let state = call(&mut s, &mut draft, "import.addMentioned", json!({ "id": "P9", "given": "Antoni", "surname": "Maj", "sex": "M" })).unwrap();
+        assert!(warnings(&state).is_empty(), "{:?}", warnings(&state));
+        assert!(!state["issues"].to_string().contains("\"mention\""));
+        let p9 = person_of(&state, "P9");
+        assert_eq!((p9["name"].as_str(), p9["sex"].as_str(), p9["decision"].as_str()), (Some("Antoni Maj"), Some("M"), Some("new")));
+        assert_eq!(p9["mentioned"], json!({ "by": "P1", "byName": "Józef Kowalski", "as": null }));
+        assert_eq!(state["summary"]["unfinished"], 3);
+        assert_eq!(state["batch"]["counts"]["persons"], 4, "the header's count follows the added person");
+
+        // Adding the missing part or files reloads the batch: the person comes back; a plain load forgets them.
+        let state = call(&mut s, &mut draft, "import.load", json!({ "texts": [], "paths": [], "add": true })).unwrap();
+        assert_eq!(person_of(&state, "P9")["name"], "Antoni Maj");
+        assert!(warnings(&state).is_empty(), "{:?}", warnings(&state));
+        call(&mut s, &mut draft, "import.commit", json!({ "author": "Ewa" })).unwrap();
+
+        let (jozef, antoni) = (xref_of(&mut s, "Józef"), xref_of(&mut s, "Antoni"));
+        assert_eq!(s.archive.doc.record(&antoni).unwrap().child_value("_HLM_TODO"), Some("Y"));
+        let d = s.derived();
+        assert!(d.info[d.index(&antoni).unwrap()].unfinished && !d.info[d.index(&antoni).unwrap()].linked);
+        let story = crate::people::profile(d, &jozef, &[]).unwrap()["stories"][0]["body"].as_str().unwrap().to_string();
+        assert!(story.contains(&format!("[Antoniego Maja](person:{antoni})")), "the mention points at the new person: {story}");
+
+        // Not added: the mention stays plain text and the warning comes back after a fresh load.
+        let state = call(&mut s, &mut draft, "import.load", json!({ "texts": [mentioned_answer()], "paths": [] })).unwrap();
+        assert_eq!(warnings(&state).len(), 1);
+        assert_eq!(state["persons"].as_array().unwrap().len(), 3);
     }
 }

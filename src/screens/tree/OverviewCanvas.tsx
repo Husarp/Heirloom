@@ -2,14 +2,16 @@
 // thousands of people pan and zoom smoothly (PLAN §5.6). Only what is on screen is drawn in detail; the canvas
 // buffer is screen-sized and only grows, so resizing the window never rebuilds it (Phase 0 finding).
 
-import { Application, BitmapFont, BitmapText, Container, Graphics, Sprite, type Renderer } from "pixi.js";
+import { Application, BitmapFont, BitmapText, Container, Graphics, Sprite, Texture, type Renderer } from "pixi.js";
 import { Minus, Plus, LocateFixed, Maximize } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { TreeCamera } from "../../app/store";
-import { useBranchPalette } from "../../app/useAppearance";
+import { useBranchPalette, useColorLook } from "../../app/useAppearance";
 import { cardYears, count, roman } from "../../lib/format";
 import { cameraOf, viewOf } from "./camera";
 import { placeLabels } from "./labels";
+import { buildMarkTextures, type MarkTextures } from "./markTextures";
+import { markFor, markScale, markUnit, markVariant, type LookInk, type ZoomLook } from "./zoomLook";
 
 export interface OverviewData {
   /** [id, x, y, branch, given, surname, birth year, death year, birth uncertain, death uncertain, living, generation,
@@ -43,6 +45,8 @@ const CARD_H = 72;
 const CELL_W = 224;
 const CELL_H = 92;
 const LEFT_COLUMN = 96;
+/** Below this zoom a person is a mark in the chosen look, above it a card. */
+const MARK_ZOOM = 0.4;
 
 type Cluster = OverviewData["clusters"][number];
 
@@ -66,6 +70,11 @@ function labelWidth(c: Cluster): number {
   width += 8 + 6 + 6 + 18 + 2;
   if (document.fonts.status === "loaded") labelWidths.set(key, width);
   return width;
+}
+
+/** A colour as "#rrggbb" for zoomLook.ts. */
+function hex(color: number): string {
+  return `#${color.toString(16).padStart(6, "0")}`;
 }
 
 function cssColor(name: string): number {
@@ -99,6 +108,8 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
   selected: string | null;
   /** The colour of a person: 0 none (`--line`), 1–12 `--b1` …; a new function re-tints everyone at once. */
   colorFor: (index: number) => number;
+  /** How a person looks zoomed far out (Ustawienia › Drzewo); a change swaps the textures, no rebuild. */
+  zoomLook: ZoomLook;
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
   onZoom: (zoom: number) => void;
@@ -107,15 +118,17 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
   onRestored?: () => void;
   /** The camera moved (to remember the place). */
   onCamera?: () => void;
-}>(function OverviewCanvas({ data, dark, hidden, focus, selected, colorFor, onSelect, onOpen, onZoom, restore, onRestored, onCamera }, ref) {
+}>(function OverviewCanvas({ data, dark, hidden, focus, selected, colorFor, zoomLook, onSelect, onOpen, onZoom, restore, onRestored, onCamera }, ref) {
   const host = useRef<HTMLDivElement>(null);
-  const api = useRef<(Omit<OverviewHandle, "getView"> & { recolor: () => void; drawSelection: () => void; drawLine: () => void; setView: (v: TreeCamera) => void }) | null>(null);
+  const api = useRef<(Omit<OverviewHandle, "getView"> & { recolor: () => void; setLook: (look: ZoomLook) => void; drawSelection: () => void; drawLine: () => void; setView: (v: TreeCamera) => void }) | null>(null);
   const [overlay, setOverlay] = useState<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 0.08 });
   const callbacks = useRef({ onSelect, onOpen, onZoom, onCamera, colorFor });
   callbacks.current = { onSelect, onOpen, onZoom, onCamera, colorFor };
   const running = useRef(true);
   running.current = !hidden;
   const labelSpots = useRef(new Map<string, number>());
+  const lookRef = useRef(zoomLook);
+  lookRef.current = zoomLook;
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const focusRef = useRef(focus);
@@ -129,7 +142,10 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
 
   // The colours are read from CSS, so a palette change (Ustawienia › Kolory gałęzi) re-tints too.
   const branchPalette = useBranchPalette();
+  // The scheme and the accent colour the canvas, the cards and the text too: those are baked in, so they rebuild it.
+  const colorLook = useColorLook();
   useEffect(() => api.current?.recolor(), [colorFor, branchPalette]);
+  useEffect(() => api.current?.setLook(zoomLook), [zoomLook]);
   useEffect(() => api.current?.drawSelection(), [selected]);
   useEffect(() => api.current?.drawLine(), [focus]);
   // While the app is starting, it picks up `restore` itself.
@@ -191,22 +207,20 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
         g.destroy();
         return t;
       };
-      const circle = texture(new Graphics().circle(8, 8, 8).fill(0xffffff));
-      const square = texture(new Graphics().roundRect(0, 0, 16, 16, 3).fill(0xffffff));
-      const diamond = texture(new Graphics().poly([8, 0, 16, 8, 8, 16, 0, 8]).fill(0xffffff));
-      const block = texture(new Graphics().roundRect(0, 0, CARD_W, CARD_H, 6).fill(0xffffff));
       const cardBg = texture(new Graphics().roundRect(0.75, 0.75, CARD_W - 1.5, CARD_H - 1.5, 8).fill(card).stroke({ width: 1.5, color: cardBorder }));
       const stripeTex = texture(new Graphics().roundRect(0, 0, 8, CARD_H - 1.5, 4).fill(0xffffff));
-      const shapeFor = (branch: number) => [circle, square, diamond][branch % 3];
+      // The theme's colours the zoomed-out looks use (zoomLook.ts); baked into their textures.
+      const ink: LookInk = { canvas: hex(cssColor("--canvas")), surface: hex(card), line: hex(cssColor("--line")), muted: hex(text2), accent: hex(accent), neutral: hex(cssColor("--line")) };
 
       const world = new Container({ isRenderGroup: true });
       const bands = new Graphics();
       const directLine = new Graphics();
-      const dots = new Container();
-      const blocks = new Container();
+      // The zoomed-out marks: what is the same for everyone under, the branch-coloured part over it.
+      const markUnder = new Container();
+      const markTint = new Container();
       const cards = new Container();
       const selection = new Graphics();
-      world.addChild(bands, blocks, directLine, dots, cards, selection);
+      world.addChild(bands, directLine, markUnder, markTint, cards, selection);
       app.stage.addChild(world);
 
       const n = data.people.length;
@@ -223,23 +237,43 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
 
       let colors = palette();
       const colorOf = (i: number) => colors[callbacks.current.colorFor(i)] ?? colors[0];
-      const dotSprites: Sprite[] = [];
-      const blockSprites: Sprite[] = [];
+      const underSprites: Sprite[] = [];
+      const tintSprites: Sprite[] = [];
       for (let i = 0; i < n; i++) {
-        const [, x, y, branch] = data.people[i];
-        const color = colorOf(i);
-        const d = new Sprite(shapeFor(branch));
-        d.anchor.set(0.5);
-        d.position.set(x + CARD_W / 2, y + CARD_H / 2);
-        d.tint = color;
-        dots.addChild(d);
-        dotSprites.push(d);
-        const b = new Sprite(block);
-        b.position.set(x, y);
-        b.tint = color;
-        blocks.addChild(b);
-        blockSprites.push(b);
+        const [, x, y] = data.people[i];
+        const u = new Sprite();
+        const t = new Sprite();
+        for (const s of [u, t]) {
+          s.anchor.set(0.5);
+          s.position.set(x + CARD_W / 2, y + CARD_H / 2);
+        }
+        t.tint = colorOf(i);
+        markUnder.addChild(u);
+        markTint.addChild(t);
+        underSprites.push(u);
+        tintSprites.push(t);
       }
+      // The look in use; its textures are made once and swapped when the setting changes.
+      let look = lookRef.current;
+      let markTextures: MarkTextures | null = null;
+      let lastZoom = -1;
+      const setLook = (next: ZoomLook) => {
+        const old = markTextures;
+        look = next;
+        markTextures = buildMarkTextures(renderer, look, ink);
+        const hasUnder = markTextures.under.some((t) => t);
+        for (let i = 0; i < n; i++) {
+          const v = markVariant(look, data.people[i][3]);
+          underSprites[i].texture = markTextures.under[v] ?? Texture.EMPTY;
+          tintSprites[i].texture = markTextures.tint[v];
+        }
+        markUnder.renderable = hasUnder;
+        for (const t of [...(old?.under ?? []), ...(old?.tint ?? [])]) t?.destroy(true);
+        lastZoom = -1;
+        drawLine();
+        drawSelection();
+        dirty = true;
+      };
 
       const pool: Card[] = [];
       const shown = new Map<number, Card>();
@@ -299,27 +333,27 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
         const zoom = Math.min(0.9, Math.max(0.02, Math.min((view.w - LEFT_COLUMN - 80) / Math.max(c.width, 400), (view.h - 160) / Math.max(height, 200))));
         setCamera(LEFT_COLUMN + (view.w - LEFT_COLUMN) / 2 - (c.x + c.width / 2) * zoom, 110 + (view.h - 130) / 2 - (top + height / 2) * zoom, zoom);
       };
-      // „Koloruj wg” changed: every dot and block and the cards on screen take the new colours (no rebuild).
+      // „Koloruj wg” changed: every mark and the cards on screen take the new colours (no rebuild).
       const recolor = () => {
         colors = palette();
-        for (let i = 0; i < n; i++) {
-          const color = colorOf(i);
-          dotSprites[i].tint = color;
-          blockSprites[i].tint = color;
-        }
+        for (let i = 0; i < n; i++) tintSprites[i].tint = colorOf(i);
         for (const [i, c] of shown) c.stripe.tint = colorOf(i);
         dirty = true;
       };
-      // The selected person: an accent border with a soft halo around the card or block, a ring around the dot.
+      // The selected person: an accent border with a soft halo around the card, the look's accent ring around the mark.
       const drawSelection = () => {
         selection.clear();
         const i = selectedRef.current == null ? undefined : index.get(selectedRef.current);
         if (i == null) return;
         const [, x, y] = data.people[i];
         const u = 1 / camera.zoom;
-        if (camera.zoom < 0.15) {
-          selection.circle(x + CARD_W / 2, y + CARD_H / 2, 9 * u).stroke({ width: 4 * u, color: accent, alpha: 0.25 });
-          selection.circle(x + CARD_W / 2, y + CARD_H / 2, 7 * u).stroke({ width: 2 * u, color: accent });
+        if (camera.zoom < MARK_ZOOM) {
+          // Sizes in screen px, border inside the box (as the focus views' ring).
+          const r = markFor(look, null, null, markUnit(camera.zoom), ink).ring;
+          const half = r.width / 2;
+          selection
+            .roundRect(x + CARD_W / 2 - (r.w / 2 - half) * u, y + CARD_H / 2 - (r.h / 2 - half) * u, (r.w - r.width) * u, (r.h - r.width) * u, Math.max(0, r.radius - half) * u)
+            .stroke({ width: r.width * u, color: r.color });
         } else {
           selection.roundRect(x - 3 * u, y - 3 * u, CARD_W + 6 * u, CARD_H + 6 * u, 10).stroke({ width: 4 * u, color: accent, alpha: 0.2 });
           selection.roundRect(x, y, CARD_W, CARD_H, 8).stroke({ width: 2 * u, color: accent });
@@ -354,31 +388,40 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
           directLine.stroke({ width: 2.5 / camera.zoom, color: accent, alpha: 0.85, join: "round" });
         }
         const [, x, y] = data.people[start];
-        directLine.roundRect(x - 6 / camera.zoom, y - 6 / camera.zoom, CARD_W + 12 / camera.zoom, CARD_H + 12 / camera.zoom, 10 / camera.zoom).stroke({ width: 2.5 / camera.zoom, color: accent });
+        const u = 1 / camera.zoom;
+        if (camera.zoom < MARK_ZOOM) {
+          // Around the mark: the size of its selection ring plus a 4 px gap (screen px), the stroke's inner edge on the gap.
+          const r = markFor(look, null, null, markUnit(camera.zoom), ink).ring;
+          const w = (r.w + 8 + 2.5) * u;
+          const h = (r.h + 8 + 2.5) * u;
+          directLine.roundRect(x + CARD_W / 2 - w / 2, y + CARD_H / 2 - h / 2, w, h, (r.radius + 4 + 1.25) * u).stroke({ width: 2.5 * u, color: accent });
+        } else directLine.roundRect(x - 6 * u, y - 6 * u, CARD_W + 12 * u, CARD_H + 12 * u, 10 * u).stroke({ width: 2.5 * u, color: accent });
       };
-      api.current = { fit, centerOn, zoomBy: (f) => zoomAt(camera.zoom * f, view.w / 2, view.h / 2), showCluster, recolor, drawSelection, drawLine, setView };
+      api.current = { fit, centerOn, zoomBy: (f) => zoomAt(camera.zoom * f, view.w / 2, view.h / 2), showCluster, recolor, setLook, drawSelection, drawLine, setView };
+      setLook(look);
 
-      let lastZoom = -1;
       const update = () => {
         const z = camera.zoom;
-        // Levels of detail by card width on screen: dots, blocks, cards (spec §3.8 thresholds: 15 % / 40 %).
-        const lod = z >= 0.4 ? 2 : z >= 0.15 ? 3 : 4;
-        dots.visible = lod === 4;
-        blocks.visible = lod === 3;
+        // Levels of detail by card width on screen: the look's marks below 40 % (spec §3.8 threshold), cards above.
+        const marks = z < MARK_ZOOM;
+        markUnder.visible = markTint.visible = marks;
         const left = -camera.x / z;
         const top = -camera.y / z;
         const right = left + view.w / z;
         const bottom = top + view.h / z;
-        if (lod === 4 && z !== lastZoom) {
-          const s = 7 / 16 / z;
-          for (const d of dotSprites) d.scale.set(s);
+        if (marks && z !== lastZoom) {
+          const s = markScale(z);
+          for (let i = 0; i < n; i++) {
+            underSprites[i].scale.set(s);
+            tintSprites[i].scale.set(s);
+          }
         }
         if (z !== lastZoom) {
           drawLine();
           drawSelection();
         }
         lastZoom = z;
-        if (lod !== 2) {
+        if (marks) {
           for (const c of shown.values()) release(c);
           shown.clear();
         } else {
@@ -429,13 +472,13 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
       // Input: drag to pan, wheel to zoom at the cursor, click to select, double click to open the family view.
       const canvas = app.canvas;
       let drag: { x: number; y: number; moved: boolean } | null = null;
-      // The nearest person: within their grid cell (card and the gaps around it) at the block and card levels,
-      // within 14 px on screen at the dot level.
+      // The nearest person: within their grid cell (card and the gaps around it) where cards are drawn,
+      // within 16 px on screen where they are marks.
       const hit = (mx: number, my: number): number | null => {
         const wx = (mx - camera.x) / camera.zoom;
         const wy = (my - camera.y) / camera.zoom;
-        const dotLevel = camera.zoom < 0.15;
-        const reach = 14 / camera.zoom;
+        const dotLevel = camera.zoom < MARK_ZOOM;
+        const reach = 16 / camera.zoom;
         let best: number | null = null;
         let bestDistance = Infinity;
         for (let i = 0; i < n; i++) {
@@ -524,6 +567,8 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
         observer.disconnect();
         canvas.removeEventListener("wheel", onWheel);
         api.current = null;
+        BitmapFont.uninstall(nameFont);
+        BitmapFont.uninstall(smallFont);
         app.destroy(true, { children: true, texture: true, textureSource: true });
       };
     })();
@@ -532,9 +577,9 @@ export const OverviewCanvas = forwardRef<OverviewHandle, {
       destroyed = true;
       cleanup();
     };
-    // Rebuilt when the data or the theme changes (a new centre person only redraws the line, above).
+    // Rebuilt when the data, the theme, the colour scheme or the accent changes (a new centre person only redraws the line, above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, dark]);
+  }, [data, dark, colorLook]);
 
   const z = overlay.zoom;
   const bandTopScreen = (g: number) => overlay.y + (g - 1) * data.bandHeight * z;

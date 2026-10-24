@@ -161,7 +161,7 @@ struct Tree {
     /// Compared key of a path inside the archive → objects.
     by_key: HashMap<String, Vec<usize>>,
     by_id: HashMap<String, usize>,
-    /// Files written inside a person (`@I1@#0`): referenced, never moved.
+    /// Files written inside a person (`@I1@#0`) and the further FILEs of a record (photo versions): referenced, never moved.
     embedded: HashSet<String>,
     person_index: HashMap<String, usize>,
 }
@@ -244,6 +244,12 @@ impl Tree {
         }
         for record in doc.records.iter().filter(|r| r.tag != "OBJE") {
             nested(record, layers, &mut embedded);
+        }
+        // Another version of a photo (its original, an earlier edit) is a further FILE of the same record: referenced, never moved.
+        for file in doc.records.iter().filter(|r| r.tag == "OBJE").flat_map(|r| r.children_tagged("FILE").skip(1)) {
+            if let Some(rel) = file.value.as_deref().and_then(|v| rel_in_layers(&decode_value(v), layers)) {
+                embedded.insert(name_key(&rel));
+            }
         }
         Tree { persons, by_given, objs, by_key, by_id, embedded, person_index }
     }
@@ -624,7 +630,7 @@ fn deleted_files(s: &Session) -> HashSet<String> {
     for entry in s.history().iter().filter(|e| e.action == Action::Delete && e.tag == "OBJE") {
         let Some(before) = entry.before.as_deref() else { continue };
         let (doc, _) = Document::from_bytes(before.as_bytes());
-        for value in doc.records.iter().filter_map(|r| r.child("FILE")?.value.as_deref()) {
+        for value in doc.records.iter().flat_map(|r| r.children_tagged("FILE")).filter_map(|f| f.value.as_deref()) {
             deleted.insert(moved_key(value));
             deleted.insert(moved_key(&decode_value(value)));
         }

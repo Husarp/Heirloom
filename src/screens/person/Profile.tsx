@@ -8,6 +8,8 @@ import { count } from "../../lib/format";
 import { pickFiles } from "../../lib/native";
 import { afterChange } from "../../app/store";
 import { runEdit } from "../media/shared";
+import { ProfileMenu, TodoNote } from "../todo/ProfileTodo";
+import { CropButton, useProfileCrop } from "./ProfileCrop";
 import { CombinedCard, EditInArchive, LinkWithOther } from "./CombinedParts";
 import { PersonalEditor } from "./PersonalSection";
 import { useSection } from "./sectionEdit";
@@ -159,6 +161,7 @@ export function Profile({ id, section, open }: { id: string; section?: string; o
         <article className="profile-article">
           <CombinedCard data={data} />
           <BrokenLinksNotice data={data} />
+          <TodoNote data={data} />
           <SummarySection data={data} />
           <FamilySection data={data} />
           <BioSection data={data} />
@@ -189,6 +192,7 @@ function Hero({ data }: { data: ProfileData }) {
   const editing = mode === "edit";
   const combined = data.combined;
   const personal = useSection(`${p.id}:personal`, "Dane osobowe");
+  const crop = useProfileCrop(data);
   const birthFact = data.facts.find((f) => f.key.startsWith("Urodzon") || f.key.startsWith("Ochrzczon"));
   const deathFact = data.facts.find((f) => f.key.startsWith("Zmarł") || f.key.startsWith("Pochowan"));
 
@@ -214,7 +218,15 @@ function Hero({ data }: { data: ProfileData }) {
     <section id="sec-personal" className="hero">
       <div className="portrait">
         {data.portrait ? (
-          <Thumb path={data.portrait.path} size={512} style={{ width: 200, height: 256, borderRadius: "var(--r-card)" }} />
+          <div className="portrait-frame">
+            {/* A crop is square: the portrait shows all of it instead of cutting its sides. */}
+            <Thumb
+              path={data.portrait.thumb ?? data.portrait.path}
+              size={512}
+              style={{ width: 200, height: data.portrait.thumb?.startsWith("crop:") ? 200 : 256, borderRadius: "var(--r-card)" }}
+            />
+            {editing && crop.start && <CropButton onClick={crop.start} />}
+          </div>
         ) : (
           <div className="portrait-empty">
             <ImageIcon size={24} />
@@ -282,6 +294,8 @@ function Hero({ data }: { data: ProfileData }) {
               Historia zmian
             </button>
           )}
+          <ProfileMenu data={data} onCrop={editing ? crop.start : null} />
+          {crop.dialog}
         </div>
       </div>
     </section>

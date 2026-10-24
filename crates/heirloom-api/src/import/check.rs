@@ -12,14 +12,22 @@ pub struct Issue {
     pub level: &'static str,
     pub message: String,
     pub reference: String,
-    /// `paste` (paste the missing part), `show`, `skip`, `fix`.
+    /// `paste` (paste the missing part), `show`, `skip`, `fix`, `mention` (a mention of an unknown person: `target` is
+    /// the id, `detail` the visible text).
     pub action: Option<&'static str>,
     pub target: Option<String>,
+    /// More for the action: the visible text of an unknown mention, to prefill the name.
+    pub detail: Option<String>,
 }
 
 impl Issue {
     fn new(level: &'static str, message: impl Into<String>, reference: impl Into<String>) -> Issue {
-        Issue { level, message: message.into(), reference: reference.into(), action: None, target: None }
+        Issue { level, message: message.into(), reference: reference.into(), action: None, target: None, detail: None }
+    }
+
+    fn detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
     }
 
     fn act(mut self, action: &'static str, target: Option<String>) -> Issue {
@@ -29,7 +37,7 @@ impl Issue {
     }
 
     pub fn json(&self) -> Value {
-        json!({ "level": self.level, "message": self.message, "reference": self.reference, "action": self.action, "target": self.target })
+        json!({ "level": self.level, "message": self.message, "reference": self.reference, "action": self.action, "target": self.target, "detail": self.detail })
     }
 }
 
@@ -393,10 +401,10 @@ pub fn check(parsed: Parsed, files: &[InputFile]) -> (Batch, Vec<Issue>) {
         if let Some(p) = &t.person {
             check_ref(&mut issues, format!("Tekst {}", t.id), p);
         }
-        // Mentions of ids that aren't in the batch become plain text.
+        // Mentions of ids that aren't in the batch become plain text, unless the user adds them as people in step 2.
         for (_, _, visible, id) in mention_links(t.md.as_deref().unwrap_or("")) {
             if !persons.contains(id.as_str()) && !id.starts_with('@') {
-                issues.push(Issue::new("warning", format!("Wzmianka o „{visible}” wskazuje nieznaną osobę — zostanie zwykłym tekstem."), format!("Tekst {}", t.id)));
+                issues.push(Issue::new("warning", format!("Wzmianka o „{visible}” wskazuje nieznaną osobę — zostanie zwykłym tekstem."), format!("Tekst {}", t.id)).act("mention", Some(id)).detail(visible));
             }
         }
     }
@@ -408,6 +416,14 @@ pub fn check(parsed: Parsed, files: &[InputFile]) -> (Batch, Vec<Issue>) {
     for l in &m.links {
         if let Some(p) = &l.person {
             check_ref(&mut issues, "Link".into(), p);
+        }
+    }
+    // A person only mentioned in the material of someone who isn't in the batch.
+    for p in &m.persons {
+        for by in p.mentioned.iter().flatten().filter_map(|x| x.by.as_deref()) {
+            if !persons.contains(by) {
+                issues.push(Issue::new("warning", format!("Osoba {}: wzmianka wskazuje {by}, której nie ma w paczce — ten opis zostanie pominięty.", p.id), person_label(m, &p.id)));
+            }
         }
     }
     // Unknown keys.
@@ -824,6 +840,26 @@ mod tests {
         let names: Vec<(&str, Option<u32>)> = inputs.files.iter().map(|f| (f.name.as_str(), f.m)).collect();
         assert_eq!(names, [("M001 akt.jpg", Some(1))]);
         assert!(inputs.missing.is_empty());
+    }
+
+    #[test]
+    fn mentioned_people_and_mentions_of_unknown_people_are_checked() {
+        let mut value: Value = serde_json::from_str(&example_json()).unwrap();
+        value["persons"][1]["mentioned"] = json!({ "by": "P1", "as": "brat" });
+        value["persons"][2]["mentioned"] = json!(true);
+        value["persons"][3]["mentioned"] = json!([{ "by": "P99", "as": "ciocia" }]);
+        let md = value["texts"][0]["md"].as_str().unwrap().to_string();
+        value["texts"][0]["md"] = json!(format!("{md} Odwiedzali też [ciocię Zosię](person:P9)."));
+        let (_, issues) = check(parse_blocks(&extract_blocks(&value.to_string(), "x")), &[]);
+        assert!(!issues.iter().any(|i| i.message.starts_with("Nieznane pole")), "mentioned is a known field: {issues:?}");
+        let by: Vec<&Issue> = issues.iter().filter(|i| i.message.starts_with("Osoba ")).collect();
+        assert_eq!(by.len(), 1, "{by:?}");
+        assert_eq!(by[0].level, "warning");
+        assert_eq!(by[0].message, "Osoba P4: wzmianka wskazuje P99, której nie ma w paczce — ten opis zostanie pominięty.");
+        let unknown = issues.iter().find(|i| i.message.starts_with("Wzmianka o")).expect("the unknown mention is warned");
+        assert_eq!(unknown.message, "Wzmianka o „ciocię Zosię” wskazuje nieznaną osobę — zostanie zwykłym tekstem.");
+        assert_eq!((unknown.action, unknown.target.as_deref(), unknown.detail.as_deref()), (Some("mention"), Some("P9"), Some("ciocię Zosię")));
+        assert_eq!(unknown.json()["detail"], "ciocię Zosię");
     }
 
     #[test]

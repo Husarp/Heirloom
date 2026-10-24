@@ -52,6 +52,13 @@ export interface MediaItem {
   /** „Nie ruszaj oryginału”: the file is in the user's folder („mine”) or in the archive. */
   layer?: "mine" | "archive";
   sources: { id: string; title: string | null }[];
+  /** Photo or document with no real caption (the file's name doesn't count), not set aside in „Do uzupełnienia”. */
+  undescribed?: boolean;
+  /** „Pomiń” in „Do uzupełnienia”. */
+  ignored?: boolean;
+  /** An edited version of a photo; `original` is the path of the untouched file (null when there is none). */
+  edited?: boolean;
+  original?: string | null;
 }
 
 export const fileName = (path: string | null | undefined) => path?.split(/[\\/]/).pop() ?? "";

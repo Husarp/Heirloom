@@ -14,6 +14,7 @@ import { foldBranch, parentsOrdered, UNFOLD_NEAR, unfoldAnswer, type FamilyUnfol
 import { directLine, layoutAncestors, layoutDescendants, layoutFamily, pathBetween } from "./layout";
 import { OverviewCanvas, type OverviewData, type OverviewHandle } from "./OverviewCanvas";
 import { SidePanel } from "./SidePanel";
+import { zoomLookOf } from "./zoomLook";
 import "./tree.css";
 
 type View = "family" | "ancestors" | "descendants" | "overview";
@@ -452,6 +453,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
               focus={focus}
               selected={selected}
               colorFor={overviewColor}
+              zoomLook={zoomLookOf(display.treeZoomLook)}
               onSelect={(id) => {
                 setSelected(id);
                 setPanelOpen(true);
@@ -480,6 +482,7 @@ export function Tree({ hidden }: { hidden: boolean }) {
             hidden={hidden}
             animate={animations}
             photos={photos}
+            zoomLook={zoomLookOf(display.treeZoomLook)}
             style={{ color: colorOf, dimmed, highlighted }}
             onSelect={(id) => {
               setSelected(id);

@@ -153,6 +153,9 @@ pub fn call(s: &mut Session, method: &str, args: &Value) -> ApiResult {
         "text.delete" => delete_text(s, args),
         "text.move" => move_text(s, args),
         "place.rename" => rename_place(s, args),
+        "person.setTodo" | "person.setIgnored" | "media.setIgnored" => crate::todo::call(s, method, args),
+        "media.editPhoto" | "media.restoreOriginal" => crate::photo_edit::call(s, method, args),
+        "media.setCrop" => crate::crop::call(s, method, args),
         _ => crate::media_edit::call(s, method, args),
     }
 }

@@ -5,6 +5,7 @@ pub mod activity;
 pub mod backup;
 pub mod combined;
 pub mod config;
+pub mod crop;
 pub mod edit;
 pub mod gedwrite;
 pub mod import;
@@ -18,13 +19,15 @@ pub mod tree;
 pub mod media;
 pub mod overlay;
 pub mod people;
+pub mod photo_edit;
 pub mod progress;
 pub mod running;
 pub mod text;
+pub mod todo;
 pub(crate) mod tools;
 pub mod update;
 
-use config::{AppConfig, IN_PLACE, OVERLAY, RecentArchive, data_key};
+use config::{ACCENT_COLOURS, AppConfig, COLOUR_SCHEMES, IN_PLACE, OVERLAY, RecentArchive, data_key};
 use derive::Derived;
 use heirloom_core::{Archive, Error as CoreError, SaveOptions};
 use serde::Serialize;
@@ -461,6 +464,11 @@ impl Api {
                 Ok(Value::Null)
             }
             "people.list" => Ok(people::list(self.view()?)),
+            // Not for archives opened together (they are read-only and have no such screen).
+            "todo.list" if self.combined.is_none() => {
+                let roots = self.session()?.file_roots();
+                Ok(todo::list(self.view()?, &roots))
+            }
             "people.search" => {
                 let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(20) as usize;
                 let query = str_arg(&args, "q")?;
@@ -485,6 +493,10 @@ impl Api {
                 let history = s.history();
                 let mut profile = people::profile(s.derived(), &id, &history)?;
                 profile["brokenLinks"] = people::broken_links(&s.archive.doc, &id);
+                if profile["portrait"].is_object() {
+                    let roots = s.file_roots();
+                    profile["portrait"]["crop"] = people::portrait_crop(s.derived(), &id, &roots);
+                }
                 Ok(profile)
             }
             "person.panel" => {
@@ -770,6 +782,14 @@ impl Api {
         if start_in.is_some_and(|s| !["start", "last"].contains(&s)) {
             return Err(ApiError::bad_args("startIn"));
         }
+        let scheme = args.get("scheme").and_then(Value::as_str);
+        if scheme.is_some_and(|s| !COLOUR_SCHEMES.contains(&s)) {
+            return Err(ApiError::bad_args("scheme"));
+        }
+        let accent = args.get("accent").and_then(Value::as_str);
+        if accent.is_some_and(|a| !ACCENT_COLOURS.contains(&a)) {
+            return Err(ApiError::bad_args("accent"));
+        }
         self.update_config(|c| {
             let appearance = &mut c.appearance;
             if let Some(theme) = theme {
@@ -786,6 +806,12 @@ impl Api {
             }
             if let Some(start_in) = start_in {
                 appearance.start_in = start_in.into();
+            }
+            if let Some(scheme) = scheme {
+                appearance.scheme = scheme.into();
+            }
+            if let Some(accent) = accent {
+                appearance.accent = accent.into();
             }
         });
         Ok(self.app_state())
@@ -1477,6 +1503,48 @@ mod tests {
         assert_eq!(date_feedback("ok. 14.03.1878")["qualifier"], "about");
         assert_eq!(date_feedback("między 1850 a 1855")["text"], "między 1850 a 1855");
         assert_eq!(date_feedback("zimą 1915")["qualifier"], "text");
+    }
+
+    #[test]
+    fn the_colour_scheme_and_accent_are_chosen_for_the_whole_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config");
+        let mut api = Api::new(Some(config.clone()), None);
+        let state = api.call("app.state", Value::Null).unwrap();
+        assert_eq!((&state["appearance"]["scheme"], &state["appearance"]["accent"]), (&json!("museum"), &json!("default")));
+        assert_eq!(api.call("app.setAppearance", json!({ "scheme": "neon" })).unwrap_err().code, "bad_args");
+        assert_eq!(api.call("app.setAppearance", json!({ "accent": "neon" })).unwrap_err().code, "bad_args");
+        // One at a time: the other choices stay.
+        api.call("app.setAppearance", json!({ "theme": "dark" })).unwrap();
+        api.call("app.setAppearance", json!({ "scheme": "terakota" })).unwrap();
+        let state = api.call("app.setAppearance", json!({ "accent": "plum" })).unwrap();
+        assert_eq!((&state["appearance"]["scheme"], &state["appearance"]["accent"], &state["appearance"]["theme"]), (&json!("terakota"), &json!("plum"), &json!("dark")));
+        // After a restart they are back (they belong to this computer, not to an archive).
+        let mut api = Api::new(Some(config), None);
+        let state = api.call("app.state", Value::Null).unwrap();
+        assert_eq!((&state["appearance"]["scheme"], &state["appearance"]["accent"]), (&json!("terakota"), &json!("plum")));
+    }
+
+    #[test]
+    fn the_profile_tells_the_crop_of_the_profile_photo_as_fractions() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("a");
+        std::fs::create_dir_all(root.join("media")).unwrap();
+        image::RgbImage::from_pixel(400, 200, image::Rgb([9, 9, 9])).save(root.join("media/p.png")).unwrap();
+        let ged = "0 HEAD\n1 GEDC\n2 VERS 7.0\n0 @I1@ INDI\n1 NAME Jan /Nowak/\n1 OBJE @O1@\n2 _HLM_PROFILE Y\n2 CROP\n3 TOP 0\n3 LEFT 100\n3 WIDTH 200\n3 HEIGHT 100\n\
+0 @I2@ INDI\n1 NAME Ewa /Nowak/\n1 OBJE @O1@\n0 @O1@ OBJE\n1 FILE media/p.png\n2 FORM image/png\n3 MEDI PHOTO\n0 TRLR\n";
+        std::fs::write(root.join("rodzina.ged"), ged).unwrap();
+        let mut api = Api::new(Some(dir.path().join("config")), None);
+        api.call("archive.open", json!({ "path": root.to_str().unwrap() })).unwrap();
+        let jan = api.call("person.get", json!({ "id": "@I1@" })).unwrap();
+        assert_eq!(jan["portrait"]["thumb"], "crop:100,0,200,100/media/p.png");
+        assert_eq!(jan["portrait"]["crop"], json!({ "x": 0.25, "y": 0.0, "w": 0.5, "h": 0.5 }));
+        assert_eq!(jan["person"]["photo"], "crop:100,0,200,100/media/p.png");
+        let ewa = api.call("person.get", json!({ "id": "@I2@" })).unwrap();
+        assert_eq!((ewa["portrait"]["thumb"].as_str(), ewa["portrait"]["crop"].is_null()), (Some("media/p.png"), true));
+        assert_eq!(api.call("person.panel", json!({ "id": "@I1@" })).unwrap()["photo"]["cropped"], true);
+        // The crop route serves what the reference says.
+        assert!(matches!(media::serve(&api.media_roots(), "thumb/128/crop%3A100%2C0%2C200%2C100/media/p.png"), media::Served::Ok { .. }));
     }
 
     #[test]

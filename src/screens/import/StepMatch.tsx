@@ -18,6 +18,21 @@ type Tab = "all" | "undecided" | "new" | "merged";
 
 const CHOICE_LABEL: Record<string, string> = { keep: "Zachowaj", replace: "Zastąp", variant: "Wariant", add: "Dodaj", skip: "Pomiń" };
 
+/** The chip of a person the material only mentions; what the tooltip promises follows the decision. */
+function MentionChip({ p }: { p: ImportPerson }) {
+  const title =
+    p.decision === "merge"
+      ? "Zostanie połączona z osobą z archiwum, bez oznaczenia „Do uzupełnienia”."
+      : p.decision === "skip"
+        ? "Pominięta — nie zostanie zapisana."
+        : "Zostanie dodana jako niedokończona osoba — trafi do „Do uzupełnienia”.";
+  return (
+    <span className="badge warn imp-mention-chip" title={title}>
+      tylko wzmianka
+    </span>
+  );
+}
+
 export function StatusBadge({ p }: { p: ImportPerson }) {
   const percent = p.candidates[0]?.percent;
   switch (p.status) {
@@ -88,8 +103,11 @@ export function StepMatch({ state, act, goStep }: { state: ImportState; act: Act
                   <span className="ellipsis" style={{ fontSize: 14, fontWeight: 500, maxWidth: "100%" }}>
                     {p.name}
                   </span>
-                  <span className="ellipsis" style={{ fontSize: 12, color: "var(--text3)", maxWidth: "100%" }}>
-                    {[p.maiden && `z d. ${p.maiden}`, p.years].filter(Boolean).join(" · ") || p.id}
+                  <span className="imp-mention-line">
+                    <span className="ellipsis" style={{ fontSize: 12, color: "var(--text3)" }}>
+                      {[p.maiden && `z d. ${p.maiden}`, p.years].filter(Boolean).join(" · ") || p.id}
+                    </span>
+                    {p.mentioned && <MentionChip p={p} />}
                   </span>
                 </span>
                 <StatusBadge p={p} />
@@ -160,6 +178,12 @@ function Decision({ p, state, act }: { p: ImportPerson; state: ImportState; act:
             {p.files.length > 0 && `, ${count(p.files.length, "plik", "pliki", "plików")}`}
           </span>
           <span className="imp-person-name">{p.name}</span>
+          {p.mentioned && (
+            <span className="imp-mention-line" style={{ marginTop: 4 }}>
+              <MentionChip p={p} />
+              {(p.mentioned.as || p.mentioned.byName) && <span style={{ fontSize: 13, color: "var(--text2)" }}>{[p.mentioned.as, p.mentioned.byName].filter(Boolean).join(" · ")}</span>}
+            </span>
+          )}
         </span>
         <Segmented
           value={p.decision === "merge" ? "merge" : p.decision === "skip" ? "skip" : p.decision === "new" ? "new" : ("" as "new")}
@@ -210,6 +234,8 @@ function Decision({ p, state, act }: { p: ImportPerson; state: ImportState; act:
         </div>
       )}
       {p.decision === "skip" && <div className="imp-note-box">Ta osoba i jej fakty nie zostaną zapisane. Relacje z nią też zostaną pominięte.</div>}
+      {p.mentioned && p.decision === "new" && <div className="imp-note-box">Materiały tylko o tej osobie wspominają. Zostanie dodana jako niedokończona osoba (zakładka „Do uzupełnienia”).</div>}
+      {p.mentioned && p.decision === "merge" && <div className="imp-note-box">Zostanie połączona z osobą z archiwum, bez oznaczenia „Do uzupełnienia”.</div>}
 
       {questions.length > 0 && (
         <div className="imp-small-card">

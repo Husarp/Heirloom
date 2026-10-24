@@ -1,4 +1,4 @@
-import { AppWindow, Archive, BookOpen, ChevronsUpDown, FolderOpen, GitMerge, House, Images, Import, Layers, Library, MapPin, Network, Settings, Signature, Users } from "lucide-react";
+import { AppWindow, Archive, BookOpen, ChevronsUpDown, FolderOpen, GitMerge, House, Images, Import, Layers, Library, ListTodo, MapPin, Network, Settings, Signature, Users } from "lucide-react";
 import { useState, type ComponentType } from "react";
 import type { CombinedArchive } from "../api/types";
 import { useStore, type Route, type TreeView } from "../app/store";
@@ -27,6 +27,7 @@ const NAV: NavItem[] = [
   { icon: BookOpen, label: "Historie", route: { name: "stories" } },
   { icon: Images, label: "Media", route: { name: "media" } },
   { icon: Library, label: "Źródła", route: { name: "sources" } },
+  { icon: ListTodo, label: "Do uzupełnienia", route: { name: "todo" }, only: "archive" },
   { icon: GitMerge, label: "Do sprawdzenia", route: { name: "pairs" }, always: true, only: "set" },
   { icon: Import, label: "Import", route: { name: "import" }, always: true, only: "archive" },
   { icon: Settings, label: "Ustawienia", route: { name: "settings" }, always: true },

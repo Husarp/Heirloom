@@ -1,0 +1,96 @@
+/* The photo with a square frame (CropDialog.tsx). */
+
+.crop-layout {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+.crop-stage {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  border-radius: var(--r-ctl);
+  background: var(--surface2);
+  outline: 1px solid var(--border);
+  touch-action: none;
+  user-select: none;
+}
+.crop-stage > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.crop-failed {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--text3);
+}
+.crop-frame {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid var(--accent);
+  /* Outside the frame the photo is dimmed. */
+  box-shadow: 0 0 0 100vmax var(--backdrop);
+  cursor: move;
+  outline: none;
+}
+.crop-frame:focus-visible {
+  border-style: dashed;
+}
+.crop-circle {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px dashed var(--accent-ink);
+  box-shadow: 0 0 0 1px var(--backdrop);
+  pointer-events: none;
+}
+.crop-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--accent);
+  border: 2px solid var(--accent-ink);
+  box-sizing: border-box;
+}
+.crop-handle.nw {
+  left: -8px;
+  top: -8px;
+  cursor: nwse-resize;
+}
+.crop-handle.se {
+  right: -8px;
+  bottom: -8px;
+  cursor: nwse-resize;
+}
+.crop-handle.ne {
+  right: -8px;
+  top: -8px;
+  cursor: nesw-resize;
+}
+.crop-handle.sw {
+  left: -8px;
+  bottom: -8px;
+  cursor: nesw-resize;
+}
+.crop-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.crop-preview {
+  position: relative;
+  display: block;
+  flex: none;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  box-sizing: content-box;
+}

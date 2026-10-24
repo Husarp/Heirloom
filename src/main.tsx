@@ -9,6 +9,7 @@ import "@fontsource/ibm-plex-sans/500.css";
 import "@fontsource/ibm-plex-sans/600.css";
 import "@fontsource/ibm-plex-sans/700.css";
 import "./styles/tokens.css";
+import "./styles/schemes.css";
 import "./styles/base.css";
 import "./styles/shell.css";
 import "./styles/content.css";

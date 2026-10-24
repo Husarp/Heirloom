@@ -8,6 +8,8 @@ import { call, importFileUrl, type ApiError } from "../../api/transport";
 import { useStore } from "../../app/store";
 import { useCategories } from "../../app/categories";
 import { CategoryDialog } from "../../components/CategoryDialog";
+import { CropDialog } from "../../components/CropDialog";
+import { cropStyle, type Crop } from "../../components/cropMath";
 import { Dialog } from "../../components/Dialog";
 import { Avatar, Spinner, useDismiss } from "../../components/bits";
 import { ProfileStar, ProfileTag, type StarPerson } from "../../components/ProfileStar";
@@ -33,9 +35,12 @@ export function StepFiles({ state, act, goStep }: { state: ImportState; act: Act
   const paths = useWizard((w) => w.paths);
   const categories = useCategories();
   const [open, setOpen] = useState<string | null>(state.persons.find((p) => p.profile)?.id ?? null);
+  const [cropping, setCropping] = useState<string | null>(null);
   const files = state.files;
   const n = (s: ImportFile["status"]) => files.filter((f) => f.status === s).length;
   const attention = n("miss") + n("und");
+  const cropPerson = state.persons.find((p) => p.id === cropping);
+  const cropFile = cropPerson?.profile ? files.find((f) => f.file === cropPerson.profile) : undefined;
   const people = [...state.persons].filter((p) => p.decision !== "skip").sort((a, b) => b.files.length - a.files.length);
 
   // „Pokaż” in step 2 points at one file.
@@ -81,13 +86,20 @@ export function StepFiles({ state, act, goStep }: { state: ImportState; act: Act
                   {expanded && (
                     <div className="row" style={{ gap: 12, padding: "4px 16px 14px" }}>
                       <span className="imp-profile-preview">
-                        {profile?.index != null && profile.image ? <img src={importFileUrl(profile.index, 128, state.loadId)} alt="" /> : <ImageIcon size={18} />}
+                        {profile?.index != null && profile.image ? <ProfilePreview index={profile.index} loadId={state.loadId} crop={p.profileCrop} /> : <ImageIcon size={18} />}
                       </span>
                       <span className="col" style={{ gap: 3, fontSize: 13 }}>
                         <span>
                           Zdjęcie profilowe: <b>{p.profile ?? "brak"}</b>
                         </span>
-                        <ProfilePicker current={p.profile} images={images} onPick={(file) => act("import.profile", { person: p.id, file })} />
+                        <span className="row" style={{ gap: 12 }}>
+                          <ProfilePicker current={p.profile} images={images} onPick={(file) => act("import.profile", { person: p.id, file })} />
+                          {profile?.index != null && profile.image && (
+                            <button className="link" onClick={() => setCropping(p.id)}>
+                              Kadruj
+                            </button>
+                          )}
+                        </span>
                       </span>
                     </div>
                   )}
@@ -135,6 +147,18 @@ export function StepFiles({ state, act, goStep }: { state: ImportState; act: Act
           )}
         </section>
       </div>
+      {cropPerson?.profile && cropFile?.index != null && (
+        <CropDialog
+          src={importFileUrl(cropFile.index, 0, state.loadId)}
+          initial={cropPerson.profileCrop}
+          title="Kadr zdjęcia profilowego"
+          onSave={(crop) => {
+            setCropping(null);
+            void act("import.profile", { person: cropPerson.id, file: cropPerson.profile, crop });
+          }}
+          onClose={() => setCropping(null)}
+        />
+      )}
       <Footer status={<>Krok 4 z 5 · {attention > 0 ? <><b>{needAttention(files.filter((f) => f.status === "miss" || f.status === "und").map((f) => f.kind))} uwagi</b> · można je pominąć</> : "pliki gotowe"}</>}>
         <button className="btn secondary" onClick={() => goStep(3)}>
           Wstecz
@@ -146,6 +170,15 @@ export function StepFiles({ state, act, goStep }: { state: ImportState; act: Act
       </Footer>
     </>
   );
+}
+
+/** The 64 px round preview: the whole thumb, or only the crop when one was chosen (the thumb keeps the aspect ratio). */
+function ProfilePreview({ index, loadId, crop }: { index: number; loadId: number; crop: Crop | null }) {
+  const [aspect, setAspect] = useState<number | null>(null);
+  if (!crop) return <img src={importFileUrl(index, 128, loadId)} alt="" />;
+  // The box is 64 px with a 2 px border.
+  const style = aspect ? cropStyle(crop, aspect, 60) : { visibility: "hidden" as const };
+  return <img className="crop" src={importFileUrl(index, 256, loadId)} alt="" style={style} onLoad={(e) => setAspect(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)} />;
 }
 
 function ProfilePicker({ current, images, onPick }: { current: string | null; images: ImportFile[]; onPick: (file: string | null) => void }) {

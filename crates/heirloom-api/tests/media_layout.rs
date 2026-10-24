@@ -376,6 +376,47 @@ fn unknown_files_leave_out_deleted_ones_noise_and_what_was_left_alone() {
     assert!(unknown_paths(&scan(&mut f.api)).is_empty());
 }
 
+/// jan1.jpg is now the edited copy and `media/jan1 oryginal.jpg` its original: a second FILE of the same record,
+/// marked `_HLM_VERSION original`. Written into the data file, then the archive is opened again.
+fn with_original_version(f: &mut Family) {
+    put(&f.root, "media/jan1 oryginal.jpg", "oryginal");
+    let ged = String::from_utf8(data_bytes(&f.root)).unwrap();
+    let mut lines: Vec<&str> = ged.lines().collect();
+    let first = lines.iter().position(|l| *l == "1 FILE media/jan1.jpg").unwrap();
+    let end = first + 1 + lines[first + 1..].iter().take_while(|l| l.starts_with("2 ") || l.starts_with("3 ")).count();
+    lines.splice(end..end, ["1 FILE media/jan1 oryginal.jpg", "2 FORM image/jpeg", "3 MEDI PHOTO", "2 _HLM_VERSION original"]);
+    fs::write(f.root.join("rodzina.ged"), lines.join("\n") + "\n").unwrap();
+    run(&mut f.api, "archive.open", json!({ "path": path(&f.root) }));
+}
+
+#[test]
+fn another_version_of_a_photo_is_referenced_and_never_moved() {
+    let mut f = family();
+    with_original_version(&mut f);
+    let list = run(&mut f.api, "media.list", Value::Null);
+    let photo = list["items"].as_array().unwrap().iter().find(|m| m["path"] == "media/jan1.jpg").unwrap();
+    assert_eq!((photo["edited"].as_bool(), photo["original"].as_str()), (Some(true), Some("media/jan1 oryginal.jpg")));
+    // Not a stray file: the scan counts it as referenced.
+    let report = scan(&mut f.api);
+    assert!(unknown_paths(&report).is_empty(), "{:?}", unknown_paths(&report));
+    // „Uporządkuj” moves the shown file and leaves the original where it is.
+    let plan = run(&mut f.api, "media.restructurePreview", json!({ "to": "perPerson" }));
+    let moves = plan["moves"].as_array().unwrap();
+    assert!(moves.iter().any(|m| m["from"] == "media/jan1.jpg"));
+    assert!(moves.iter().all(|m| m["from"] != "media/jan1 oryginal.jpg"), "{moves:?}");
+    let tree0 = tree(&f.root);
+    restructure(&mut f.api, "perPerson");
+    assert_eq!(tree(&f.root).len(), tree0.len());
+    assert!(f.root.join("media/jan1 oryginal.jpg").is_file());
+    // A deleted record leaves both of its files on disk, and neither is „unknown” afterwards.
+    let file = paths(&mut f.api).into_values().find(|p| p.ends_with("jan1.jpg")).unwrap();
+    let id = object_at(&mut f.api, &file);
+    run(&mut f.api, "media.delete", json!({ "id": id }));
+    save(&mut f.api);
+    let report = scan(&mut f.api);
+    assert!(unknown_paths(&report).is_empty(), "{:?}", unknown_paths(&report));
+}
+
 #[test]
 fn the_banner_stays_away_until_the_findings_change() {
     let mut f = family();

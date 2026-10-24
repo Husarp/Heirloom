@@ -13,6 +13,7 @@ import { Stories } from "../screens/stories/Stories";
 import { Media } from "../screens/media/Media";
 import { MissingFiles } from "../screens/media/MissingFiles";
 import { Sources } from "../screens/sources/Sources";
+import { Todo } from "../screens/todo/Todo";
 import { Settings } from "../screens/settings/Settings";
 import { Pairs } from "../screens/pairs/Pairs";
 
@@ -55,6 +56,8 @@ export function Screen() {
         return <MissingFiles />;
       case "sources":
         return <Sources selected={route.id} />;
+      case "todo":
+        return <Todo />;
       case "settings":
         return <Settings section={route.section} />;
       case "pairs":

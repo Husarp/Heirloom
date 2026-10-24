@@ -3,6 +3,32 @@
 Format: `X.Y.Z — YYYY-MM-DD HH:MM: description`. Newest on top.
 X = major change, Y = feature / bigger change, Z = small change.
 
+## 0.9.0 (unreleased) — Looks, „Do uzupełnienia”, photo editing and profile photo crop
+- **Colours of the whole app.** Ustawienia › Wygląd › „Kolorystyka”: „Muzeum”, „Poranek”, „Terakota” and „Wrzos”
+  (background, panels, sidebar and the tree canvas; each has a light and a dark version). Ustawienia › Wygląd ›
+  „Kolor akcentu” (no longer „wkrótce”): „Domyślny dla kolorystyki”, „Zieleń”, „Granat”, „Bordo”, „Śliwka”, „Miedź”
+  and „Morski” for buttons, links, selections and the keyboard marker.
+- **Zoomed-out tree.** Ustawienia › Drzewo › „Wygląd przy oddaleniu”: how people look when the tree is very small —
+  „Kształty”, „Obwódka” (the default), „Kafelki” or „Mini-karty”, in the branch colours. It works in Rodzina,
+  Przodkowie, Potomkowie and Całe drzewo, and the selected person keeps the accent ring in all four.
+- **New tab „Do uzupełnienia”.** One place for unfinished people and for photos and documents with no description.
+  „Pomiń” leaves an item out and „Przywróć” brings it back (remembered in the archive). „Do dokończenia” in a
+  profile's „⋯” menu marks a person as unfinished by hand; their profile shows a note until „Gotowe”. Photos and
+  documents with no description are marked „nieopisane” in the gallery and in Media (a file name used as the
+  caption counts as no description).
+- **Import: relatives who are only mentioned.** A relative the material names but says nothing else about (a
+  letter mentions „ciocia Zosia”) becomes an unfinished person. When the relation is known they are linked in the
+  family; otherwise they are only in „Do uzupełnienia” and Osoby, not in the tree. Step 2 offers „Dodaj jako osobę do
+  uzupełnienia” for an unknown mention, and a research note records how the person was mentioned. The import file
+  has a new optional key `mentioned` (the format stays 1.0, the AI instructions are now revision 2026-10-24 — copy
+  the instructions to your AI chat again).
+- **Photo editing.** „Edytuj” in the photo preview and „Edytuj zdjęcie” in Media: „Obróć”, „Wyprostuj” and
+  „Przytnij”. The result is saved as a new file next to the original („… (edytowane)”); „Przywróć oryginał” goes
+  back. Nothing is overwritten or deleted. In „Nie ruszaj oryginału” the new file goes to „Twoje zmiany”.
+- **Cropping the profile photo.** „Kadruj” on the profile photo (edit mode), in the profile's „⋯” menu, on the
+  „Profilowe” spot of the gallery and in Import step 4. The photo file is not changed; the crop is shown on the
+  profile, in the tree's cards and panel and in every list.
+
 ## 0.8.0 — 2026-10-19 14:20: Fixes from the second test — tree, profile, gallery, import, archive list, AI instructions
 - **Tree.**
   - **Rodzina: the descendants arrow unfolds in place.** The „+N” under a child draws that child's descendants

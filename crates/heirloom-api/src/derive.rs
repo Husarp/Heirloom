@@ -80,11 +80,17 @@ pub struct Info {
     pub generation: Option<u32>,
     /// The profile photo: (media id, file path relative to the archive).
     pub photo: Option<(String, String)>,
+    /// The CROP of the link that gave `photo`.
+    pub photo_crop: Option<heirloom_core::gedcom::view::Crop>,
     pub photo_count: usize,
     pub search: String,
     pub parents: Vec<usize>,
     pub children: Vec<usize>,
     pub partners: Vec<usize>,
+    /// Marked unfinished (`_HLM_TODO Y`).
+    pub unfinished: bool,
+    /// The record has a FAMC or FAMS that points at an existing family (a sibling without parents shares a FAM).
+    pub linked: bool,
 }
 
 /// People who share a surname in any of its forms (Kowalski, Kowalska, Kowalskiego…).
@@ -177,6 +183,17 @@ impl Derived {
         Some(origins.iter().filter_map(|&k| self.archive_keys.get(k as usize).map(String::as_str)).collect())
     }
 
+    /// How lists and cards refer to a person's profile photo: the path, or `crop:L,T,W,H/<path>` when the link has a
+    /// CROP (width/height `0` = to the image's edge). The file server's `thumb` route crops by it.
+    pub fn photo_ref(&self, i: usize) -> Option<String> {
+        let info = &self.info[i];
+        let (_, path) = info.photo.as_ref()?;
+        Some(match info.photo_crop {
+            Some(c) => format!("crop:{},{},{},{}/{path}", c.left, c.top, c.width.unwrap_or(0), c.height.unwrap_or(0)),
+            None => path.clone(),
+        })
+    }
+
     /// The texts linked from a person, in order.
     pub fn person_texts_of(&self, xref: &str) -> Vec<&heirloom_core::gedcom::view::Text> {
         match self.index(xref) {
@@ -211,7 +228,7 @@ impl Derived {
             "branchName": self.branch_name(i),
             "generation": info.generation,
             "initials": info.initials,
-            "photo": info.photo.as_ref().map(|(_, path)| path),
+            "photo": self.photo_ref(i),
             "photoCount": info.photo_count,
             "changed": d.changed,
             "created": d.created,
@@ -364,6 +381,7 @@ pub fn build_with(doc: &Document, display: &Display) -> Derived {
         let marked = photos.iter().any(|l| l.profile || l.profile_off);
         let profile = photos.iter().find(|l| l.profile).or(if marked { None } else { photos.first() });
         let photo = profile.and_then(|l| Some((l.object.clone(), view.media.get(&l.object)?.file.clone()?)));
+        let photo_crop = profile.filter(|_| photo.is_some()).and_then(|l| l.crop);
         let given_first = p.display_name();
         let name = if display.surname_first && !p.surname().is_empty() && !p.given().is_empty() { format!("{} {}", p.surname(), p.given()) } else { given_first.clone() };
         let mut search = fold(&name);
@@ -389,11 +407,14 @@ pub fn build_with(doc: &Document, display: &Display) -> Derived {
             group,
             generation: generations[i],
             photo,
+            photo_crop,
             photo_count: photos.len(),
             search,
             parents: std::mem::take(&mut parents[i]),
             children: std::mem::take(&mut children[i]),
             partners: std::mem::take(&mut partners[i]),
+            unfinished: d.todo,
+            linked: p.famc.iter().chain(&p.fams).any(|f| view.family_index.contains_key(f)),
             initials: initials(&given_first),
             name: if name.is_empty() { "(bez imienia)".to_string() } else { name },
         });
@@ -564,6 +585,34 @@ mod tests {
         assert_eq!((antoni["birth"]["year"].as_str(), antoni["birth"]["uncertain"].as_bool()), (Some("ok. 1850"), Some(true)));
         let marianna = d.summary(d.index("@I4@").unwrap());
         assert_eq!((marianna["name"].as_str(), marianna["maiden"].as_str()), (Some("Marianna Kowalska"), Some("Nowak")));
+    }
+
+    #[test]
+    fn a_crop_rides_on_the_photo_reference_and_unfinished_people_know_if_they_are_linked() {
+        let file = "0 HEAD\n1 GEDC\n2 VERS 7.0\n\
+0 @I1@ INDI\n1 NAME Jan /Nowak/\n1 FAMS @F1@\n1 OBJE @O1@\n2 _HLM_PROFILE Y\n2 CROP\n3 TOP 10\n3 LEFT 20\n3 WIDTH 100\n\
+0 @I2@ INDI\n1 NAME Ewa /Nowak/\n1 FAMS @F1@\n1 _HLM_TODO Y\n1 OBJE @O1@\n\
+0 @I3@ INDI\n1 NAME Zosia /Nowak/\n1 _HLM_TODO Y\n\
+0 @I4@ INDI\n1 NAME Adam /Nowak/\n1 FAMC @F2@\n1 _HLM_TODO Y\n\
+0 @I5@ INDI\n1 NAME Ola /Nowak/\n1 FAMS @F9@\n1 _HLM_TODO Y\n\
+0 @I6@ INDI\n1 NAME Ala /Nowak/\n\
+0 @F1@ FAM\n1 HUSB @I1@\n1 WIFE @I2@\n0 @F2@ FAM\n1 CHIL @I4@\n\
+0 @O1@ OBJE\n1 FILE media/p.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n0 TRLR\n";
+        let d = build(&Document::from_bytes(file.as_bytes()).0);
+        let at = |x: &str| d.index(x).unwrap();
+        // Jan's link has a CROP (width only: the height 0 goes to the edge); Ewa's has none. Both name the same photo.
+        assert_eq!(d.photo_ref(at("@I1@")).as_deref(), Some("crop:20,10,100,0/media/p.jpg"));
+        assert_eq!(d.summary(at("@I1@"))["photo"], "crop:20,10,100,0/media/p.jpg");
+        assert_eq!(d.photo_ref(at("@I2@")).as_deref(), Some("media/p.jpg"));
+        assert_eq!(d.info[at("@I1@")].photo.as_ref().map(|p| p.0.as_str()), Some("@O1@"), "the photo tuple stays as it was");
+        assert_eq!(d.photo_ref(at("@I6@")), None);
+        let flags = |x: &str| (d.info[at(x)].unfinished, d.info[at(x)].linked);
+        assert_eq!(flags("@I1@"), (false, true));
+        assert_eq!(flags("@I2@"), (true, true));
+        assert_eq!(flags("@I3@"), (true, false), "mentioned only");
+        assert_eq!(flags("@I4@"), (true, true), "a sibling without parents shares a family");
+        assert_eq!(flags("@I5@"), (true, false), "a link to a family that isn't there");
+        assert_eq!(flags("@I6@"), (false, false));
     }
 
     #[test]

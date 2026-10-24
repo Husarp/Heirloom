@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useState } from "react";
 import { inTauri } from "../api/transport";
+import { knownAccent, knownScheme } from "./colorLooks";
 import { useStore } from "./store";
 
 /** The branch colour palette of the open archive (Ustawienia › Drzewo › Kolory gałęzi): "light" or "bright"; the
@@ -9,10 +10,20 @@ export function useBranchPalette(): "light" | "bright" | undefined {
   return palette === "light" || palette === "bright" ? palette : undefined;
 }
 
-/** Applies the theme, text size, density and animation settings to the whole window. */
+/** The colour scheme and the accent colour (Ustawienia › Wygląd) as one key, for what has to be rebuilt when either
+ *  changes (a canvas that bakes the colours in). */
+export function useColorLook(): string {
+  const scheme = useStore((s) => knownScheme(s.app?.appearance.scheme));
+  const accent = useStore((s) => knownAccent(s.app?.appearance.accent));
+  return `${scheme}/${accent}`;
+}
+
+/** Applies the theme, colour scheme, accent, text size, density and animation settings to the whole window. */
 export function useAppearance() {
   const appearance = useStore((s) => s.app?.appearance);
   const palette = useBranchPalette();
+  const scheme = useStore((s) => knownScheme(s.app?.appearance.scheme));
+  const accent = useStore((s) => knownAccent(s.app?.appearance.accent));
   const [systemDark, setSystemDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
 
   useEffect(() => {
@@ -33,12 +44,17 @@ export function useAppearance() {
     root.classList.toggle("compact", appearance?.density === "compact");
   }, [dark, appearance?.animations, appearance?.density]);
 
-  // Before any effect of the screens below, so the tree can read the new colours when it recolours itself.
+  // Before any effect of the screens below, so the tree can read the new colours when it recolours itself. The default
+  // scheme and accent are no attribute at all (tokens.css).
   useLayoutEffect(() => {
     const root = document.documentElement;
     if (palette) root.dataset.palette = palette;
     else delete root.dataset.palette;
-  }, [palette]);
+    if (scheme !== "museum") root.dataset.scheme = scheme;
+    else delete root.dataset.scheme;
+    if (accent !== "default") root.dataset.accent = accent;
+    else delete root.dataset.accent;
+  }, [palette, scheme, accent]);
 
   useEffect(() => {
     // The whole interface grows, like the browser zoom: the design is drawn in px at 100 %.

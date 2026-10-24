@@ -280,3 +280,20 @@
   flex: 1 1 320px;
   min-width: 0;
 }
+
+/* „nieopisane”: a photo or document without a caption (profile gallery, Media tiles, „Do uzupełnienia”). Bottom left,
+   because the profile star and the tag sit at the top. */
+.undescribed-chip {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  z-index: 1;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}

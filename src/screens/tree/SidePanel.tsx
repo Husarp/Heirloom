@@ -9,7 +9,8 @@ import type { Profile } from "../person/types";
 
 interface PanelData {
   person: PersonSummary;
-  photo: { path: string; caption: string | null; date: string | null } | null;
+  /** `cropped`: the path is a profile crop (a square), so it is shown whole. */
+  photo: { path: string; cropped?: boolean; caption: string | null; date: string | null } | null;
   generationBranch: string;
   birth: string | null;
   death: string | null;
@@ -58,7 +59,7 @@ export function SidePanel({
           <div className="tree-panel-body">
             <div className="panel-photo">
               {data.photo ? (
-                <img src={mediaUrl(data.photo.path, "thumb", 512)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                <img src={mediaUrl(data.photo.path, "thumb", 512)} alt="" style={{ width: "100%", height: "100%", objectFit: data.photo.cropped ? "contain" : "cover" }} />
               ) : (
                 <>
                   <ImageIcon size={22} />

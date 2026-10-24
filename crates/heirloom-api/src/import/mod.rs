@@ -60,6 +60,8 @@ pub struct Draft {
     pub file_choices: HashMap<String, FileChoice>,
     /// The profile photo per person (M label), starting with the AI's suggestion.
     pub profile: HashMap<String, Option<String>>,
+    /// The crop (`{x,y,w,h}` fractions of the upright image) of the chosen profile photo per person.
+    pub profile_crop: HashMap<String, Value>,
     /// M label → the existing media record with the same contents.
     pub duplicates: HashMap<String, String>,
     /// Changes with every load, so file previews from an earlier batch aren't reused.
@@ -77,6 +79,9 @@ pub struct Draft {
     /// Dropped paths that are gone: shown in step 1 so they can be taken off the list.
     pub missing: Vec<PathBuf>,
     pub exclude: Vec<PathBuf>,
+    /// People typed in step 2 for a mention of someone the batch doesn't have (`import.addMentioned`): a reload that
+    /// adds to the batch puts them back while their id is still mentioned and still not in the batch.
+    pub added: Vec<format::Person>,
 }
 
 /// A file picked for M-number `n` (it replaces any other file with that number).
@@ -155,6 +160,10 @@ pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Val
                 new.answers = old.answers;
                 new.file_choices = old.file_choices;
                 new.profile.extend(old.profile);
+                new.profile_crop.extend(old.profile_crop);
+                for person in old.added {
+                    let _ = add_mentioned(s, &mut new, person);
+                }
                 for (id, decision) in old.decisions {
                     if new.decisions.contains_key(&id) {
                         new.decisions.insert(id, decision);
@@ -311,6 +320,26 @@ pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Val
                     let n = m_number(&label).ok_or_else(|| ApiError::bad_args("file"))?;
                     attach(d, n, PathBuf::from(req(args, "path")?))?;
                 }
+                "import.addMentioned" => {
+                    let id = req(args, "id")?;
+                    let text = |key: &str| args.get(key).and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty()).map(str::to_string);
+                    let (given, surname) = (text("given"), text("surname"));
+                    if given.is_none() && surname.is_none() {
+                        return Err(ApiError::new("bad_args", "Podaj imię albo nazwisko."));
+                    }
+                    let sex = match args.get("sex").and_then(Value::as_str) {
+                        Some("M") => "M",
+                        Some("F") => "F",
+                        _ => "U",
+                    };
+                    let person = format::Person {
+                        id,
+                        names: vec![format::Name { kind: Some("birth".into()), given, surname, ..Default::default() }],
+                        sex: Some(sex.into()),
+                        ..Default::default()
+                    };
+                    add_mentioned(s, d, person)?;
+                }
                 "import.fixDate" => {
                     // A date the AI wrote as free text, set by hand in step 2.
                     let id = req(args, "event")?;
@@ -329,8 +358,21 @@ pub fn call(s: &mut Session, draft: &mut Option<Draft>, method: &str, args: &Val
                         who.push(req(args, "person")?);
                     }
                     let file = args.get("file").and_then(Value::as_str).map(str::to_string);
+                    // A crop (`{x,y,w,h}`) belongs to the chosen file; `null` takes it off, no `crop` keeps the old one.
+                    let crop = args.get("crop").filter(|c| !c.is_null());
+                    if let Some(c) = crop {
+                        if file.is_none() || !["x", "y", "w", "h"].iter().all(|k| c.get(*k).is_some_and(Value::is_number)) {
+                            return Err(ApiError::bad_args("crop"));
+                        }
+                    }
                     for person in who {
-                        d.profile.insert(person, file.clone());
+                        let previous = d.profile.insert(person.clone(), file.clone()).flatten();
+                        if previous != file || (args.get("crop").is_some() && crop.is_none()) {
+                            d.profile_crop.remove(&person);
+                        }
+                        if let Some(c) = crop {
+                            d.profile_crop.insert(person, c.clone());
+                        }
                     }
                 }
                 "import.commit" => {
@@ -396,6 +438,7 @@ fn load(s: &mut Session, texts: &[String], paths: &[PathBuf], exclude: &[PathBuf
             reference: "Wklejony tekst".into(),
             action: None,
             target: None,
+            detail: None,
         });
     }
     let roots = s.file_roots();
@@ -412,6 +455,7 @@ fn load(s: &mut Session, texts: &[String], paths: &[PathBuf], exclude: &[PathBuf
                 reference: format!("Plik {}", f.name),
                 action: None,
                 target: None,
+                detail: None,
             });
             duplicates.insert(m_label(n), existing);
         }
@@ -424,10 +468,7 @@ fn load(s: &mut Session, texts: &[String], paths: &[PathBuf], exclude: &[PathBuf
     }
     matching::family_boost(d, &batch.merged, &mut candidates);
     for p in &batch.merged.persons {
-        let list = &candidates[&p.id];
-        let kind = if matching::status_for(list.first()) == "new" { Kind::New } else { Kind::Undecided };
-        let target = list.first().map(|c| c.xref.clone());
-        decisions.insert(p.id.clone(), Decision { kind, target, fields: HashMap::new(), excluded: false, excluded_fields: HashSet::new() });
+        decisions.insert(p.id.clone(), first_decision(&candidates[&p.id]));
     }
     // The AI's profile-photo suggestions.
     let mut profile = HashMap::new();
@@ -450,6 +491,7 @@ fn load(s: &mut Session, texts: &[String], paths: &[PathBuf], exclude: &[PathBuf
                     reference: format!("Osoba {} · {}", role.p, who.trim()),
                     action: None,
                     target: Some(role.p.clone()),
+                    detail: None,
                 });
             }
         }
@@ -465,6 +507,7 @@ fn load(s: &mut Session, texts: &[String], paths: &[PathBuf], exclude: &[PathBuf
         answers: HashMap::new(),
         file_choices: HashMap::new(),
         profile,
+        profile_crop: HashMap::new(),
         duplicates,
         load_id,
         attached: Vec::new(),
@@ -475,7 +518,41 @@ fn load(s: &mut Session, texts: &[String], paths: &[PathBuf], exclude: &[PathBuf
         skipped,
         missing: inputs.missing,
         exclude: exclude.to_vec(),
+        added: Vec::new(),
     }
+}
+
+/// A person's decision before the user decides: new when nothing in the archive is close, else waiting.
+fn first_decision(candidates: &[matching::Candidate]) -> Decision {
+    let kind = if matching::status_for(candidates.first()) == "new" { Kind::New } else { Kind::Undecided };
+    Decision { kind, target: candidates.first().map(|c| c.xref.clone()), fields: HashMap::new(), excluded: false, excluded_fields: HashSet::new() }
+}
+
+/// The first text of the batch that mentions `id` (`[…](person:P9)`).
+fn first_text_mentioning<'a>(batch: &'a Part, id: &str) -> Option<&'a format::Text> {
+    batch.texts.iter().find(|t| check::mention_links(t.md.as_deref().unwrap_or("")).iter().any(|(_, _, _, mentioned)| mentioned == id))
+}
+
+/// Adds `person` to the batch as a person only mentioned, for an id some text mentions that the batch doesn't have: its
+/// candidates and decision come as for any person of a load, its warnings go, and the draft remembers it.
+fn add_mentioned(s: &mut Session, d: &mut Draft, mut person: format::Person) -> Result<(), ApiError> {
+    let batch = &d.batch.merged;
+    if batch.persons.iter().any(|p| p.id == person.id) {
+        return Err(ApiError::new("bad_args", "Ta osoba jest już w paczce."));
+    }
+    let Some(text) = first_text_mentioning(batch, &person.id) else {
+        return Err(ApiError::new("bad_args", format!("Żaden tekst z paczki nie wspomina o osobie {}.", person.id)));
+    };
+    person.mentioned = Some(vec![format::Mention { by: text.person.clone(), relation: None }]);
+    let archive = s.derived();
+    let candidates = matching::candidates(archive, &matching::surname_keys(archive), batch, &person);
+    d.decisions.insert(person.id.clone(), first_decision(&candidates));
+    d.candidates.insert(person.id.clone(), candidates);
+    d.issues.retain(|i| !(i.action == Some("mention") && i.target.as_deref() == Some(person.id.as_str())));
+    d.added.retain(|p| p.id != person.id);
+    d.added.push(person.clone());
+    d.batch.merged.persons.push(person);
+    Ok(())
 }
 
 /// Step 1's list of everything dropped or pasted (design 17d): each AI answer with its part and counts, each file with
@@ -914,9 +991,15 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
             "facts": facts,
             "files": files,
             "profile": draft.profile.get(&p.id).cloned().flatten(),
+            "profileCrop": draft.profile_crop.get(&p.id),
             "excluded": decision.is_some_and(|x| x.excluded),
             "excludedFields": decision.map(|x| x.excluded_fields.iter().cloned().collect::<Vec<_>>()).unwrap_or_default(),
             "summary": p.summary,
+            "mentioned": p.mentioned.as_ref().map(|list| {
+                let first = list.first();
+                let by = first.and_then(|m| m.by.as_deref());
+                json!({ "by": by, "byName": by.and_then(|by| batch.persons.iter().find(|x| x.id == by)).map(batch_name), "as": first.and_then(|m| m.relation.as_deref()) })
+            }),
         }));
     }
 
@@ -996,6 +1079,8 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
     let mentions_plain = draft.issues.iter().filter(|i| i.message.starts_with("Wzmianka o")).count();
     let unanswered = batch.questions.iter().filter(|q| !draft.answers.get(&q.id).is_some_and(|a| !a.0.is_empty())).count();
     let count_kind = |k: Kind| draft.decisions.values().filter(|x| x.kind == k && !x.excluded).count();
+    // People saved as new that the material only mentions: they land in „Do uzupełnienia”.
+    let unfinished = batch.persons.iter().filter(|p| p.mentioned.is_some() && draft.decisions.get(&p.id).is_some_and(|x| x.kind == Kind::New && !x.excluded)).count();
     let inputs = input_list(draft, &files);
     Ok(json!({
         "loadId": draft.load_id,
@@ -1029,6 +1114,7 @@ fn state(s: &mut Session, draft: &Draft) -> ApiResult {
             "new": count_kind(Kind::New),
             "merged": count_kind(Kind::Merge),
             "skipped": count_kind(Kind::Skip) + draft.decisions.values().filter(|x| x.excluded).count(),
+            "unfinished": unfinished,
             "events": batch.events.len(),
             "relationships": batch.relationships.len(),
             "texts": batch.texts.len(),
@@ -1126,5 +1212,38 @@ mod tests {
         // Another photo replaces the first: one profile photo per person.
         let state = call(&mut session, &mut draft, "import.profile", &json!({ "persons": [ids[1]], "file": "M002" })).unwrap();
         assert_eq!(profile_of(&state, &ids[1]), json!("M002"));
+    }
+
+    #[test]
+    fn a_profile_crop_goes_with_its_file_is_refused_without_one_and_survives_adding_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::new(Archive::create(&dir.path().join("a"), "A").unwrap());
+        let mut draft = None;
+        let text = format!("```json\n{}\n```", check::extract_blocks(include_str!("../../../../docs/IMPORT_FORMAT.md"), "doc").into_iter().next().unwrap().text);
+        let state = call(&mut session, &mut draft, "import.load", &json!({ "texts": [text.clone()], "paths": [] })).unwrap();
+        let id = state["persons"][0]["id"].as_str().unwrap().to_string();
+        let crop_of = |state: &Value| state["persons"].as_array().unwrap().iter().find(|p| p["id"] == id.as_str()).unwrap()["profileCrop"].clone();
+        let crop = json!({ "x": 0.1, "y": 0.2, "w": 0.5, "h": 0.5 });
+
+        let state = call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": "M001", "crop": crop })).unwrap();
+        assert_eq!(crop_of(&state), crop);
+        // The same file again without `crop` keeps it (`crop: null` takes it off, below).
+        let state = call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": "M001" })).unwrap();
+        assert_eq!(crop_of(&state), crop);
+        // Adding files reloads the batch but keeps the crop.
+        let state = call(&mut session, &mut draft, "import.load", &json!({ "texts": [text], "paths": [], "add": true })).unwrap();
+        assert_eq!(crop_of(&state), crop);
+        // Another file (or none) drops it.
+        let state = call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": "M002" })).unwrap();
+        assert_eq!(crop_of(&state), Value::Null);
+        call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": "M002", "crop": crop })).unwrap();
+        let state = call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": null })).unwrap();
+        assert_eq!(crop_of(&state), Value::Null);
+        // A crop without a file, or a crop that is not {x,y,w,h}, is refused.
+        assert_eq!(call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": null, "crop": crop })).unwrap_err().code, "bad_args");
+        assert_eq!(call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": "M001", "crop": { "x": 0.1 } })).unwrap_err().code, "bad_args");
+        call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": "M001", "crop": crop })).unwrap();
+        let state = call(&mut session, &mut draft, "import.profile", &json!({ "person": id, "file": "M001", "crop": null })).unwrap();
+        assert_eq!(crop_of(&state), Value::Null);
     }
 }

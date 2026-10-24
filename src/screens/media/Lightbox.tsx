@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, ExternalLink, FileText, FileX, FolderOpen, Image as ImageIcon, ImageOff, Maximize, Minimize, Minus, Plus, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Crop, ExternalLink, FileText, FileX, FolderOpen, Image as ImageIcon, ImageOff, Maximize, Minimize, Minus, Plus, X } from "lucide-react";
 import { Fragment, useEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { mediaUrl } from "../../api/transport";
@@ -6,6 +6,8 @@ import { useStore } from "../../app/store";
 import { useApi } from "../../app/useApi";
 import { Spinner } from "../../components/bits";
 import { num } from "../../lib/format";
+import { EditedNote, PhotoEditor } from "./PhotoEditor";
+import { isEditableImage } from "./photoMath";
 import { fileName, isImage, isPdf, isWebImage, MetaRows, openInProgram, showInFolder, TextBlock, useElementSize, type MediaItem } from "./shared";
 import "./media.css";
 
@@ -37,6 +39,8 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
  *  show in the WebView's own viewer. Esc closes. Rendered over the whole window, in a fixed dark palette. */
 export function Lightbox({ items, index, onClose, title }: { items: LightboxItem[]; index: number; onClose: () => void; title?: string }) {
   const go = useStore((s) => s.go);
+  // Archives opened together are only for looking at: no editing of the pictures.
+  const combined = useStore((s) => s.archive?.combined != null);
   const [pos, setPos] = useState(() => clamp(index, 0, Math.max(0, items.length - 1)));
   const current = Math.min(pos, items.length - 1);
   const item = items[current] as LightboxItem | undefined;
@@ -51,6 +55,7 @@ export function Lightbox({ items, index, onClose, title }: { items: LightboxItem
   const [failed, setFailed] = useState(false);
   const [original, setOriginal] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [editing, setEditing] = useState(false);
   // Every item opens fitted to the window.
   const [shownId, setShownId] = useState(item?.id);
   if (item && shownId !== item.id) {
@@ -60,6 +65,7 @@ export function Lightbox({ items, index, onClose, title }: { items: LightboxItem
     setNatural(null);
     setFailed(false);
     setOriginal(false);
+    setEditing(false);
   }
 
   const [stageRef, stage, stageEl] = useElementSize<HTMLDivElement>();
@@ -72,6 +78,16 @@ export function Lightbox({ items, index, onClose, title }: { items: LightboxItem
   const missing = !path || !!info?.missing;
   const showsImage = !missing && isImage(path) && !failed;
   const showsPdf = !missing && isPdf(path);
+  // A photo saved in a new version is another file: it is drawn afresh, fitted to the window.
+  const [shownPath, setShownPath] = useState(path);
+  if (shownPath !== path) {
+    setShownPath(path);
+    setZoom("fit");
+    setOffset({ x: 0, y: 0 });
+    setNatural(null);
+    setFailed(false);
+    setOriginal(false);
+  }
 
   const fit =
     natural && stage.width > 0
@@ -119,10 +135,11 @@ export function Lightbox({ items, index, onClose, title }: { items: LightboxItem
 
   // Keys go to the lightbox first (capture), so Esc and the arrows don't also reach the screen underneath. Keys
   // meant for something opened above it (Ctrl K, a dialog) are left alone; `body` means a focused button went away.
+  // While the photo editor is open it owns the keys: a focus drop to `body` must not close the lightbox under it.
   const onKey = useRef<(e: KeyboardEvent) => void>(() => {});
   onKey.current = (e) => {
     const target = e.target as Node;
-    if (e.ctrlKey || e.metaKey || (target !== document.body && !rootRef.current?.contains(target))) return;
+    if (editing || e.ctrlKey || e.metaKey || (target !== document.body && !rootRef.current?.contains(target))) return;
     const actions: Record<string, () => void> = {
       Escape: onClose,
       ArrowLeft: () => step(-1),
@@ -256,6 +273,12 @@ export function Lightbox({ items, index, onClose, title }: { items: LightboxItem
           <FolderOpen size={15} />
           Pokaż w folderze
         </button>
+        {showsImage && !combined && !item.id.includes("#") && isEditableImage(path) && (
+          <button className="lb-btn" onClick={() => setEditing(true)} title="Obróć, wyprostuj lub przytnij zdjęcie">
+            <Crop size={15} />
+            Edytuj
+          </button>
+        )}
         <button className="lb-btn lb-close" onClick={onClose} title="Zamknij podgląd">
           <X size={15} />
           Esc
@@ -348,6 +371,7 @@ export function Lightbox({ items, index, onClose, title }: { items: LightboxItem
           </div>
           {info.note && <p style={{ fontSize: 14, lineHeight: 1.55, color: "var(--text2)", whiteSpace: "pre-wrap" }}>{info.note}</p>}
           <MetaRows item={info} gap={7} before={onClose} />
+          {info.edited && !combined && <EditedNote id={item.id} />}
           {people.length > 0 && (
             <div className="media-section">
               <span className="label-caps">Osoby</span>
@@ -367,6 +391,8 @@ export function Lightbox({ items, index, onClose, title }: { items: LightboxItem
           {info.translation && <TextBlock label="Tłumaczenie" text={info.translation} />}
         </aside>
       </div>
+
+      {editing && path && <PhotoEditor id={item.id} path={path} onClose={() => setEditing(false)} />}
 
       <div ref={stripRef} className="lb-strip">
         {items.slice(stripStart, stripStart + visible).map((it, i) => (

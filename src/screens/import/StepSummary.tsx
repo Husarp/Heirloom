@@ -173,6 +173,7 @@ export function StepSummary({ state, act, goStep }: { state: ImportState; act: A
                 <Stat n={s.merged} label={plural(s.merged, "połączona", "połączone", "połączonych")} />
                 <Stat n={s.skipped} label={plural(s.skipped, "pominięta", "pominięte", "pominiętych")} />
               </div>
+              {s.unfinished > 0 && <span className="imp-unfinished-line">{count(s.unfinished, "osoba trafi", "osoby trafią", "osób trafi")} do „Do uzupełnienia” (tylko wspomniane w materiałach)</span>}
             </div>
             <div className="imp-stat-card">
               <span className="label-caps">Dane</span>

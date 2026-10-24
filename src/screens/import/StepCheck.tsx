@@ -2,11 +2,12 @@
 // „Dalej” stays off while there are errors.
 
 import { ArrowRight, CircleCheck, CircleX, Info, MessageCircleQuestion, TriangleAlert } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useState, type KeyboardEvent, type ReactNode } from "react";
 import { Dialog } from "../../components/Dialog";
 import { Segmented } from "../../components/bits";
 import { count } from "../../lib/format";
 import { Footer } from "./ImportWizard";
+import { splitMentionName } from "./mentionName";
 import { useWizard, type Act, type Answer, type ImportIssue, type ImportState, type Step } from "./types";
 
 const GROUPS = [
@@ -163,6 +164,7 @@ function IssueRow({ issue, icon, state, act, goStep, onPaste }: { issue: ImportI
   const setWizard = useWizard((w) => w.set);
   const [fixing, setFixing] = useState(false);
   const [date, setDate] = useState("");
+  const [adding, setAdding] = useState(false);
   const target = issue.target;
   const file = target && /^M\d+$/.test(target) ? state.files.find((f) => f.file === target) : undefined;
   const person = target ? state.persons.find((p) => p.id === target) : undefined;
@@ -171,6 +173,9 @@ function IssueRow({ issue, icon, state, act, goStep, onPaste }: { issue: ImportI
   const fix = async () => {
     if (await act("import.fixDate", { event: target, date })) setFixing(false);
   };
+
+  // Several warnings can name one unknown person: the first row has the button, and adding clears them all.
+  const mentionFirst = issue.action === "mention" && !!target && state.issues.find((i) => i.action === "mention" && i.target === target) === issue;
 
   let actions: ReactNode = null;
   if (issue.action === "paste") {
@@ -190,6 +195,12 @@ function IssueRow({ issue, icon, state, act, goStep, onPaste }: { issue: ImportI
     ) : (
       <button className="btn secondary xs imp-act" onClick={() => setFixing(true)}>
         Popraw
+      </button>
+    );
+  } else if (mentionFirst) {
+    actions = adding ? null : (
+      <button className="btn secondary xs imp-act" onClick={() => setAdding(true)}>
+        Dodaj jako osobę do uzupełnienia
       </button>
     );
   } else if (file) {
@@ -212,7 +223,7 @@ function IssueRow({ issue, icon, state, act, goStep, onPaste }: { issue: ImportI
   }
 
   return (
-    <div className="imp-issue" style={skipped ? { opacity: 0.55 } : undefined}>
+    <div className={`imp-issue${mentionFirst && adding ? " open" : ""}`} style={skipped ? { opacity: 0.55 } : undefined}>
       <span style={{ display: "flex", flex: "none" }}>{icon}</span>
       <span className="col grow" style={{ gap: 2 }}>
         <span style={{ fontSize: 14 }}>{issue.message}</span>
@@ -226,6 +237,61 @@ function IssueRow({ issue, icon, state, act, goStep, onPaste }: { issue: ImportI
           {actions}
         </span>
       )}
+      {mentionFirst && adding && target && <MentionForm id={target} visible={issue.detail ?? null} act={act} onClose={() => setAdding(false)} />}
+    </div>
+  );
+}
+
+/** The form under a warning about an unknown mention: the person is added to the batch as someone to complete. */
+function MentionForm({ id, visible, act, onClose }: { id: string; visible: string | null; act: Act; onClose: () => void }) {
+  const start = splitMentionName(visible);
+  const [given, setGiven] = useState(start.given);
+  const [surname, setSurname] = useState(start.surname);
+  const [sex, setSex] = useState<"F" | "M" | "U">("U");
+  const [busy, setBusy] = useState(false);
+  const ready = !!(given.trim() || surname.trim());
+  const add = async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    const next = await act("import.addMentioned", { id, given, surname, sex });
+    // The warnings of this person are gone with it, so this form goes too; only a refusal keeps it open.
+    if (!next) setBusy(false);
+  };
+  const enter = (e: KeyboardEvent) => e.key === "Enter" && add();
+  return (
+    <div className="imp-mention-form">
+      <div className="imp-mention-fields">
+        <label className="field">
+          <span className="field-label">Imię</span>
+          <input className="input sm" autoFocus value={given} onChange={(e) => setGiven(e.target.value)} onKeyDown={enter} />
+        </label>
+        <label className="field">
+          <span className="field-label">Nazwisko</span>
+          <input className="input sm" value={surname} onChange={(e) => setSurname(e.target.value)} onKeyDown={enter} />
+        </label>
+        <div className="field">
+          <span className="field-label">Płeć</span>
+          <Segmented<"F" | "M" | "U">
+            size={30}
+            value={sex}
+            onChange={setSex}
+            options={[
+              { value: "F", label: "Kobieta" },
+              { value: "M", label: "Mężczyzna" },
+              { value: "U", label: "Nie wiadomo" },
+            ]}
+          />
+        </div>
+      </div>
+      <span className="imp-mention-hint">Wzmianki bywają odmienione („Antoniego”) — wpisz imię i nazwisko w mianowniku.</span>
+      <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
+        <button className="btn ghost sm" onClick={onClose}>
+          Anuluj
+        </button>
+        <button className="btn primary sm" disabled={!ready || busy} onClick={add}>
+          Dodaj osobę
+        </button>
+      </div>
     </div>
   );
 }

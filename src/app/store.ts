@@ -39,6 +39,8 @@ export type Route =
   | { name: "media"; id?: string }
   | { name: "missingFiles" }
   | { name: "sources"; id?: string }
+  /** „Do uzupełnienia”: unfinished people and photos and documents without a caption. */
+  | { name: "todo" }
   | { name: "import" }
   | { name: "settings"; section?: string }
   | { name: "activity" }

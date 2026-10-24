@@ -9,7 +9,7 @@ pub const EXTENSION_URI: &str = "https://github.com/Husarp/Heirloom/blob/main/do
 pub const EXTENSION_TAGS: &[&str] = &[
     "_HLM_KIND", "_HLM_TITLE", "_HLM_DATE", "_HLM_PLAC", "_HLM_CERT", "_HLM_BASIS", "_HLM_JULIAN", "_HLM_AGE", "_HLM_ORIG",
     "_HLM_TAG", "_HLM_LINK", "_HLM_PROFILE", "_HLM_TRANSCRIPTION", "_HLM_TRANSLATION", "_HLM_PARISH", "_HLM_YEAR",
-    "_HLM_AKT", "_HLM_URL", "_HLM_BATCH", "_HLM_NODATA", "_HLM_CATEGORY",
+    "_HLM_AKT", "_HLM_URL", "_HLM_BATCH", "_HLM_NODATA", "_HLM_CATEGORY", "_HLM_TODO", "_HLM_IGNORE", "_HLM_VERSION",
 ];
 
 const MONTHS: [&str; 12] = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
