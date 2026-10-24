@@ -5,6 +5,7 @@ pub mod activity;
 pub mod backup;
 pub mod combined;
 pub mod config;
+pub mod crop;
 pub mod edit;
 pub mod gedwrite;
 pub mod import;
@@ -18,9 +19,11 @@ pub mod tree;
 pub mod media;
 pub mod overlay;
 pub mod people;
+pub mod photo_edit;
 pub mod progress;
 pub mod running;
 pub mod text;
+pub mod todo;
 pub(crate) mod tools;
 pub mod update;
 
@@ -461,6 +464,11 @@ impl Api {
                 Ok(Value::Null)
             }
             "people.list" => Ok(people::list(self.view()?)),
+            // Not for archives opened together (they are read-only and have no such screen).
+            "todo.list" if self.combined.is_none() => {
+                let roots = self.session()?.file_roots();
+                Ok(todo::list(self.view()?, &roots))
+            }
             "people.search" => {
                 let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(20) as usize;
                 let query = str_arg(&args, "q")?;

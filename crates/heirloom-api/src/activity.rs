@@ -86,6 +86,12 @@ fn fields(d: &Derived, text: Option<&str>) -> Vec<(String, String)> {
             for tag in &details.tags {
                 out.push(("Etykieta".into(), tag.clone()));
             }
+            if details.todo {
+                out.push(("Do uzupełnienia".into(), "tak".into()));
+            }
+            if details.ignored {
+                out.push(("Pominięte w „Do uzupełnienia”".into(), "tak".into()));
+            }
             for link in &details.links {
                 out.push(("Link".into(), link.title.clone().unwrap_or_else(|| link.url.clone())));
             }
@@ -128,6 +134,9 @@ fn fields(d: &Derived, text: Option<&str>) -> Vec<(String, String)> {
                 }
                 if m.transcription.is_some() {
                     out.push(("Transkrypcja".into(), "jest".into()));
+                }
+                if m.ignored {
+                    out.push(("Pominięte w „Do uzupełnienia”".into(), "tak".into()));
                 }
             }
         }
