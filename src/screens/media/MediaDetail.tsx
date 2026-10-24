@@ -1,4 +1,4 @@
-import { ExternalLink, FileSearch, FileText, FileX, FolderOpen, Image as ImageIcon, Maximize2, Plus, Search, Star, Trash2, X } from "lucide-react";
+import { Crop, ExternalLink, FileSearch, FileText, FileX, FolderOpen, Image as ImageIcon, Maximize2, Plus, Search, Star, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
 import { call } from "../../api/transport";
 import type { PersonSummary } from "../../api/types";
@@ -11,6 +11,8 @@ import { PROFILE_TAG_TITLE } from "../../components/ProfileStar";
 import { BASE_LIKE, choiceOf, choiceValue, withCurrent } from "../../lib/categories";
 import { count } from "../../lib/format";
 import { pickFiles } from "../../lib/native";
+import { EditedNote, PhotoEditor } from "./PhotoEditor";
+import { isEditableImage } from "./photoMath";
 import {
   extension,
   fileName,
@@ -49,6 +51,9 @@ export function MediaDetail({
   const go = useStore((s) => s.go);
   const notify = useStore((s) => s.notify);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [photoEditor, setPhotoEditor] = useState(false);
+  // Archives opened together are only for looking at.
+  const combined = useStore((s) => s.archive?.combined != null);
 
   if (!item) {
     return (
@@ -66,6 +71,7 @@ export function MediaDetail({
   const image = !missing && isImage(item.path);
   const pdf = !missing && isPdf(item.path);
   const canPreview = image || pdf;
+  const canEditPhoto = image && !combined && isEditableImage(item.path) && !item.id.includes("#");
   const relink = async () => {
     const [path] = await pickFiles(`Wskaż plik ${fileName(item.path)}`, filtersLike(fileName(item.path)), false);
     if (!path) return;
@@ -101,6 +107,7 @@ export function MediaDetail({
       )}
       {item.note && <p style={{ fontSize: 14, lineHeight: 1.55, color: "var(--text2)", whiteSpace: "pre-wrap" }}>{item.note}</p>}
       <MetaRows item={item} hide={editing ? ["kind", "date", "place"] : []} />
+      {item.edited && !combined && <EditedNote id={item.id} />}
 
       {missing && item.path && (
         <div className="banner warn" style={{ fontSize: 13, alignItems: "flex-start" }}>
@@ -136,6 +143,12 @@ export function MediaDetail({
             Otwórz w programie
           </button>
         )}
+        {canEditPhoto && (
+          <button className="btn secondary" onClick={() => setPhotoEditor(true)} title="Obróć, wyprostuj lub przytnij zdjęcie">
+            <Crop size={14} />
+            Edytuj zdjęcie
+          </button>
+        )}
         {!missing && (
           <button className="btn secondary" onClick={() => showInFolder(item.absolute)} disabled={!item.absolute}>
             <FolderOpen size={14} />
@@ -164,6 +177,7 @@ export function MediaDetail({
           Usuń z archiwum
         </button>
       )}
+      {photoEditor && item.path && <PhotoEditor id={item.id} path={item.path} onClose={() => setPhotoEditor(false)} />}
       {confirmDelete && <DeleteDialog item={item} onClose={() => setConfirmDelete(false)} onDeleted={onDeleted} />}
     </aside>
   );
