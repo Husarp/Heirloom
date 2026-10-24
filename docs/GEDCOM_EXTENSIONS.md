@@ -29,7 +29,7 @@ note, a photo is still a normal `OBJE`.
 | Families | `FAM` with `HUSB`, `WIFE`, `CHIL`; a child's link type is `FAMC.PEDI` (`BIRTH`, `ADOPTED`, `FOSTER`, `OTHER`) |
 | Texts (biography, stories, sayings, trivia, notes) | shared notes: `0 @N1@ SNOTE <text>`, linked from each person it belongs to with `1 SNOTE @N1@` |
 | Photos and documents | `0 @O1@ OBJE` with `FILE media/<name>`, `FORM <media type>`, `MEDI PHOTO` (photos) or `MEDI MANUSCRIPT` + `PHRASE <document type>` (documents), `TITL <caption>`; linked from people with `1 OBJE @O1@` |
-| Profile photo crop | `OBJE.CROP` (`TOP`, `LEFT`, `HEIGHT`, `WIDTH`) |
+| Profile photo crop | `INDI.OBJE.CROP` (`TOP`, `LEFT`, `HEIGHT`, `WIDTH`), under the person's link to the photo, in pixels of the image as shown upright (after its EXIF rotation), of the first `FILE`; Heirloom chooses a square. The photo file itself is not changed. |
 | Sources | `0 @S1@ SOUR` with `TITL`, `REPO @R1@` + `CALN` (archive and call number), `OBJE` (the scans); cited with `SOUR @S1@` + `PAGE` + `QUAY` |
 | Created / changed | `CREA` and `CHAN` with `DATE` + `TIME` |
 
@@ -49,6 +49,10 @@ note, a photo is still a normal `OBJE`.
 | `_HLM_TAG` | `INDI` | A short label, e.g. `kolejarz` (one tag per line). |
 | `_HLM_LINK` | `INDI` | A web link. Substructures: `TITL` (the title) and `TYPE` (`wikipedia`, `geneteka`, `familysearch`, `grave`, `other`). |
 | `_HLM_PROFILE` | `INDI.OBJE` | `Y` on the person's profile photo; `N` when the photo was explicitly taken off as their profile photo. A person whose photo links carry no marker at all uses the first photo; once any link carries `Y` or `N`, only a `Y` photo is the profile photo (so a person whose profile photo was removed has none until another is chosen). The order of a person's photos is the order of their `OBJE` links. |
+| `_HLM_NODATA` | `INDI` | A field marked „Brak danych” (known to have no data), one key per line. |
+| `_HLM_TODO` | `INDI` | `Y` = an unfinished person: listed in „Do uzupełnienia” and their profile shows a note. Created by the import for relatives who are only mentioned, or by „Do dokończenia”; „Gotowe” removes it. |
+| `_HLM_IGNORE` | `INDI`, `OBJE` | `Y` = left out of „Do uzupełnienia” („Pomiń”). An ignored file is not marked „nieopisane”. |
+| `_HLM_VERSION` | `OBJE.FILE` | Marks a `FILE` that is not the one shown: `original` = the file as it came into the archive, `earlier` = an earlier edited version. The first `FILE` is always the version shown; all versions' files stay in the archive. |
 | `_HLM_DATE` | `OBJE` | When a photo was taken or a document was made. |
 | `_HLM_PLAC` | `OBJE` | Where a photo was taken or a document was made. |
 | `_HLM_TRANSCRIPTION` | `OBJE` | A transcription of a document, as written. |
@@ -65,6 +69,10 @@ note, a photo is still a normal `OBJE`.
 (`media/Kowalski Józef/ślub.jpg`) when the archive uses „W folderach osób”; a reader must treat everything after the
 first `media/` as one path. Files moved by Heirloom keep their `FILE` value in step with their place, and the layout
 setting itself is kept in `.heirloom/ustawienia.json`, not in the GEDCOM file.
+
+0.9.0 adds `_HLM_TODO`, `_HLM_IGNORE` and `_HLM_VERSION`, and documents `_HLM_NODATA` (written since earlier
+versions). The research note the import writes for a mentioned relative is an ordinary `SNOTE`: nothing important is
+only in an extension tag.
 
 ## Mentions inside texts
 

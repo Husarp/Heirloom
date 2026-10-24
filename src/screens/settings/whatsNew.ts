@@ -7,6 +7,7 @@ export const WHATS_NEW: string[] = [
   "Listy osób, nazwisk, miejsc, historii, zdjęć i źródeł. Wyszukiwanie (Ctrl K) znajduje „Łukasza” także wpisanego jako „lukasz”.",
   "Edycja wprost na profilu, sekcja po sekcji. Każda zmiana trafia do historii z imieniem osoby, która ją zrobiła, i można ją cofnąć — także cały zapis naraz.",
   "Import paczki od osoby, która bada rodzinę: upuść naraz odpowiedzi AI, zdjęcia, dokumenty i notatki — Heirloom rozpozna każdy plik i dopasuje osoby do tych już zapisanych. Każdy import można cofnąć.",
+  "Zakładka „Do uzupełnienia” zbiera osoby do dokończenia oraz zdjęcia i dokumenty bez opisu. Zdjęcia można prosto poprawić — obrócić, wyprostować, przyciąć — a oryginał zostaje. Zdjęcie profilowe można wykadrować.",
   "Bezpieczny zapis: przed każdym zapisem kopia pliku danych, a na żądanie kopia całego archiwum w pliku .zip.",
   "Eksport GEDZIP: dane i zdjęcia w jednym pliku, dla innych programów.",
   "Dwa sposoby pracy: „Pracuj na archiwum” albo „Nie ruszaj oryginału” — wtedy Twoje zmiany czekają osobno, aż przeniesiesz je do archiwum. Przed importem Heirloom proponuje kopię zapasową całego archiwum.",
