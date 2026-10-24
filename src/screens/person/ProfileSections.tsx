@@ -44,6 +44,7 @@ import { RichEditor } from "../../components/RichEditor";
 import { cardName, cardYears, clock, count, relativeTime } from "../../lib/format";
 import { openUrl, pickFiles } from "../../lib/native";
 import { Lightbox } from "../media/Lightbox";
+import { UndescribedChip } from "../todo/UndescribedChip";
 import { runEdit } from "../media/shared";
 import { RelativeTools } from "./RelativeTools";
 import { FactCellEditor, FactForm, factKey } from "./FactEdit";
@@ -971,6 +972,7 @@ export function GallerySection({ data }: Props) {
               <div className="gallery-thumb has-profile-star">
                 <button className="gallery-open" onClick={() => open(g)} title={reorderable ? "Otwórz podgląd · przeciągnij, aby przesunąć (Alt ← →)" : "Otwórz podgląd"}>
                   <Thumb path={g.path} size={512} icon={<ImageIcon size={18} />} style={{ aspectRatio: "4 / 3", width: "100%" }} />
+                  {g.undescribed && !g.ignored && <UndescribedChip />}
                 </button>
                 {star(g)}
               </div>

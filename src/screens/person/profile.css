@@ -974,6 +974,18 @@
 }
 
 /* Archives opened together: the person's records in each archive and where they differ (design §1.5). */
+/* „Do uzupełnienia” note: soft, like the combined-archives card. */
+.todo-note {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: color-mix(in oklab, var(--accent-soft) 35%, var(--surface));
+  font-size: 13px;
+  line-height: 1.5;
+}
 .combined-card {
   display: flex;
   flex-direction: column;

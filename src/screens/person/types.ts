@@ -68,6 +68,10 @@ export interface GalleryItem {
   people: { id: string; name: string }[];
   /** Whose profile photo it is. */
   profileOf: string[];
+  /** No real caption and not set aside in „Do uzupełnienia” (the „nieopisane” chip). */
+  undescribed?: boolean;
+  ignored?: boolean;
+  edited?: boolean;
 }
 
 export interface DocumentItem {
@@ -81,6 +85,8 @@ export interface DocumentItem {
   meta: string | null;
   tags: string[];
   year: string | null;
+  undescribed?: boolean;
+  ignored?: boolean;
 }
 
 export interface SourceItem {
@@ -196,4 +202,6 @@ export interface Profile {
   created: string | null;
   changed: string | null;
   batch: string | null;
+  /** „Do uzupełnienia”: marked unfinished (by hand or by the import), set aside, not yet in the family, import batch. */
+  todo?: { unfinished: boolean; ignored: boolean; linked: boolean; batch: string | null };
 }

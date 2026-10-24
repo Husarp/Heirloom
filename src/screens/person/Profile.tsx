@@ -8,6 +8,7 @@ import { count } from "../../lib/format";
 import { pickFiles } from "../../lib/native";
 import { afterChange } from "../../app/store";
 import { runEdit } from "../media/shared";
+import { ProfileMenu, TodoNote } from "../todo/ProfileTodo";
 import { CombinedCard, EditInArchive, LinkWithOther } from "./CombinedParts";
 import { PersonalEditor } from "./PersonalSection";
 import { useSection } from "./sectionEdit";
@@ -159,6 +160,7 @@ export function Profile({ id, section, open }: { id: string; section?: string; o
         <article className="profile-article">
           <CombinedCard data={data} />
           <BrokenLinksNotice data={data} />
+          <TodoNote data={data} />
           <SummarySection data={data} />
           <FamilySection data={data} />
           <BioSection data={data} />
@@ -282,6 +284,7 @@ function Hero({ data }: { data: ProfileData }) {
               Historia zmian
             </button>
           )}
+          <ProfileMenu data={data} />
         </div>
       </div>
     </section>

@@ -17,6 +17,7 @@ const SECTION_LABEL: Record<string, string> = {
   media: "Media",
   missingFiles: "Media",
   sources: "Źródła",
+  todo: "Do uzupełnienia",
   import: "Import",
   settings: "Ustawienia",
   activity: "Historia zmian",
