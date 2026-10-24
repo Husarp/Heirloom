@@ -2,6 +2,8 @@
 
 use crate::derive::{DateInfo, Derived, date_json};
 use crate::kin;
+use crate::lists::undescribed;
+use crate::media_edit::FileRoots;
 use crate::text::{display_markdown, excerpt};
 use crate::ApiError;
 use heirloom_core::fold::fold;
@@ -252,9 +254,9 @@ pub fn panel(d: &Derived, id: &str) -> Result<Value, ApiError> {
     for child in kids {
         relatives.push(relative(d, i, child));
     }
-    let photo = info.photo.as_ref().and_then(|(id, path)| {
+    let photo = info.photo.as_ref().and_then(|(id, _)| {
         let object = d.view.media.get(id)?;
-        Some(json!({ "path": path, "caption": object.title, "date": object.date_text }))
+        Some(json!({ "path": d.photo_ref(i), "cropped": info.photo_crop.is_some(), "caption": object.title, "date": object.date_text }))
     });
     Ok(json!({
         "person": d.summary(i),
@@ -649,6 +651,9 @@ pub fn profile(d: &Derived, id: &str, history: &[heirloom_core::history::Entry])
                     "profile": info.photo.as_ref().is_some_and(|(id, _)| *id == object.id),
                     "people": who.iter().map(|&p| json!({ "id": d.xref(p), "name": d.info[p].name })).collect::<Vec<_>>(),
                     "profileOf": profile_of,
+                    "undescribed": undescribed(object),
+                    "ignored": object.ignored,
+                    "edited": object.original.is_some(),
                 }));
             }
             _ => {
@@ -669,6 +674,8 @@ pub fn profile(d: &Derived, id: &str, history: &[heirloom_core::history::Entry])
                     "meta": object.place,
                     "tags": tags,
                     "year": date.map(|dv| dv.start.year.to_string()).or_else(|| object.date_text.clone()),
+                    "undescribed": undescribed(object),
+                    "ignored": object.ignored,
                 }))
             }
         }
@@ -717,9 +724,10 @@ pub fn profile(d: &Derived, id: &str, history: &[heirloom_core::history::Entry])
         })
         .collect();
 
+    // `crop` (fractions of the upright image) needs the file's size: `person.get` fills it in (`portrait_crop`).
     let portrait = info.photo.as_ref().and_then(|(id, path)| {
         let object = d.view.media.get(id)?;
-        Some(json!({ "path": path, "caption": object.title, "date": object.date_text }))
+        Some(json!({ "path": path, "thumb": d.photo_ref(i), "crop": null, "caption": object.title, "date": object.date_text }))
     });
     let names: Vec<Value> = p
         .names
@@ -780,7 +788,27 @@ pub fn profile(d: &Derived, id: &str, history: &[heirloom_core::history::Entry])
         "changed": details.changed,
         "batch": details.batch,
         "noData": details.no_data,
+        "todo": { "unfinished": info.unfinished, "ignored": details.ignored, "linked": info.linked, "batch": details.batch },
     }))
+}
+
+/// The profile photo's crop as fractions 0–1 of the upright image (`x`, `y`, `w`, `h`); a width or height of 0 or
+/// none goes to the image's edge. Null when the link has no CROP, it lies outside the image or the size can't be read.
+pub fn portrait_crop(d: &Derived, id: &str, roots: &FileRoots) -> Value {
+    let Some(i) = d.index(id) else { return Value::Null };
+    let (Some(crop), Some((_, file))) = (d.info[i].photo_crop, d.info[i].photo.as_ref()) else { return Value::Null };
+    let Some((width, height)) = crate::media::upright_size(&roots.resolve(file)) else { return Value::Null };
+    if crop.left >= width || crop.top >= height {
+        return Value::Null;
+    }
+    let (w, h) = (f64::from(width), f64::from(height));
+    let room = |size: Option<u32>, start: u32, whole: u32| size.filter(|&s| s > 0).map_or(whole - start, |s| s.min(whole - start));
+    json!({
+        "x": f64::from(crop.left) / w,
+        "y": f64::from(crop.top) / h,
+        "w": f64::from(room(crop.width, crop.left, width)) / w,
+        "h": f64::from(room(crop.height, crop.top, height)) / h,
+    })
 }
 
 pub(crate) fn kind_word(kind: TextKind) -> &'static str {
@@ -1345,5 +1373,75 @@ mod tests {
         let d = derived();
         let card = hover(&d, "@I3@", Some("@I1@")).unwrap();
         assert_eq!(card["relation"], "Żona Józefa · ślub 1904");
+    }
+
+    const MEDIA: &str = "0 HEAD\n1 GEDC\n2 VERS 7.0\n\
+0 @I1@ INDI\n1 NAME Jan /Nowak/\n1 FAMS @F1@\n1 _HLM_TODO Y\n1 _HLM_BATCH import-1\n\
+1 OBJE @O1@\n2 _HLM_PROFILE Y\n2 CROP\n3 TOP 0\n3 LEFT 100\n3 WIDTH 200\n3 HEIGHT 100\n\
+1 OBJE @O2@\n1 OBJE @O3@\n1 OBJE @O4@\n1 OBJE @O5@\n\
+0 @I2@ INDI\n1 NAME Ewa /Nowak/\n1 FAMS @F1@\n1 OBJE @O1@\n\
+0 @I3@ INDI\n1 NAME Zosia /Nowak/\n1 _HLM_TODO Y\n1 _HLM_IGNORE Y\n\
+0 @F1@ FAM\n1 HUSB @I1@\n1 WIFE @I2@\n\
+0 @O1@ OBJE\n1 FILE media/p.png\n2 FORM image/png\n3 MEDI PHOTO\n\
+0 @O2@ OBJE\n1 FILE media/IMG_0042.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n2 TITL IMG_0042.jpg\n1 _HLM_IGNORE Y\n\
+0 @O3@ OBJE\n1 FILE media/slub.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n2 TITL Ślub 1904\n\
+1 FILE media/slub-oryginal.jpg\n2 FORM image/jpeg\n2 _HLM_VERSION original\n\
+0 @O4@ OBJE\n1 FILE media/akt.pdf\n2 FORM application/pdf\n3 MEDI MANUSCRIPT\n\
+0 @O5@ OBJE\n1 FILE media/akt2.pdf\n2 FORM application/pdf\n3 MEDI MANUSCRIPT\n2 TITL Akt chrztu\n1 _HLM_IGNORE Y\n0 TRLR\n";
+
+    #[test]
+    fn the_profile_says_what_is_unfinished_undescribed_and_edited() {
+        let d = crate::derive::build(&Document::from_bytes(MEDIA.as_bytes()).0);
+        let jan = profile(&d, "@I1@", &[]).unwrap();
+        assert_eq!(jan["todo"], json!({ "unfinished": true, "ignored": false, "linked": true, "batch": "import-1" }));
+        let zosia = profile(&d, "@I3@", &[]).unwrap();
+        assert_eq!(zosia["todo"], json!({ "unfinished": true, "ignored": true, "linked": false, "batch": null }));
+        assert!(profile(&d, "@I2@", &[]).unwrap()["todo"]["unfinished"] == false);
+        let flags = |id: &str| jan["gallery"].as_array().unwrap().iter().find(|g| g["id"] == id).map(|g| (g["undescribed"].as_bool(), g["ignored"].as_bool(), g["edited"].as_bool())).unwrap();
+        assert_eq!(flags("@O1@"), (Some(true), Some(false), Some(false)), "no caption");
+        assert_eq!(flags("@O2@"), (Some(true), Some(true), Some(false)), "the file name as the caption, left out");
+        assert_eq!(flags("@O3@"), (Some(false), Some(false), Some(true)), "captioned, and has an original");
+        let docs = |id: &str| jan["documents"].as_array().unwrap().iter().find(|g| g["id"] == id).map(|g| (g["undescribed"].as_bool(), g["ignored"].as_bool())).unwrap();
+        assert_eq!(docs("@O4@"), (Some(true), Some(false)));
+        assert_eq!(docs("@O5@"), (Some(false), Some(true)));
+        // The profile photo is told with its crop reference; the fractions come with the file's size (`portrait_crop`).
+        assert_eq!((jan["portrait"]["path"].as_str(), jan["portrait"]["thumb"].as_str()), (Some("media/p.png"), Some("crop:100,0,200,100/media/p.png")));
+        assert!(jan["portrait"]["crop"].is_null());
+        let ewa = profile(&d, "@I2@", &[]).unwrap();
+        assert_eq!(ewa["portrait"]["thumb"], "media/p.png", "no CROP on her link");
+    }
+
+    #[test]
+    fn the_panel_photo_carries_the_crop() {
+        let d = crate::derive::build(&Document::from_bytes(MEDIA.as_bytes()).0);
+        let jan = panel(&d, "@I1@").unwrap();
+        assert_eq!((jan["photo"]["path"].as_str(), jan["photo"]["cropped"].as_bool()), (Some("crop:100,0,200,100/media/p.png"), Some(true)));
+        assert_eq!(jan["person"]["photo"], "crop:100,0,200,100/media/p.png");
+        let ewa = panel(&d, "@I2@").unwrap();
+        assert_eq!((ewa["photo"]["path"].as_str(), ewa["photo"]["cropped"].as_bool()), (Some("media/p.png"), Some(false)));
+    }
+
+    #[test]
+    fn the_crop_is_told_as_fractions_of_the_upright_image() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("media")).unwrap();
+        image::RgbImage::from_pixel(400, 200, image::Rgb([9, 9, 9])).save(dir.path().join("media/p.png")).unwrap();
+        let roots = FileRoots::one(dir.path().to_path_buf());
+        let with = |link: &str| {
+            let text = format!("0 HEAD\n1 GEDC\n2 VERS 7.0\n0 @I1@ INDI\n1 NAME Jan /Nowak/\n1 OBJE @O1@\n2 _HLM_PROFILE Y\n{link}0 @O1@ OBJE\n1 FILE media/p.png\n2 FORM image/png\n3 MEDI PHOTO\n0 TRLR\n");
+            crate::derive::build(&Document::from_bytes(text.as_bytes()).0)
+        };
+        let d = with("2 CROP\n3 TOP 50\n3 LEFT 100\n3 WIDTH 200\n3 HEIGHT 100\n");
+        assert_eq!(portrait_crop(&d, "@I1@", &roots), json!({ "x": 0.25, "y": 0.25, "w": 0.5, "h": 0.5 }));
+        // No width or height (or 0): to the edge; more than there is: cut at the edge.
+        let d = with("2 CROP\n3 TOP 100\n3 LEFT 300\n");
+        assert_eq!(portrait_crop(&d, "@I1@", &roots), json!({ "x": 0.75, "y": 0.5, "w": 0.25, "h": 0.5 }));
+        let d = with("2 CROP\n3 TOP 0\n3 LEFT 0\n3 WIDTH 0\n3 HEIGHT 900\n");
+        assert_eq!(portrait_crop(&d, "@I1@", &roots), json!({ "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0 }));
+        // Nothing to tell: no CROP, a crop outside the image, a file that can't be read, no such person.
+        assert!(portrait_crop(&with(""), "@I1@", &roots).is_null());
+        assert!(portrait_crop(&with("2 CROP\n3 LEFT 400\n"), "@I1@", &roots).is_null());
+        assert!(portrait_crop(&d, "@I1@", &FileRoots::one(dir.path().join("elsewhere"))).is_null());
+        assert!(portrait_crop(&d, "@I9@", &roots).is_null());
     }
 }

@@ -5,12 +5,15 @@
 //! - `file/<path>`: the file as it is;
 //! - `view/<path>`: an image the WebView can show (TIFF and other formats are converted to JPEG);
 //! - `thumb/<size>/<path>`: a JPEG no bigger than `size` pixels (64–1024);
+//! - `thumb/<size>/crop:L,T,W,H/<path>`: the same of a part of the upright image (a person's profile photo crop; pixels,
+//!   W/H 0 = to the edge);
 //! - `import/<size>/<n>`: the n-th file of the import being reviewed (size 0 = the file itself), so files can be
 //!   previewed before they are copied into the archive. Only the files the user gave the import are served.
 //!
 //! `<path>` is relative to the archive folder, with each segment percent-encoded. In a set of archives opened together
 //! („Otwórz razem…”) every path starts with `~<key>/`, the archive's key in the set: `thumb/256/~b/media/x.jpg`.
 
+use image::metadata::Orientation;
 use image::{DynamicImage, ImageDecoder, ImageReader};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -108,7 +111,7 @@ pub fn serve(roots: &MediaRoots, url_path: &str) -> Served {
         let (Ok(size), Some(path)) = (size.parse::<u32>(), n.parse::<usize>().ok().and_then(|n| roots.import_file(n))) else { return Served::BadRequest };
         return match size {
             0 => view(&path),
-            s if THUMB_SIZES.contains(&s) => thumb(&shared, &path, s),
+            s if THUMB_SIZES.contains(&s) => thumb(&shared, &path, s, None),
             _ => Served::BadRequest,
         };
     }
@@ -145,7 +148,10 @@ pub fn serve(roots: &MediaRoots, url_path: &str) -> Served {
         "thumb" => {
             let (size, rest) = rest.split_once('/').unwrap_or(("", ""));
             match size.parse::<u32>() {
-                Ok(size) if THUMB_SIZES.contains(&size) => pick(rest).map(|(roots, p)| thumb(&roots, &p, size)),
+                Ok(size) if THUMB_SIZES.contains(&size) => {
+                    let Ok((crop, rest)) = split_crop(rest) else { return Served::BadRequest };
+                    pick(rest).map(|(roots, p)| thumb(&roots, &p, size, crop))
+                }
                 _ => return Served::BadRequest,
             }
         }
@@ -154,6 +160,22 @@ pub fn serve(roots: &MediaRoots, url_path: &str) -> Served {
     match result {
         Some(served) => served,
         None => Served::BadRequest,
+    }
+}
+
+/// A crop in pixels of the upright image: left, top, width, height (0 = to the edge).
+type Crop = [u32; 4];
+
+/// Takes a leading `crop:L,T,W,H` segment (percent-encoded) off the path; the path without it. A crop that isn't four
+/// unsigned integers is an error.
+fn split_crop(rest: &str) -> Result<(Option<Crop>, &str), ()> {
+    let rest = rest.trim_start_matches('/');
+    let (first, tail) = rest.split_once('/').unwrap_or((rest, ""));
+    let Some(text) = percent_decode(first).and_then(|s| s.strip_prefix("crop:").map(str::to_string)) else { return Ok((None, rest)) };
+    let numbers: Option<Vec<u32>> = text.split(',').map(|n| n.trim().parse().ok()).collect();
+    match numbers.as_deref() {
+        Some(&[left, top, width, height]) => Ok((Some([left, top, width, height]), tail)),
+        _ => Err(()),
     }
 }
 
@@ -243,17 +265,22 @@ fn view(path: &Path) -> Served {
     }
 }
 
-fn thumb(roots: &Roots, path: &Path, size: u32) -> Served {
+fn thumb(roots: &Roots, path: &Path, size: u32, crop: Option<Crop>) -> Served {
     let Ok(meta) = std::fs::metadata(path) else { return Served::NotFound };
     let cached = roots.thumbs.as_ref().map(|dir| {
         let modified = meta.modified().ok().and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis());
-        let key = blake3::hash(format!("{}|{}|{modified}", path.display(), meta.len()).as_bytes());
+        let crop_key = crop.map(|c| format!("|crop{},{},{},{}", c[0], c[1], c[2], c[3])).unwrap_or_default();
+        let key = blake3::hash(format!("{}|{}|{modified}{crop_key}", path.display(), meta.len()).as_bytes());
         dir.join(format!("{}-{size}.jpg", &key.to_hex()[..20]))
     });
     if let Some(body) = cached.as_ref().and_then(|p| std::fs::read(p).ok()) {
         return Served::Ok { body, mime: "image/jpeg" };
     }
     let Some(image) = load_image(path) else { return Served::NotFound };
+    let image = match crop.and_then(|c| crop_rect(c, (image.width(), image.height()))) {
+        Some((left, top, width, height)) => image.crop_imm(left, top, width, height),
+        None => image,
+    };
     let served = encode_jpeg(&image.thumbnail(size, size));
     if let (Served::Ok { body, .. }, Some(target)) = (&served, &cached) {
         // The cache is only a speed-up: if it can't be written, the next request makes the thumbnail again.
@@ -264,8 +291,29 @@ fn thumb(roots: &Roots, path: &Path, size: u32) -> Served {
     served
 }
 
+/// The crop as (left, top, width, height) inside an image of the given size; width/height 0 = to the edge, a bigger
+/// one is cut at the edge. None when it starts outside the image (the whole image is used then).
+fn crop_rect([left, top, width, height]: Crop, (image_width, image_height): (u32, u32)) -> Option<(u32, u32, u32, u32)> {
+    if left >= image_width || top >= image_height {
+        return None;
+    }
+    let (room_w, room_h) = (image_width - left, image_height - top);
+    Some((left, top, if width == 0 { room_w } else { width.min(room_w) }, if height == 0 { room_h } else { height.min(room_h) }))
+}
+
+/// The size of an image as it is shown (after the EXIF rotation), read from the header without decoding the pixels.
+pub(crate) fn upright_size(path: &Path) -> Option<(u32, u32)> {
+    let mut decoder = ImageReader::open(path).ok()?.with_guessed_format().ok()?.into_decoder().ok()?;
+    let (width, height) = decoder.dimensions();
+    let turned = matches!(
+        decoder.orientation().unwrap_or(Orientation::NoTransforms),
+        Orientation::Rotate90 | Orientation::Rotate270 | Orientation::Rotate90FlipH | Orientation::Rotate270FlipH
+    );
+    Some(if turned { (height, width) } else { (width, height) })
+}
+
 /// Decodes an image and turns it upright (phone photos store their rotation separately, in EXIF).
-fn load_image(path: &Path) -> Option<DynamicImage> {
+pub(crate) fn load_image(path: &Path) -> Option<DynamicImage> {
     let mut decoder = ImageReader::open(path).ok()?.with_guessed_format().ok()?.into_decoder().ok()?;
     let orientation = decoder.orientation().ok();
     let mut image = DynamicImage::from_decoder(decoder).ok()?;
@@ -376,5 +424,109 @@ mod tests {
         assert_eq!((thumb.width(), thumb.height()), (128, 64));
         assert_eq!(std::fs::read_dir(dir.path().join("thumbs")).unwrap().count(), 1);
         assert_eq!(serve(&roots, "thumb/128/media/p.png"), Served::Ok { body, mime: "image/jpeg" });
+    }
+
+    /// 400 × 200: the left half red, the right half blue.
+    fn two_halves(dir: &Path) {
+        std::fs::create_dir_all(dir.join("a/media")).unwrap();
+        image::RgbImage::from_fn(400, 200, |x, _| if x < 200 { image::Rgb([230, 20, 20]) } else { image::Rgb([20, 20, 230]) }).save(dir.join("a/media/p.png")).unwrap();
+    }
+
+    fn decoded(served: Served) -> image::RgbImage {
+        let Served::Ok { body, mime } = served else { panic!("not served: {served:?}") };
+        assert_eq!(mime, "image/jpeg");
+        image::load_from_memory(&body).unwrap().to_rgb8()
+    }
+
+    #[test]
+    fn a_thumbnail_can_be_cut_from_a_part_of_the_photo() {
+        let dir = tempfile::tempdir().unwrap();
+        two_halves(dir.path());
+        let roots = roots(dir.path());
+        // Pixels 100–300 across the full height: red on the left, blue on the right, square.
+        let cut = decoded(serve(&roots, "thumb/128/crop%3A100%2C0%2C200%2C200/media/p.png"));
+        assert_eq!((cut.width(), cut.height()), (128, 128));
+        let (left, right) = (cut.get_pixel(10, 64), cut.get_pixel(117, 64));
+        assert!(left[0] > 150 && left[2] < 100, "red on the left: {left:?}");
+        assert!(right[2] > 150 && right[0] < 100, "blue on the right: {right:?}");
+        // Another crop is another picture (and another cached file); the plain thumbnail is untouched.
+        let blue = decoded(serve(&roots, "thumb/128/crop%3A200%2C0%2C200%2C200/media/p.png"));
+        assert!(blue.get_pixel(10, 64)[2] > 150 && blue.get_pixel(10, 64)[0] < 100, "all blue");
+        assert_eq!(decoded(serve(&roots, "thumb/128/media/p.png")).dimensions(), (128, 64));
+        assert_eq!(std::fs::read_dir(dir.path().join("thumbs")).unwrap().count(), 3);
+        let again = decoded(serve(&roots, "thumb/128/crop%3A100%2C0%2C200%2C200/media/p.png"));
+        assert_eq!(again.get_pixel(10, 64), cut.get_pixel(10, 64));
+        assert_eq!(std::fs::read_dir(dir.path().join("thumbs")).unwrap().count(), 3, "the same crop is served from the cache");
+        // 0 as the width or height goes to the edge; a crop reaching past the edge is cut there.
+        assert_eq!(decoded(serve(&roots, "thumb/128/crop%3A200%2C0%2C0%2C0/media/p.png")).dimensions(), (128, 128));
+        assert_eq!(decoded(serve(&roots, "thumb/128/crop%3A300%2C0%2C500%2C500/media/p.png")).dimensions(), (64, 128));
+        // A crop outside the picture falls back to the whole picture.
+        assert_eq!(decoded(serve(&roots, "thumb/128/crop%3A500%2C0%2C100%2C100/media/p.png")).dimensions(), (128, 64));
+    }
+
+    #[test]
+    fn a_bad_crop_is_refused_and_only_thumbnails_take_one() {
+        let dir = tempfile::tempdir().unwrap();
+        two_halves(dir.path());
+        let roots = roots(dir.path());
+        for path in [
+            "thumb/128/crop%3Aabc/media/p.png",
+            "thumb/128/crop%3A1%2C2%2C3/media/p.png",
+            "thumb/128/crop%3A1%2C2%2C3%2C4%2C5/media/p.png",
+            "thumb/128/crop%3A-1%2C0%2C10%2C10/media/p.png",
+            "thumb/128/crop%3A1%2C2%2C3%2C/media/p.png",
+            "file/crop%3A100%2C0%2C200%2C200/media/p.png",
+            "view/crop%3A100%2C0%2C200%2C200/media/p.png",
+        ] {
+            assert_eq!(serve(&roots, path), Served::BadRequest, "{path}");
+        }
+        assert_eq!(serve(&roots, "thumb/128/crop%3A1%2C2%2C3%2C4/media/brak.png"), Served::NotFound, "a good crop of a missing file is just missing");
+    }
+
+    #[test]
+    fn a_crop_comes_before_the_archive_key_in_a_set() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("b/media")).unwrap();
+        image::RgbImage::from_fn(400, 200, |x, _| if x < 200 { image::Rgb([230, 20, 20]) } else { image::Rgb([20, 20, 230]) }).save(dir.path().join("b/media/p.png")).unwrap();
+        let roots = MediaRoots::default();
+        roots.set_many(["a", "b"].iter().map(|k| Roots { archive: dir.path().join(k), fallback: None, thumbs: Some(dir.path().join("thumbs").join(k)), key: Some(k.to_string()), moved: Moved::default() }).collect());
+        let cut = decoded(serve(&roots, "thumb/128/crop%3A200%2C0%2C200%2C200/~b/media/p.png"));
+        assert_eq!((cut.width(), cut.height()), (128, 128));
+        assert!(cut.get_pixel(64, 64)[2] > 150);
+        assert_eq!(serve(&roots, "thumb/128/~b/crop%3A200%2C0%2C200%2C200/media/p.png"), Served::BadRequest, "the crop is the first segment");
+        assert_eq!(serve(&roots, "thumb/128/crop%3A200%2C0%2C200%2C200/media/p.png"), Served::BadRequest, "a set needs the key");
+    }
+
+    /// A JPEG of the given size with an EXIF orientation tag.
+    fn jpeg_with_orientation(width: u32, height: u32, orientation: u8) -> Vec<u8> {
+        let mut plain = Vec::new();
+        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut plain, 80);
+        image::RgbImage::from_pixel(width, height, image::Rgb([90, 90, 90])).write_with_encoder(encoder).unwrap();
+        // APP1 "Exif": a little-endian TIFF header and one IFD0 entry, Orientation (0x0112, SHORT, 1).
+        let mut exif = b"Exif\0\0II*\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0".to_vec();
+        exif.extend([orientation, 0, 0, 0, 0, 0, 0, 0]);
+        let mut out = plain[..2].to_vec();
+        out.extend([0xFF, 0xE1]);
+        out.extend(((exif.len() + 2) as u16).to_be_bytes());
+        out.extend(exif);
+        out.extend(&plain[2..]);
+        out
+    }
+
+    #[test]
+    fn the_upright_size_follows_the_exif_rotation() {
+        let dir = tempfile::tempdir().unwrap();
+        for (orientation, size) in [(1, (40, 20)), (3, (40, 20)), (6, (20, 40)), (8, (20, 40)), (5, (20, 40)), (7, (20, 40))] {
+            let file = dir.path().join(format!("o{orientation}.jpg"));
+            std::fs::write(&file, jpeg_with_orientation(40, 20, orientation)).unwrap();
+            assert_eq!(upright_size(&file), Some(size), "orientation {orientation}");
+            let upright = load_image(&file).unwrap();
+            assert_eq!((upright.width(), upright.height()), size, "the same as the decoded image");
+        }
+        image::RgbImage::from_pixel(30, 10, image::Rgb([1, 2, 3])).save(dir.path().join("plain.png")).unwrap();
+        assert_eq!(upright_size(&dir.path().join("plain.png")), Some((30, 10)));
+        std::fs::write(dir.path().join("text.png"), "not an image").unwrap();
+        assert_eq!(upright_size(&dir.path().join("text.png")), None);
+        assert_eq!(upright_size(&dir.path().join("none.png")), None);
     }
 }

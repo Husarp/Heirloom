@@ -196,6 +196,10 @@ pub struct MediaObject {
     pub note: Option<String>,
     pub citations: Vec<Citation>,
     pub batch: Option<String>,
+    /// Left out of „Do uzupełnienia” (`_HLM_IGNORE Y` on the record).
+    pub ignored: bool,
+    /// The file of the version marked `_HLM_VERSION original` (any FILE of the record), when the photo was edited.
+    pub original: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -255,6 +259,10 @@ pub struct PersonDetails {
     /// Substructures Heirloom doesn't show anywhere else, as GEDCOM lines ("Inne dane z pliku").
     pub other: Vec<String>,
     pub batch: Option<String>,
+    /// An unfinished person: only mentioned somewhere, or marked by hand (`_HLM_TODO Y`).
+    pub todo: bool,
+    /// Left out of „Do uzupełnienia” (`_HLM_IGNORE Y`).
+    pub ignored: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -298,7 +306,7 @@ pub const FAM_EVENTS: &[&str] = &["ANUL", "CENS", "DIV", "DIVF", "ENGA", "MARB",
 /// INDI substructures shown somewhere in the app; everything else goes to "Inne dane z pliku".
 const INDI_KNOWN: &[&str] = &[
     "NAME", "SEX", "FAMC", "FAMS", "SNOTE", "NOTE", "OBJE", "SOUR", "UID", "_UID", "CREA", "CHAN", "_MARNM", "_HLM_TAG",
-    "_HLM_LINK", "_HLM_BATCH", "_HLM_NODATA", "ASSO",
+    "_HLM_LINK", "_HLM_BATCH", "_HLM_NODATA", "ASSO", "_HLM_TODO", "_HLM_IGNORE",
 ];
 
 impl View {
@@ -379,6 +387,11 @@ pub fn build(doc: &Document) -> View {
 
 fn text_of(node: &Node, tag: &str, version: Version) -> Option<String> {
     node.child(tag).and_then(|n| n.text(version)).map(|t| t.trim().to_string()).filter(|t| !t.is_empty())
+}
+
+/// A flag tag: its value is `Y` (any case, trimmed).
+fn is_yes(node: &Node) -> bool {
+    node.value.as_deref().is_some_and(|v| v.trim().eq_ignore_ascii_case("Y"))
 }
 
 fn citations(node: &Node, version: Version) -> Vec<Citation> {
@@ -540,6 +553,8 @@ fn person_details(record: &Node, version: Version, this_year: i32) -> PersonDeta
             "_MARNM" => vendor_married += 1,
             "_HLM_BATCH" => details.batch = child.value.clone(),
             "_HLM_NODATA" => details.no_data.extend(child.value.clone()),
+            "_HLM_TODO" => details.todo = is_yes(child),
+            "_HLM_IGNORE" => details.ignored = is_yes(child),
             "ASSO" => {
                 if let Some(person) = child.pointer().filter(|p| *p != "@VOID@") {
                     // 7.0 writes ROLE (+ PHRASE); 5.5.1 wrote RELA with free text.
@@ -691,6 +706,13 @@ fn media_object(node: &Node, id: &str, version: Version) -> MediaObject {
         note: text_of(node, "NOTE", version),
         citations: citations(node, version),
         batch: node.child_value("_HLM_BATCH").map(str::to_string),
+        ignored: node.child("_HLM_IGNORE").is_some_and(is_yes),
+        original: node
+            .children_tagged("FILE")
+            .find(|f| f.child_value("_HLM_VERSION").map(str::trim) == Some("original"))
+            .and_then(|f| f.value.as_deref())
+            .map(|v| file_path(v, version))
+            .filter(|f| !f.is_empty()),
     }
 }
 
@@ -825,6 +847,27 @@ mod tests {
         let flags: Vec<_> = d.media.iter().map(|m| (m.profile, m.profile_off)).collect();
         // `N` is read from _HLM_PROFILE only, and beats a `_PRIM Y` left on the same link.
         assert_eq!(flags, [(false, true), (false, false), (false, true), (true, false)]);
+    }
+
+    #[test]
+    fn todo_ignore_and_original_version_are_read() {
+        let file = "0 HEAD\n1 GEDC\n2 VERS 7.0\n\
+0 @I1@ INDI\n1 NAME Jan /Nowak/\n1 _HLM_TODO Y\n1 _HLM_IGNORE  y \n\
+0 @I2@ INDI\n1 NAME Ewa /Nowak/\n1 _HLM_TODO N\n\
+0 @O1@ OBJE\n1 FILE media/a%20edit.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n1 FILE media/a.jpg\n2 FORM image/jpeg\n2 _HLM_VERSION original\n1 _HLM_IGNORE Y\n\
+0 @O2@ OBJE\n1 FILE media/b.jpg\n2 FORM image/jpeg\n0 TRLR\n";
+        let v = build(&Document::from_bytes(file.as_bytes()).0);
+        let (_, d) = v.person("@I1@").unwrap();
+        assert!(d.todo && d.ignored);
+        assert!(d.other.is_empty(), "the tags are known, not „Inne dane z pliku”");
+        let (_, e) = v.person("@I2@").unwrap();
+        assert!(!e.todo && !e.ignored, "only Y counts");
+        let photo = &v.media["@O1@"];
+        assert_eq!(photo.file.as_deref(), Some("media/a edit.jpg"), "the first FILE stays the one shown");
+        assert_eq!(photo.original.as_deref(), Some("media/a.jpg"));
+        assert!(photo.ignored);
+        let plain = &v.media["@O2@"];
+        assert!(!plain.ignored && plain.original.is_none());
     }
 
     #[test]

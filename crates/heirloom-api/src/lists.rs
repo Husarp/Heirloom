@@ -5,7 +5,7 @@ use crate::media_edit::FileRoots;
 use crate::people::{self, domain, years_range};
 use crate::ApiError;
 use heirloom_core::fold::fold;
-use heirloom_core::gedcom::view::{MediaKind, TextKind};
+use heirloom_core::gedcom::view::{MediaKind, MediaObject, TextKind};
 use heirloom_core::history::{Action, Entry};
 use heirloom_core::polish;
 use serde_json::{Value, json};
@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 fn person_ref(d: &Derived, i: usize) -> Value {
-    let mut v = json!({ "id": d.xref(i), "name": d.info[i].name, "initials": d.info[i].initials, "branch": d.info[i].branch, "photo": d.info[i].photo.as_ref().map(|p| &p.1) });
+    let mut v = json!({ "id": d.xref(i), "name": d.info[i].name, "initials": d.info[i].initials, "branch": d.info[i].branch, "photo": d.photo_ref(i) });
     if let Some(from) = d.from(i) {
         v["from"] = json!(from);
     }
@@ -395,7 +395,7 @@ pub fn stories(d: &Derived) -> Value {
             first
         });
         let excerpt = if t.title.is_some() { body.clone() } else { String::new() };
-        let photo = owner.and_then(|o| d.info[o].photo.as_ref().map(|p| p.1.clone()));
+        let photo = owner.and_then(|o| d.photo_ref(o));
         items.push(json!({
             "id": xref,
             "kind": t.kind.code(),
@@ -472,7 +472,20 @@ pub(crate) fn media_people(d: &Derived) -> HashMap<&str, Vec<usize>> {
     map
 }
 
-fn media_json(d: &Derived, id: &str, roots: &FileRoots, people_of: &HashMap<&str, Vec<usize>>) -> Option<Value> {
+/// A photo or document record that still needs a caption: none, or just the file's name (other programs write that
+/// as the title). Objects written inside a person (id with `#`) and „inne” never count.
+pub fn undescribed(m: &MediaObject) -> bool {
+    if m.id.contains('#') || m.kind == MediaKind::Other {
+        return false;
+    }
+    let Some(title) = m.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) else { return true };
+    let Some(name) = m.file.as_deref().and_then(|f| f.rsplit(['/', '\\']).next()) else { return false };
+    let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+    let title = title.to_lowercase();
+    title == name.to_lowercase() || title == stem.to_lowercase()
+}
+
+pub(crate) fn media_json(d: &Derived, id: &str, roots: &FileRoots, people_of: &HashMap<&str, Vec<usize>>) -> Option<Value> {
     let m = d.view.media.get(id)?;
     let date = m.date_text.as_deref().and_then(heirloom_core::gedcom::date::parse);
     let path = m.file.as_ref().map(|f| roots.resolve(f));
@@ -503,6 +516,10 @@ fn media_json(d: &Derived, id: &str, roots: &FileRoots, people_of: &HashMap<&str
         "absolute": path.map(|p| p.display().to_string()),
         "people": people,
         "profileOf": profile_of,
+        "undescribed": undescribed(m),
+        "ignored": m.ignored,
+        "edited": m.original.is_some(),
+        "original": m.original,
         "format": m.format,
         "sources": m.citations.iter().filter_map(|c| c.source.as_ref()).filter_map(|s| d.view.sources.get(s)).map(|s| json!({ "id": s.xref, "title": s.title })).collect::<Vec<_>>(),
     }))
@@ -729,6 +746,32 @@ pub fn source(d: &Derived, id: &str) -> Result<Value, ApiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_photo_or_document_without_a_real_caption_is_undescribed() {
+        let text = "0 HEAD\n1 GEDC\n2 VERS 7.0\n\
+0 @O1@ OBJE\n1 FILE media/IMG_0042.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n\
+0 @O2@ OBJE\n1 FILE media/IMG_0042.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n2 TITL  img_0042 \n\
+0 @O3@ OBJE\n1 FILE media/rody/Ślub.JPG\n2 FORM image/jpeg\n3 MEDI PHOTO\n2 TITL ślub.jpg\n\
+0 @O4@ OBJE\n1 FILE media/ślub.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n2 TITL Ślub Jana i Anny\n\
+0 @O5@ OBJE\n1 FILE media\\skan.pdf\n2 FORM application/pdf\n3 MEDI MANUSCRIPT\n1 TITL skan\n\
+0 @O6@ OBJE\n1 FILE media/skan.pdf\n2 FORM application/pdf\n3 MEDI MANUSCRIPT\n1 TITL Akt chrztu\n\
+0 @O7@ OBJE\n1 FILE media/rzecz.dat\n2 FORM application/octet-stream\n3 MEDI OTHER\n\
+0 @O8@ OBJE\n1 FILE media/b.jpg\n2 FORM image/jpeg\n3 MEDI PHOTO\n1 _HLM_CATEGORY Pocztówki\n\
+0 @I1@ INDI\n1 NAME Jan /Nowak/\n1 OBJE\n2 FILE media/w.jpg\n2 FORM image/jpeg\n0 TRLR\n";
+        let d = crate::derive::build(&heirloom_core::gedcom::Document::from_bytes(text.as_bytes()).0);
+        let flag = |id: &str| undescribed(&d.view.media[id]);
+        assert!(flag("@O1@"), "no caption");
+        assert!(flag("@O2@"), "the file's name without the extension, any case, trimmed");
+        assert!(flag("@O3@"), "the name with the extension, any case, also Polish letters");
+        assert!(!flag("@O4@"), "a real caption");
+        assert!(flag("@O5@") && !flag("@O6@"), "documents too; the object's own TITL counts when the file has none");
+        assert!(!flag("@O7@"), "„inne” never");
+        assert!(flag("@O8@"), "an own category counts by the kind it behaves like");
+        assert!(!flag("@I1@#0"), "an object written inside a person is no record");
+        let item = media_json(&d, "@O2@", &FileRoots::one(std::path::PathBuf::from("/nonexistent")), &HashMap::new()).unwrap();
+        assert_eq!((item["undescribed"].as_bool(), item["ignored"].as_bool(), item["edited"].as_bool(), item["original"].is_null()), (Some(true), Some(false), Some(false), true));
+    }
 
     #[test]
     fn edit_distance() {

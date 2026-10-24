@@ -198,13 +198,20 @@ pub fn overview(d: &Derived, focus: Option<&str>) -> Value {
     const BAND_PAD: f64 = 60.0;
     const CLUSTER_GAP: f64 = 160.0;
     let n = d.info.len();
+    // Unfinished people that nothing links to (a name only mentioned somewhere) have no place in the tree yet: they get
+    // no cell and no row, and the others' parent indices skip them.
+    let shown: Vec<usize> = (0..n).filter(|&i| !(d.info[i].unfinished && !d.info[i].linked)).collect();
+    let mut row_of: Vec<Option<usize>> = vec![None; n];
+    for (row, &i) in shown.iter().enumerate() {
+        row_of[i] = Some(row);
+    }
     let bands = d.max_generation.max(1) as usize;
-    let rows = ((1.52 * n as f64).sqrt() / bands as f64).ceil().clamp(1.0, 16.0) as usize;
+    let rows = ((1.52 * shown.len() as f64).sqrt() / bands as f64).ceil().clamp(1.0, 16.0) as usize;
 
     // Clusters: the surname group of the birth surname; people without one form their own "?" cluster.
     let cluster_of = |i: usize| d.info[i].group.map_or(usize::MAX, |g| g);
     let mut members: HashMap<usize, Vec<usize>> = HashMap::new();
-    for i in 0..n {
+    for &i in &shown {
         members.entry(cluster_of(i)).or_default().push(i);
     }
     let mut clusters: Vec<(usize, Vec<usize>)> = members.into_iter().collect();
@@ -252,7 +259,9 @@ pub fn overview(d: &Derived, focus: Option<&str>) -> Value {
     // Approximate years for the band labels ("ok. 1690").
     let mut band_years = Vec::new();
     for g in 1..=bands as u32 {
-        let mut years: Vec<i32> = (0..n)
+        let mut years: Vec<i32> = shown
+            .iter()
+            .copied()
             .filter(|&i| d.info[i].generation == Some(g))
             .filter_map(|i| d.info[i].birth.as_ref().and_then(|b| b.value.map(|v| v.start.year)))
             .collect();
@@ -275,10 +284,11 @@ pub fn overview(d: &Derived, focus: Option<&str>) -> Value {
     }
 
     // Flat arrays keep 10 000 people small: [id, x, y, branch, given, surname, birth, death, birth uncertain, death
-    // uncertain, living, generation, surname branch, [father, mother] as indices] per person. The parents serve
+    // uncertain, living, generation, surname branch, [father, mother] as row indices] per person. The parents serve
     // „Koloruj wg: strona” until the overview has real family links.
-    let people: Vec<Value> = (0..n)
-        .map(|i| {
+    let people: Vec<Value> = shown
+        .iter()
+        .map(|&i| {
             let info = &d.info[i];
             let mut row = json!([
                 d.xref(i),
@@ -294,7 +304,7 @@ pub fn overview(d: &Derived, focus: Option<&str>) -> Value {
                 info.living,
                 info.generation,
                 info.surname_branch,
-                father_and_mother(d, i),
+                father_and_mother(d, i).map(|p| p.and_then(|p| row_of[p])),
             ]);
             // Archives opened together: the archives the person comes from, last, so the indexes above stay.
             if let (Some(from), Some(list)) = (d.from(i), row.as_array_mut()) {
@@ -373,6 +383,31 @@ mod tests {
             let key = (p[1].as_f64().unwrap() as i64, p[2].as_f64().unwrap() as i64);
             assert!(cells.insert(key), "overlap at {key:?}");
         }
+    }
+
+    /// An unfinished person that nothing links to (a name only mentioned in an import) is not in Całe drzewo: no row,
+    /// no count, and the parent indices of the others count rows without it. A linked unfinished one stays.
+    #[test]
+    fn the_overview_leaves_out_unfinished_people_nobody_links() {
+        let text = "0 HEAD\n1 GEDC\n2 VERS 7.0\n\
+0 @I0@ INDI\n1 NAME Zosia /Nowak/\n1 _HLM_TODO Y\n\
+0 @I1@ INDI\n1 NAME Jan /Nowak/\n1 SEX M\n1 FAMS @F1@\n\
+0 @I2@ INDI\n1 NAME Ewa /Nowak/\n1 SEX F\n1 FAMS @F1@\n\
+0 @I3@ INDI\n1 NAME Adam /Nowak/\n1 FAMC @F1@\n1 _HLM_TODO Y\n\
+0 @I4@ INDI\n1 NAME Ola /Nowak/\n\
+0 @F1@ FAM\n1 HUSB @I1@\n1 WIFE @I2@\n1 CHIL @I3@\n0 TRLR\n";
+        let d = crate::derive::build(&Document::from_bytes(text.as_bytes()).0);
+        for focus in [Some("@I3@"), Some("@I0@"), None] {
+            let o = overview(&d, focus);
+            let rows = o["people"].as_array().unwrap();
+            let ids: Vec<&str> = rows.iter().map(|r| r[0].as_str().unwrap()).collect();
+            assert_eq!(ids, ["@I1@", "@I2@", "@I3@", "@I4@"], "Zosia is left out; Adam is unfinished but in a family");
+            let adam = &rows[2];
+            assert_eq!(adam[13], json!([0, 1]), "the parents are rows of this list");
+            assert_eq!(o["clusters"].as_array().unwrap().iter().map(|c| c["count"].as_u64().unwrap()).sum::<u64>(), 4);
+        }
+        let positions: HashSet<(i64, i64)> = overview(&d, None)["people"].as_array().unwrap().iter().map(|r| (r[1].as_f64().unwrap() as i64, r[2].as_f64().unwrap() as i64)).collect();
+        assert_eq!(positions.len(), 4);
     }
 
     /// Rodzina: a child's „+N” unfolds their descendants to the asked depth, no deeper, and every person says how many
